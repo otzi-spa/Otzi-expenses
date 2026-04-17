@@ -1,0 +1,136 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Tipos de gasto{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Tipos de gasto</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-6">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Agregar tipo de gasto</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_expense_type">
+          <div class="col-12">
+            <label class="form-label">Nombre</label>
+            <input type="text" name="name" class="form-control" placeholder="Ej: Mantención" required>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary w-100" type="submit">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Tipos registrados</h3>
+        <div class="card-toolbar">
+          <input type="text" class="form-control w-300px" id="expenseTypesSearch" placeholder="Buscar tipo">
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle" id="expenseTypesTable">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th>Creado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in expense_types %}
+              <tr>
+                <td>{{ t.name }}</td>
+                <td>
+                  {% if t.is_active %}
+                    <span class="badge badge-light-success">Activo</span>
+                  {% else %}
+                    <span class="badge badge-light">Inactivo</span>
+                  {% endif %}
+                </td>
+                <td class="text-muted">{{ t.created_at|localtime|date:"d/m/Y H:i" }}</td>
+                <td class="text-end">
+                  <button class="btn btn-sm btn-light-primary" type="button" data-bs-toggle="modal" data-bs-target="#editExpenseTypeModal{{ t.id }}">Editar</button>
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="toggle_expense_type">
+                    <input type="hidden" name="expense_type_id" value="{{ t.id }}">
+                    <button class="btn btn-sm {% if t.is_active %}btn-light-danger{% else %}btn-light-success{% endif %}">
+                      {% if t.is_active %}Desactivar{% else %}Activar{% endif %}
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="text-muted">Sin tipos de gasto cargados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% for t in expense_types %}
+<div class="modal fade" id="editExpenseTypeModal{{ t.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Editar tipo de gasto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_expense_type">
+        <input type="hidden" name="expense_type_id" value="{{ t.id }}">
+        <div class="modal-body">
+          <label class="form-label">Nombre</label>
+          <input type="text" name="name" class="form-control" value="{{ t.name }}" required>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var table = $("#expenseTypesTable").DataTable({
+        info: false,
+        pageLength: 10,
+        lengthChange: false,
+        order: [],
+      });
+
+      var search = document.getElementById("expenseTypesSearch");
+      if (search) {
+        search.addEventListener("keyup", function () {
+          table.search(search.value).draw();
+        });
+      }
+    });
+  </script>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% load static %}
+<!--begin::Sidebar-->
+<div id="kt_app_sidebar" class="app-sidebar flex-column" data-kt-drawer="true" data-kt-drawer-name="app-sidebar"
+    data-kt-drawer-activate="{default: true, lg: false}" data-kt-drawer-overlay="true"
+    data-kt-drawer-width="225px" data-kt-drawer-direction="start" data-kt-drawer-toggle="#kt_app_sidebar_mobile_toggle" 
+    style="background-color: rgb(233,216,117) !important;
+    -moz-box-shadow:    -3px 0 5px 0 #555;
+    -webkit-box-shadow: -3px 0 5px 0 #555;
+    box-shadow:         -3px 0 5px 0 #555;">
+
+  <!--begin::Logo-->
+  <div class="app-sidebar-logo px-6" id="kt_app_sidebar_logo">
+    <!-- <a href="{% url 'dashboard' %}">
+      <img alt="Logo" src="{% static 'theme/metronic/assets/media/logos/default.svg' %}" class="h-25px app-sidebar-logo-default" />
+    </a> -->
+    <span style="font-weight: bold;font-size: 1.4rem;color: var(--kt-gray-900);">Rendición Gastos</span>
+  </div>
+  <!--end::Logo-->
+
+  <!--begin::Sidebar menu-->
+  <div class="app-sidebar-menu overflow-hidden flex-column-fluid">
+    <div id="kt_app_sidebar_menu_wrapper" class="app-sidebar-wrapper">
+      <div id="kt_app_sidebar_menu" data-kt-menu="true" class="menu menu-column menu-rounded menu-sub-indention menu-state-bullet-primary my-5">
+        
+        <!-- Dashboard -->
+        <div class="menu-item {% if request.resolver_match.url_name == 'dashboard' %}here show{% endif %}">
+          <a class="menu-link" href="{% url 'dashboard' %}">
+            <span class="menu-icon">
+              <i class="ki-duotone ki-element-11 fs-2"></i>
+            </span>
+            <span class="menu-title">Dashboard</span>
+          </a>
+        </div>
+
+        <!-- Gastos -->
+        <div class="menu-item {% if request.resolver_match.url_name == 'expense_list' %}here show{% endif %}">
+          <!-- url 'expense_list' -->
+          <a class="menu-link" href="{% url 'expense_list' %}">  
+            <span class="menu-icon">
+              <i class="ki-duotone ki-wallet fs-2"></i>
+            </span>
+            <span class="menu-title">Gastos</span>
+          </a>
+        </div>
+
+        <!-- Configuración -->
+        <div class="menu-item menu-accordion {% if request.resolver_match.url_name in settings_menu_urls %}here show{% endif %}" data-kt-menu-trigger="click">
+          <span class="menu-link">
+            <span class="menu-icon">
+              <i class="ki-duotone ki-setting fs-2"></i>
+            </span>
+            <span class="menu-title">Configuración</span>
+            <span class="menu-arrow"></span>
+          </span>
+          <div class="menu-sub menu-sub-accordion">
+            <div class="menu-item">
+              <a class="menu-link" href="{% url 'settings_users' %}">
+                <span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+                <span class="menu-title">Usuarios</span>
+              </a>
+            </div>
+            <div class="menu-item">
+              <a class="menu-link" href="{% url 'settings_vehicles' %}">
+                <span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+                <span class="menu-title">Vehículos</span>
+              </a>
+            </div>
+            <div class="menu-item">
+              <a class="menu-link" href="{% url 'settings_worksites' %}">
+                <span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+                <span class="menu-title">Obras</span>
+              </a>
+            </div>
+            <div class="menu-item">
+              <a class="menu-link" href="{% url 'settings_categories' %}">
+                <span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+                <span class="menu-title">Categorías</span>
+              </a>
+            </div>
+            <div class="menu-item">
+              <a class="menu-link" href="{% url 'settings_expense_types' %}">
+                <span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+                <span class="menu-title">Tipos de gasto</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!--end::Sidebar menu-->
+</div>
+<!--end::Sidebar-->

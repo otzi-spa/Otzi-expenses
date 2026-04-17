@@ -1,0 +1,174 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Obras{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Obras / Proyectos</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-6">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Agregar obra/proyecto</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_worksite">
+          <div class="col-12">
+            <label class="form-label">Nombre</label>
+            <input type="text" name="name" class="form-control" placeholder="Ej: Obra central" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">External ID</label>
+            <input type="text" name="external_id" class="form-control" placeholder="Opcional">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Sync status</label>
+            <select name="sync_status" class="form-select">
+              {% for key, label in sync_status_choices.items %}
+                <option value="{{ key }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary w-100" type="submit">Agregar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Obras registradas</h3>
+        <div class="card-toolbar">
+          <input type="text" class="form-control w-300px" id="worksitesSearch" placeholder="Buscar nombre o estado">
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle" id="worksitesTable">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th>Sync</th>
+                <th>Última sync</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for w in worksites %}
+              <tr>
+                <td>{{ w.name }}{% if w.external_id %} <span class="text-muted">({{ w.external_id }})</span>{% endif %}</td>
+                <td>
+                  {% if w.is_active %}
+                    <span class="badge badge-light-success">Activo</span>
+                  {% else %}
+                    <span class="badge badge-light">Inactivo</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge badge-light-primary">{{ w.get_sync_status_display }}</span>
+                </td>
+                <td class="text-muted">
+                  {% if w.last_synced_at %}{{ w.last_synced_at|localtime|date:"d/m/Y H:i" }}{% else %}-{% endif %}
+                </td>
+                <td class="text-end">
+                  <button class="btn btn-sm btn-light-primary" type="button" data-bs-toggle="modal" data-bs-target="#editWorksiteModal{{ w.id }}">Editar</button>
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="sync_worksite">
+                    <input type="hidden" name="worksite_id" value="{{ w.id }}">
+                    <button class="btn btn-sm btn-light-primary">Marcar sync</button>
+                  </form>
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="toggle_worksite">
+                    <input type="hidden" name="worksite_id" value="{{ w.id }}">
+                    <button class="btn btn-sm {% if w.is_active %}btn-light-danger{% else %}btn-light-success{% endif %}">
+                      {% if w.is_active %}Desactivar{% else %}Activar{% endif %}
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="text-muted">Sin obras cargadas.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% for w in worksites %}
+<div class="modal fade" id="editWorksiteModal{{ w.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Editar obra/proyecto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_worksite">
+        <input type="hidden" name="worksite_id" value="{{ w.id }}">
+        <div class="modal-body row g-3">
+          <div class="col-12">
+            <label class="form-label">Nombre</label>
+            <input type="text" name="name" class="form-control" value="{{ w.name }}" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">External ID</label>
+            <input type="text" name="external_id" class="form-control" value="{{ w.external_id|default:'' }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Sync status</label>
+            <select name="sync_status" class="form-select">
+              {% for key, label in sync_status_choices.items %}
+                <option value="{{ key }}" {% if w.sync_status == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var table = $("#worksitesTable").DataTable({
+        info: false,
+        pageLength: 10,
+        lengthChange: false,
+        order: [],
+      });
+
+      var search = document.getElementById("worksitesSearch");
+      if (search) {
+        search.addEventListener("keyup", function () {
+          table.search(search.value).draw();
+        });
+      }
+    });
+  </script>
+{% endblock %}

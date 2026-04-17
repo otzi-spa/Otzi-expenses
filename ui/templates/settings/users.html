@@ -1,0 +1,218 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Usuarios WhatsApp{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Usuarios autorizados (WhatsApp)</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-6">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Agregar usuario</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_sender">
+          <div class="col-12">
+            <label class="form-label">Nombre</label>
+            <input type="text" name="first_name" class="form-control" placeholder="Nombre">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Apellido</label>
+            <input type="text" name="last_name" class="form-control" placeholder="Apellido">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Teléfono</label>
+            <input type="text" name="phone" class="form-control" placeholder="569..." required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Email</label>
+            <input type="email" name="email" class="form-control" placeholder="correo@dominio.cl">
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="active" id="senderActive" checked>
+              <label class="form-check-label" for="senderActive">Activo</label>
+            </div>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary w-100" type="submit">Agregar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Usuarios registrados</h3>
+        <div class="card-toolbar">
+          <input type="text" class="form-control w-300px" id="usersSearch" placeholder="Buscar nombre, teléfono o email">
+        </div>
+      </div>
+      <div class="card-body">
+    <div class="table-responsive">
+      <table class="table align-middle" id="usersTable">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Email</th>
+                <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sender in senders %}
+          <tr>
+                <td>{{ sender.first_name }} {{ sender.last_name }}</td>
+                <td class="fw-semibold">{{ sender.phone }}</td>
+                <td>{{ sender.email|default:"-" }}</td>
+                <td>
+                  {% if sender.active %}
+                    <span class="badge badge-light-success">Activo</span>
+                  {% else %}
+                    <span class="badge badge-light-danger">Inactivo</span>
+                  {% endif %}
+                </td>
+            <td class="text-end">
+              <div class="d-flex justify-content-end gap-1">
+                <button type="button" class="btn btn-light btn-icon btn-sm" data-bs-toggle="modal" data-bs-target="#editSender{{ sender.id }}" data-kt-tooltip="true" title="Editar usuario" aria-label="Editar usuario">
+                  <span class="svg-icon svg-icon-3">
+                    <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                      <path d="M10.8 2.5L13.5 5.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                      <path d="M2.8 11.2L10.2 3.8L12.2 5.8L4.8 13.2L2.5 13.5L2.8 11.2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                </button>
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="toggle_sender">
+                  <input type="hidden" name="sender_id" value="{{ sender.id }}">
+                  <button class="btn btn-icon btn-sm {% if sender.active %}btn-light-danger{% else %}btn-light-success{% endif %}" data-kt-tooltip="true" title="{% if sender.active %}Desactivar usuario{% else %}Activar usuario{% endif %}" aria-label="{% if sender.active %}Desactivar usuario{% else %}Activar usuario{% endif %}">
+                    <span class="svg-icon svg-icon-3">
+                      {% if sender.active %}
+                      <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                        <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/>
+                        <path d="M5.5 5.5L10.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                        <path d="M10.5 5.5L5.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                      </svg>
+                      {% else %}
+                      <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                        <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/>
+                        <path d="M5.25 8.25L7.1 10.1L10.75 6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                      {% endif %}
+                    </span>
+                  </button>
+                </form>
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="delete_sender">
+                  <input type="hidden" name="sender_id" value="{{ sender.id }}">
+                  <button class="btn btn-icon btn-sm btn-light-secondary" data-kt-tooltip="true" title="Eliminar usuario" aria-label="Eliminar usuario">
+                    <span class="svg-icon svg-icon-3">
+                      <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                        <path d="M6 2.5H10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                        <path d="M3.5 4H12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                        <path d="M11.5 4L11 12.5C11 13.3284 10.3284 14 9.5 14H6.5C5.67157 14 5 13.3284 5 12.5L4.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                        <path d="M6.5 6.5V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                        <path d="M9.5 6.5V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                      </svg>
+                    </span>
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          <div class="modal fade" id="editSender{{ sender.id }}" tabindex="-1" aria-labelledby="editSenderLabel{{ sender.id }}" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title" id="editSenderLabel{{ sender.id }}">Editar usuario</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="update_sender">
+                  <input type="hidden" name="sender_id" value="{{ sender.id }}">
+                  <div class="modal-body">
+                    <div class="row g-3">
+                      <div class="col-12">
+                        <label class="form-label">Nombre</label>
+                        <input type="text" name="first_name" class="form-control" value="{{ sender.first_name }}">
+                      </div>
+                      <div class="col-12">
+                        <label class="form-label">Apellido</label>
+                        <input type="text" name="last_name" class="form-control" value="{{ sender.last_name }}">
+                      </div>
+                      <div class="col-12">
+                        <label class="form-label">Teléfono</label>
+                        <input type="text" name="phone" class="form-control" value="{{ sender.phone }}" required>
+                      </div>
+                      <div class="col-12">
+                        <label class="form-label">Email</label>
+                        <input type="email" name="email" class="form-control" value="{{ sender.email }}">
+                      </div>
+                      <div class="col-12">
+                        <div class="form-check">
+                          <input class="form-check-input" type="checkbox" name="active" id="senderActive{{ sender.id }}" {% if sender.active %}checked{% endif %}>
+                          <label class="form-check-label" for="senderActive{{ sender.id }}">Activo</label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+          {% empty %}
+          <tr><td colspan="5" class="text-muted">Sin usuarios configurados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var table = $("#usersTable").DataTable({
+        info: false,
+        pageLength: 10,
+        lengthChange: false,
+        order: [],
+      });
+
+      var search = document.getElementById("usersSearch");
+      if (search) {
+        search.addEventListener("keyup", function () {
+          table.search(search.value).draw();
+        });
+      }
+
+      var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-kt-tooltip="true"]'));
+      tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+        new bootstrap.Tooltip(tooltipTriggerEl);
+      });
+    });
+  </script>
+{% endblock %}

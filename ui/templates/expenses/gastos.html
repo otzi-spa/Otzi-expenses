@@ -1,0 +1,1308 @@
+{% extends "metronic/base_app.html" %}
+{% load tz expense_filters %}
+{% block page_title %}Gastos{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Gastos</h1>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-excel-export d-inline-flex align-items-center gap-2" href="#">
+        <span class="svg-icon svg-icon-5">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3 1.5H9.5L13 5V14.5H3V1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            <path d="M9.5 1.5V5H13" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            <path d="M5.2 7.2L7.2 10.1M7.2 7.2L5.2 10.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <path d="M8.7 8.65H11.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </span>
+        Exportar Excel
+      </a>
+      <button type="button" class="btn btn-add-expense d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#newExpenseModal">
+        <span class="svg-icon svg-icon-5">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M8 3.2V12.8M3.2 8H12.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        Agregar gasto
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if messages %}
+<div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1090;">
+  {% for message in messages %}
+    {% if "auto-parametrized" in message.tags %}
+    <div class="toast text-bg-success border-0 auto-param-toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3200">
+      <div class="d-flex">
+        <div class="toast-body">{{ message }}</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Cerrar"></button>
+      </div>
+    </div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="modal fade" id="splitExpenseModal" tabindex="-1" aria-labelledby="splitExpenseModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="splitExpenseModalLabel">Dividir gasto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post" id="splitExpenseForm">
+        {% csrf_token %}
+        <div class="modal-body">
+          <label class="form-label">¿En cuántos gastos deseas dividirlo?</label>
+          <div class="input-group">
+            <input type="number" min="2" max="20" value="2" class="form-control" id="splitCountInput" name="split_count" required>
+            <button type="button" class="btn btn-light-primary" id="splitCountPlusBtn">+</button>
+          </div>
+          <div class="form-text">Se conserva la misma información y comprobantes en cada gasto dividido.</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-warning">Dividir</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade expense-edit-modal" id="newExpenseModal" tabindex="-1" aria-labelledby="newExpenseModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="newExpenseModalLabel">Agregar nuevo gasto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post" action="{% url 'expense_create' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Estado</label>
+              <select name="status" class="form-select" data-role="status-field">
+                <option value="pending" selected>Pendiente</option>
+                <option value="completed">Parametrizado</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Categoría</label>
+              <select name="category_select" class="form-select" data-required-param="true">
+                <option value="">Selecciona categoría</option>
+                {% for c in categories_catalog %}
+                <option value="{{ c.name }}">{{ c.name }}</option>
+                {% endfor %}
+              </select>
+              <div class="input-group mt-2" id="newCategoryGroupCreate">
+                <input type="text" class="form-control create-option-input" id="newCategoryCreate" name="new_category_name" placeholder="Nueva categoría">
+                <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="category_select" data-source-input-id="newCategoryCreate">+</button>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Monto</label>
+              <input type="text" inputmode="decimal" name="amount" class="form-control" placeholder="0" data-required-param="true">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Moneda</label>
+              <input type="text" name="currency" class="form-control" value="CLP" data-required-param="true">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Proveedor</label>
+              <select name="supplier_select" class="form-select" data-required-param="true">
+                <option value="">Selecciona proveedor</option>
+                {% for s in suppliers_catalog %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endfor %}
+              </select>
+              <div class="input-group mt-2" id="newSupplierGroupCreate">
+                <input type="text" class="form-control create-option-input" id="newSupplierCreate" name="new_supplier_name" placeholder="Nuevo proveedor">
+                <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="supplier_select" data-source-input-id="newSupplierCreate">+</button>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Obra</label>
+              <div class="row g-2">
+                <div class="col-12 col-lg-6">
+                  <input type="text" name="worksite" class="form-control" placeholder="Obra reportada" data-required-param="true">
+                </div>
+                <div class="col-12 col-lg-6">
+                  <select name="worksite_standard" class="form-select" data-required-param="true">
+                    <option value="">Selecciona obra (estándar)</option>
+                    {% for ws in worksites %}
+                      <option value="{{ ws.name }}">{{ ws.name }}</option>
+                    {% empty %}
+                      <option value="" disabled>No hay obras cargadas</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12">
+                  <div class="input-group">
+                    <input type="text" name="new_worksite_name" class="form-control create-option-input" id="newWorksiteCreate" placeholder="Crear nueva obra desde aquí">
+                    <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="worksite_standard" data-source-input-id="newWorksiteCreate">+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Fecha del gasto</label>
+              <input type="date" name="paid_at" class="form-control" data-required-param="true">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Tipo de documento</label>
+              <select name="document_type" class="form-select" data-required-param="true">
+                <option value="">-</option>
+                <option value="boleta">Boleta</option>
+                <option value="factura">Factura</option>
+                <option value="vale">Vale</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">¿Es para vehículo?</label>
+              <div class="form-check mt-2">
+                <input class="form-check-input vehicle-toggle" type="checkbox" name="is_vehicle" id="isVehicleCreate">
+                <label class="form-check-label" for="isVehicleCreate">Marcar si corresponde a vehículo</label>
+              </div>
+            </div>
+            <div class="col-12 vehicle-section d-none">
+              <label class="form-label">Vehículo</label>
+              <div class="row g-2">
+                <div class="col-12 col-lg-6">
+                  <input type="text" name="vehicle" class="form-control" placeholder="Vehículo reportado">
+                </div>
+                <div class="col-12 col-lg-6">
+                  <select name="vehicle_standard" class="form-select">
+                    <option value="">Selecciona vehículo (estándar)</option>
+                    {% for v in vehicles %}
+                      <option value="{{ v.name }}">{{ v.name }}</option>
+                    {% empty %}
+                      <option value="" disabled>No hay vehículos cargados</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12 col-lg-6 offset-lg-6">
+                  <div class="input-group">
+                    <input type="text" name="new_vehicle_name" class="form-control create-option-input" id="newVehicleCreate" placeholder="Crear nuevo vehículo desde aquí">
+                    <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="vehicle_standard" data-source-input-id="newVehicleCreate">+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="row g-2 expense-type-row">
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Tipo de gasto</label>
+                  <select name="expense_type_select" class="form-select" data-required-param="true">
+                    <option value="">Selecciona tipo de gasto</option>
+                    {% for t in expense_types_catalog %}
+                    <option value="{{ t.name }}">{{ t.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label">Tipo de gasto (detalle)</label>
+                  <input type="text" name="expense_type_other" class="form-control" placeholder="Detalle opcional">
+                </div>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Comentario (opcional)</label>
+              <textarea name="notes" class="form-control" rows="3"></textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Comprobantes</label>
+              <div class="receipt-dropzone border border-dashed rounded p-4 text-center bg-light-primary" data-existing-count="0">
+                <input
+                  type="file"
+                  name="receipt_files"
+                  class="d-none receipt-file-input"
+                  id="receiptFilesCreate"
+                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                  multiple
+                >
+                <div class="small text-muted mb-3">Sin comprobante. Arrastra un archivo aquí o haz click para adjuntar.</div>
+                <div class="small fw-semibold text-primary receipt-files-feedback">Ningún archivo nuevo seleccionado</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar gasto</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="button" class="btn btn-sm expenses-quick-filter active" data-expenses-filter="all">Todos</button>
+        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="pending">Pendiente</button>
+        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="completed">Parametrizado</button>
+        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="approved">Aprobado</button>
+        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="without_receipt">Sin comprobante</button>
+      </div>
+      <div class="w-100 w-md-300px">
+        <input type="text" id="expensesTableSearch" class="form-control" placeholder="Buscar gastos...">
+      </div>
+    </div>
+
+    <table id="expensesTable" class="table table-striped align-middle table-row-dashed fs-6 gy-5">
+      <thead>
+        <tr class="text-start text-muted fw-bold fs-7 text-uppercase gs-0">
+          <th data-sortable="true">Fecha Reporte</th>
+          <th data-sortable="true">Fecha Gasto</th>
+          <th data-sortable="true">Usuario que reporta</th>
+          <th data-sortable="true">Proveedor</th>
+          <th data-sortable="true">Monto</th>
+          <th data-sortable="true">Categoría</th>
+          <th data-sortable="true">Obra</th>
+          <th data-sortable="true">Vehículo</th>
+          <th data-sortable="true">Status</th>
+          <th data-sortable="true">Recibido</th>
+          <th data-sortable="false">Comprobante</th>
+          <th data-sortable="false">Acción</th>
+        </tr>
+      </thead>
+      <tbody class="text-gray-600 fw-semibold">
+        {% for gasto in gastos %}
+        <tr data-status="{{ gasto.status }}" data-has-attachment="{% if gasto.attachments.all %}1{% else %}0{% endif %}">
+          <td data-order="{{ gasto.created_at|date:'Y-m-d H:i:s' }}">{{ gasto.created_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
+          <td data-order="{{ gasto.paid_at|date:'Y-m-d' }}">{{ gasto.paid_at|date:"d/m/Y"|default:"-" }}</td>
+          <td>
+            {% if gasto.split_label %}
+              <div class="badge badge-light-info mb-1">{{ gasto.split_label }}</div>
+              <div class="text-muted fs-8">Grupo {{ gasto.split_group_id|slice:":8" }}</div>
+            {% endif %}
+            {% if gasto.wa_sender %}
+              {% if gasto.wa_sender.first_name or gasto.wa_sender.last_name %}
+                {{ gasto.wa_sender.first_name }} {{ gasto.wa_sender.last_name }}
+              {% else %}
+                {{ gasto.wa_sender.phone }}
+              {% endif %}
+            {% elif gasto.wa_sender_name %}
+              {{ gasto.wa_sender_name }}
+            {% elif gasto.created_by %}
+              {{ gasto.created_by.get_full_name|default:gasto.created_by.username }}
+            {% elif gasto.wa_sender_phone %}
+              {{ gasto.wa_sender_phone }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>{{ gasto.supplier|default:"-" }}</td>
+          <td data-order="{{ gasto.amount|default:0 }}">
+            {% if gasto.amount is not none %}
+              ${{ gasto.amount|cl_currency }} {{ gasto.currency }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>{{ gasto.category|default:"-" }}</td>
+          <td>
+            {% if gasto.worksite_standard %}
+              <div class="fw-semibold">{{ gasto.worksite_standard }}</div>
+              <div class="text-muted fs-8">Reportada: {{ gasto.worksite|default:"-" }}</div>
+            {% else %}
+              <div class="text-muted">Sin parametrizar</div>
+              <div class="text-muted fs-8">Reportada: {{ gasto.worksite|default:"-" }}</div>
+            {% endif %}
+          </td>
+          <td>{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</td>
+          <td>
+            {% with gasto.get_status_display|default:gasto.status as status_label %}
+              {% if gasto.status == "completed" %}
+                <span class="badge badge-light-primary">{{ status_label }}</span>
+              {% elif gasto.status == "approved" %}
+                <span class="badge badge-light-success">{{ status_label }}</span>
+              {% elif gasto.status == "rejected" %}
+                <span class="badge badge-light-danger">{{ status_label }}</span>
+              {% elif gasto.status == "pending" %}
+                <span class="badge badge-light-warning">{{ status_label }}</span>
+              {% else %}
+                <span class="badge badge-light">{{ status_label }}</span>
+              {% endif %}
+            {% endwith %}
+          </td>
+          <td data-order="{{ gasto.message_sent_at|date:'Y-m-d H:i:s' }}">{{ gasto.message_sent_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
+          <td>
+            {% with attachments=gasto.attachments.all %}
+              {% if attachments %}
+                {% with attachment=attachments.0 %}
+                  <button type="button" class="btn p-0" data-bs-toggle="modal" data-bs-target="#attachmentModal{{ attachment.pk }}">
+                    <img src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante" class="rounded border" style="width: 48px; height: 48px; object-fit: cover;">
+                  </button>
+                {% endwith %}
+              {% else %}
+                <span class="text-muted">-</span>
+              {% endif %}
+            {% endwith %}
+          </td>
+          <td>
+            <div class="d-flex flex-wrap gap-1">
+              <button type="button" class="btn btn-light btn-icon btn-sm" data-bs-toggle="modal" data-bs-target="#expenseModal{{ gasto.pk }}" data-kt-tooltip="true" title="Ver detalle" aria-label="Ver detalle">
+                <span class="svg-icon svg-icon-3">
+                  <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                    <path d="M1 8C2.6 4.6 5.1 2.5 8 2.5C10.9 2.5 13.4 4.6 15 8C13.4 11.4 10.9 13.5 8 13.5C5.1 13.5 2.6 11.4 1 8Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4"/>
+                    <circle cx="8" cy="8" r="1" fill="currentColor"/>
+                  </svg>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                class="btn btn-light-warning btn-icon btn-sm split-action-btn"
+                data-expense-id="{{ gasto.pk }}"
+                data-split-url="{% url 'expense_action' gasto.pk 'split' %}"
+                data-bs-toggle="modal"
+                data-bs-target="#splitExpenseModal"
+                {% if gasto.split_group_id or gasto.status == "approved" or gasto.status == "rejected" %}disabled{% endif %}
+                data-kt-tooltip="true"
+                title="{% if gasto.split_group_id %}Este gasto ya fue dividido{% elif gasto.status == 'approved' or gasto.status == 'rejected' %}No se puede dividir en este estado{% else %}Dividir gasto{% endif %}"
+                aria-label="Dividir gasto"
+              >
+                <span class="svg-icon svg-icon-3">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2.5 4H7.2L9 2.2H13.5V6.8H9L7.2 8.5H2.5V4Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                    <path d="M2.5 8.5H7.2L9 10.2H13.5V13.8H9L7.2 12H2.5V8.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              </button>
+
+              <form method="post" action="{% url 'expense_action' gasto.pk 'approve' %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-light-success btn-icon btn-sm" {% if not gasto.can_approve_or_reject %}disabled{% endif %} data-kt-tooltip="true" title="{% if gasto.can_approve_or_reject %}Aprobar gasto{% else %}Requiere estado Parametrizado{% endif %}">
+                  <span class="svg-icon svg-icon-3">
+                    <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                      <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/>
+                      <path d="M5.25 8.25L7.1 10.1L10.75 6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                </button>
+              </form>
+
+              <form method="post" action="{% url 'expense_action' gasto.pk 'reject' %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-light-danger btn-icon btn-sm" {% if not gasto.can_approve_or_reject %}disabled{% endif %} data-kt-tooltip="true" title="{% if gasto.can_approve_or_reject %}Rechazar gasto{% else %}Requiere estado Parametrizado{% endif %}">
+                  <span class="svg-icon svg-icon-3">
+                    <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                      <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/>
+                      <path d="M5.5 5.5L10.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                      <path d="M10.5 5.5L5.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                </button>
+              </form>
+
+              <form method="post" action="{% url 'expense_action' gasto.pk 'delete' %}" class="d-inline" onsubmit="return confirm('¿Eliminar gasto #{{ gasto.pk }}?')">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-light-secondary btn-icon btn-sm" data-kt-tooltip="true" title="Eliminar gasto">
+                  <span class="svg-icon svg-icon-3">
+                    <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                      <path d="M6 2.5H10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                      <path d="M3.5 4H12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                      <path d="M11.5 4L11 12.5C11 13.3284 10.3284 14 9.5 14H6.5C5.67157 14 5 13.3284 5 12.5L4.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                      <path d="M7 6.5L7.3 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                      <path d="M9 6.5L8.7 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="12" class="text-center py-10 text-muted">No hay gastos registrados aún.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% for gasto in gastos %}
+      {% for attachment in gasto.attachments.all %}
+      <div class="modal fade" id="attachmentModal{{ attachment.pk }}" tabindex="-1" aria-labelledby="attachmentModalLabel{{ attachment.pk }}" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="attachmentModalLabel{{ attachment.pk }}">Comprobante del gasto #{{ gasto.pk }}</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body text-center">
+              <img src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante gasto {{ gasto.pk }}" class="img-fluid rounded border">
+            </div>
+            <div class="modal-footer">
+              <a class="btn btn-light" href="{% url 'attachment_serve' attachment.pk %}?download=1" target="_blank" rel="noopener">Descargar</a>
+              <a class="btn btn-primary" href="{% url 'attachment_serve' attachment.pk %}" target="_blank" rel="noopener">Abrir en pestaña</a>
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    {% endfor %}
+
+    {% for gasto in gastos %}
+    <div class="modal fade expense-edit-modal" id="expenseModal{{ gasto.pk }}" tabindex="-1" aria-labelledby="expenseModalLabel{{ gasto.pk }}" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="expenseModalLabel{{ gasto.pk }}">Editar gasto #{{ gasto.pk }}</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          </div>
+          <form method="post" action="{% url 'expense_detail' gasto.pk %}" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="modal-body">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Estado</label>
+                  <select name="status" class="form-select" data-role="status-field" {% if gasto.status == "approved" or gasto.status == "rejected" %}disabled{% endif %}>
+                    <option value="pending" {% if gasto.status == "pending" %}selected{% endif %}>Pendiente</option>
+                    <option value="completed" {% if gasto.status == "completed" %}selected{% endif %}>Parametrizado</option>
+                  </select>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Categoría</label>
+                  <select name="category_select" class="form-select" data-required-param="true">
+                    <option value="">Selecciona categoría</option>
+                    {% if gasto.category %}<option value="{{ gasto.category }}" selected>{{ gasto.category }}</option>{% endif %}
+                    {% for c in categories_catalog %}
+                    <option value="{{ c.name }}">{{ c.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <div class="input-group mt-2" id="newCategoryGroup{{ gasto.pk }}">
+                    <input type="text" class="form-control create-option-input" id="newCategory{{ gasto.pk }}" name="new_category_name" placeholder="Nueva categoría">
+                    <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="category_select" data-source-input-id="newCategory{{ gasto.pk }}">+</button>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Monto</label>
+                  <input type="text" inputmode="decimal" name="amount" class="form-control" value="{{ gasto.amount|cl_currency }}" placeholder="0" data-required-param="true">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Moneda</label>
+                  <input type="text" name="currency" class="form-control" value="{{ gasto.currency|default_if_none:'' }}" data-required-param="true">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Proveedor</label>
+                  <select name="supplier_select" class="form-select" data-required-param="true">
+                    <option value="">Selecciona proveedor</option>
+                    {% if gasto.supplier %}<option value="{{ gasto.supplier }}" selected>{{ gasto.supplier }}</option>{% endif %}
+                    {% for s in suppliers_catalog %}
+                    <option value="{{ s }}">{{ s }}</option>
+                    {% endfor %}
+                  </select>
+                  <div class="input-group mt-2" id="newSupplierGroup{{ gasto.pk }}">
+                    <input type="text" class="form-control create-option-input" id="newSupplier{{ gasto.pk }}" name="new_supplier_name" placeholder="Nuevo proveedor">
+                    <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="supplier_select" data-source-input-id="newSupplier{{ gasto.pk }}">+</button>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Obra</label>
+                  <div class="row g-2">
+                    <div class="col-12 col-lg-6">
+                      <input type="text" name="worksite" class="form-control" value="{{ gasto.worksite|default:'' }}" placeholder="Obra reportada" data-required-param="true">
+                    </div>
+                    <div class="col-12 col-lg-6">
+                      <select name="worksite_standard" class="form-select" data-required-param="true">
+                        <option value="">Selecciona obra (estándar)</option>
+                        {% for ws in worksites %}
+                          <option value="{{ ws.name }}" {% if gasto.worksite_standard == ws.name %}selected{% endif %}>{{ ws.name }}</option>
+                        {% empty %}
+                          <option value="" disabled>No hay obras cargadas</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-12">
+                      <div class="input-group">
+                        <input type="text" name="new_worksite_name" class="form-control create-option-input" id="newWorksite{{ gasto.pk }}" placeholder="Crear nueva obra desde aquí">
+                        <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="worksite_standard" data-source-input-id="newWorksite{{ gasto.pk }}">+</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Fecha del gasto</label>
+                  <input type="date" name="paid_at" class="form-control" value="{{ gasto.paid_at|date:'Y-m-d' }}" data-required-param="true">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Tipo de documento</label>
+                  <select name="document_type" class="form-select" data-required-param="true">
+                    <option value="">-</option>
+                    {% for val, label in gasto.DOC_TYPE_CHOICES %}
+                      <option value="{{ val }}" {% if gasto.document_type == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12">
+                  <label class="form-label">¿Es para vehículo?</label>
+                  <div class="form-check mt-2">
+                    <input class="form-check-input vehicle-toggle" type="checkbox" name="is_vehicle" id="isVehicle{{ gasto.pk }}" {% if gasto.is_vehicle %}checked{% endif %}>
+                    <label class="form-check-label" for="isVehicle{{ gasto.pk }}">Marcar si corresponde a vehículo</label>
+                  </div>
+                </div>
+                <div class="col-12 vehicle-section {% if not gasto.is_vehicle %}d-none{% endif %}">
+                  <label class="form-label">Vehículo</label>
+                  <div class="row g-2">
+                    <div class="col-12 col-lg-6">
+                      <input type="text" name="vehicle" class="form-control" value="{{ gasto.vehicle|default:'' }}" placeholder="Vehículo reportado">
+                    </div>
+                    <div class="col-12 col-lg-6">
+                      <select name="vehicle_standard" class="form-select">
+                        <option value="">Selecciona vehículo (estándar)</option>
+                        {% for v in vehicles %}
+                          <option value="{{ v.name }}" {% if gasto.vehicle == v.name %}selected{% endif %}>{{ v.name }}</option>
+                        {% empty %}
+                          <option value="" disabled>No hay vehículos cargados</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-12 col-lg-6 offset-lg-6">
+                      <div class="input-group">
+                        <input type="text" name="new_vehicle_name" class="form-control create-option-input" id="newVehicle{{ gasto.pk }}" placeholder="Crear nuevo vehículo desde aquí">
+                        <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="vehicle_standard" data-source-input-id="newVehicle{{ gasto.pk }}">+</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <div class="row g-2 expense-type-row {% if gasto.is_vehicle %}d-none{% endif %}">
+                    <div class="col-12 col-md-6">
+                      <label class="form-label">Tipo de gasto</label>
+                      <select name="expense_type_select" class="form-select" data-required-param="true">
+                        <option value="">Selecciona tipo de gasto</option>
+                        {% if gasto.expense_type %}<option value="{{ gasto.expense_type }}" selected>{{ gasto.expense_type }}</option>{% endif %}
+                        {% for t in expense_types_catalog %}
+                        <option value="{{ t.name }}">{{ t.name }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-12 col-md-6">
+                      <label class="form-label">Tipo de gasto (detalle)</label>
+                      <input type="text" name="expense_type_other" class="form-control" value="{{ gasto.expense_type_other|default:'' }}" placeholder="Detalle opcional">
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Comentario (opcional)</label>
+                  <textarea name="notes" class="form-control" rows="3">{{ gasto.notes|default:'' }}</textarea>
+                </div>
+                {% with attachments=gasto.attachments.all %}
+                <div class="col-12">
+                  <label class="form-label">Comprobantes</label>
+                  <div class="receipt-dropzone border border-dashed rounded p-4 text-center bg-light-primary" data-existing-count="{{ attachments|length }}">
+                    <input
+                      type="file"
+                      name="receipt_files"
+                      class="d-none receipt-file-input"
+                      id="receiptFiles{{ gasto.pk }}"
+                      accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                      multiple
+                    >
+                    {% if attachments %}
+                      <div class="small text-muted mb-3">Tienes {{ attachments|length }} comprobante(s). Arrastra más archivos aquí o haz click para agregar.</div>
+                    {% else %}
+                      <div class="small text-muted mb-3">Sin comprobante. Arrastra un archivo aquí o haz click para adjuntar.</div>
+                    {% endif %}
+                    <div class="small fw-semibold text-primary receipt-files-feedback">Ningún archivo nuevo seleccionado</div>
+                  </div>
+
+                  {% if attachments %}
+                  <div class="d-flex flex-wrap gap-3 mt-3">
+                    {% for attachment in attachments %}
+                      <a class="btn p-0" href="{% url 'attachment_serve' attachment.pk %}" target="_blank" rel="noopener">
+                        <img src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante #{{ forloop.counter }}" class="rounded border" style="width: 96px; height: 96px; object-fit: cover;">
+                      </a>
+                    {% endfor %}
+                  </div>
+                  {% endif %}
+                </div>
+                {% endwith %}
+
+                <div class="col-12">
+                  <div class="accordion" id="auditAccordion{{ gasto.pk }}">
+                    <div class="accordion-item">
+                      <h2 class="accordion-header" id="auditHeading{{ gasto.pk }}">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#auditCollapse{{ gasto.pk }}" aria-expanded="false" aria-controls="auditCollapse{{ gasto.pk }}">
+                          Auditoría y metadata
+                        </button>
+                      </h2>
+                      <div id="auditCollapse{{ gasto.pk }}" class="accordion-collapse collapse" aria-labelledby="auditHeading{{ gasto.pk }}" data-bs-parent="#auditAccordion{{ gasto.pk }}">
+                        <div class="accordion-body">
+                          <div class="row g-2 small text-muted">
+                            <div class="col-sm-6">
+                              <div class="fw-semibold text-secondary">WhatsApp</div>
+                              <div>ID mensaje: {{ gasto.wa_message_id|default:"-" }}</div>
+                              <div>Teléfono: {{ gasto.wa_sender_phone|default:"-" }}</div>
+                              <div>Fuente: {{ gasto.source|default:"-" }}</div>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="fw-semibold text-secondary">Registro</div>
+                              <div>Usuario creador: {% if gasto.created_by %}{{ gasto.created_by.get_full_name|default:gasto.created_by.username }}{% else %}-{% endif %}</div>
+                              <div>Creado: {{ gasto.created_at|localtime|date:'d/m/Y H:i' }}</div>
+                              <div>Recibido: {{ gasto.message_sent_at|localtime|date:'d/m/Y H:i' }}</div>
+                            </div>
+                          </div>
+                          <hr>
+                          <div class="fw-semibold text-secondary mb-2">Últimos cambios</div>
+                          {% if gasto.audit_entries %}
+                            <div class="d-flex flex-column gap-2 small">
+                              {% for log in gasto.audit_entries %}
+                              <div class="border rounded p-2">
+                                <div><strong>{{ log.get_action_display }}</strong> · {{ log.created_at|localtime|date:'d/m/Y H:i' }}</div>
+                                <div>Usuario: {{ log.actor_name|default:'Sistema' }}</div>
+                                {% if log.reason %}<div>Motivo: {{ log.reason }}</div>{% endif %}
+                              </div>
+                              {% endfor %}
+                            </div>
+                          {% else %}
+                            <div class="text-muted small">Sin historial registrado aún.</div>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+              <button type="button" class="btn btn-light-primary open-history-btn" data-expense-id="{{ gasto.pk }}">Historial</button>
+              <button type="submit" class="btn btn-primary">Guardar cambios</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade expense-history-modal" id="historyModal{{ gasto.pk }}" tabindex="-1" aria-labelledby="historyModalLabel{{ gasto.pk }}" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="historyModalLabel{{ gasto.pk }}">Historial gasto #{{ gasto.pk }}</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          </div>
+          <div class="modal-body">
+            {% if gasto.audit_entries_all %}
+              <div class="timeline-label">
+                {% for log in gasto.audit_entries_all %}
+                <div class="timeline-item mb-4">
+                  <div class="timeline-label fw-semibold text-muted fs-7">{{ log.created_at|localtime|date:'d/m/Y H:i' }}</div>
+                  <div class="timeline-badge">
+                    <i class="fa fa-genderless text-primary fs-1"></i>
+                  </div>
+                  <div class="timeline-content">
+                    <div class="fw-bold">{{ log.get_action_display }}</div>
+                    <div class="text-muted">Usuario: {{ log.actor_name|default:'Sistema' }} · Origen: {{ log.source }}</div>
+                    {% if log.reason %}<div class="text-muted">Motivo: {{ log.reason }}</div>{% endif %}
+                    {% if log.changes %}
+                      <pre class="bg-light rounded p-2 mt-2 mb-0 small">{{ log.changes }}</pre>
+                    {% endif %}
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="text-muted">Sin historial.</div>
+            {% endif %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+  {{ block.super }}
+  <style>
+    .expense-edit-modal {
+      overflow-y: auto !important;
+    }
+
+    .expense-edit-modal .modal-dialog {
+      max-width: min(1140px, calc(100vw - 1.5rem));
+      height: calc(100vh - 1rem);
+      min-height: calc(100% - 1rem);
+      margin-top: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .expense-edit-modal .modal-content {
+      height: 100%;
+      max-height: none;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .expense-edit-modal form[action*="/expenses/"] {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .expense-edit-modal .modal-body,
+    .expense-history-modal .modal-body {
+      overflow-y: auto !important;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .expense-edit-modal .modal-body {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .expense-history-modal .modal-dialog {
+      max-width: 900px;
+    }
+
+    .expense-history-modal .timeline-content {
+      min-width: 0;
+    }
+
+    .expense-history-modal pre {
+      max-width: 100%;
+      overflow-x: auto;
+      white-space: pre;
+      word-break: normal;
+    }
+
+    .expense-edit-modal .form-label {
+      font-weight: 700;
+    }
+
+    .expense-edit-modal .create-option-input {
+      height: calc(1.5em + 0.75rem + 2px);
+      font-size: 0.84rem;
+      background-color: #f8fafc;
+      border-style: dashed;
+      border-color: #d8dbe4;
+      color: #5b6375;
+    }
+
+    .expense-edit-modal .create-option-input::placeholder {
+      color: #8a90a3;
+      font-size: 0.82rem;
+    }
+
+    .expense-edit-modal .create-option-btn {
+      min-width: 38px;
+      padding: 0.35rem 0.5rem;
+      font-weight: 700;
+      border-color: #cfd5e3;
+      background: #eef3ff;
+      color: #3f6cb3;
+    }
+
+    .expense-edit-modal .create-option-btn:hover,
+    .expense-edit-modal .create-option-btn:focus {
+      background: #e4ecff;
+      color: #2f5692;
+      border-color: #b8c5e0;
+    }
+
+    .btn-excel-export {
+      background: #217346;
+      border-color: #217346;
+      color: #fff;
+    }
+
+    .btn-excel-export:hover,
+    .btn-excel-export:focus {
+      background: #1b5f39;
+      border-color: #1b5f39;
+      color: #fff;
+    }
+
+    .btn-add-expense {
+      background: #d7c45a;
+      border-color: #d7c45a;
+      color: #1f1f1f;
+      font-weight: 600;
+    }
+
+    .btn-add-expense:hover,
+    .btn-add-expense:focus {
+      background: #c8b44b;
+      border-color: #c8b44b;
+      color: #1f1f1f;
+    }
+
+    .expenses-quick-filter {
+      background: #f1f3f9;
+      border: 1px solid #eef1f6;
+      color: #6b7280;
+      font-weight: 600;
+    }
+
+    .expenses-quick-filter:hover,
+    .expenses-quick-filter:focus {
+      background: #fff9dc;
+      border-color: #d6bf60;
+      color: #4f4411;
+    }
+
+    .expenses-quick-filter.active {
+      background: #d7c45a;
+      border-color: #c8b44b;
+      color: #2c2609;
+    }
+
+    .expense-edit-modal .receipt-dropzone {
+      cursor: pointer;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+    }
+
+    .expense-edit-modal .receipt-dropzone.is-dragover {
+      border-color: var(--bs-primary) !important;
+      background-color: var(--bs-light) !important;
+    }
+  </style>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var expensesTable = document.getElementById("expensesTable");
+      var expensesTbody = expensesTable ? expensesTable.querySelector("tbody") : null;
+      var allExpenseRows = expensesTbody ? Array.from(expensesTbody.querySelectorAll("tr")) : [];
+      var activeQuickFilter = "all";
+      var searchTerm = "";
+      var sortState = { columnIndex: 0, direction: "desc" };
+
+      function getCellSortValue(row, index) {
+        var cell = row.cells[index];
+        if (!cell) return "";
+        var dataOrder = cell.getAttribute("data-order");
+        if (dataOrder !== null && dataOrder !== "") return dataOrder;
+        return (cell.textContent || "").trim().toLowerCase();
+      }
+
+      function sortRows(rows) {
+        var index = sortState.columnIndex;
+        var direction = sortState.direction === "asc" ? 1 : -1;
+        rows.sort(function (a, b) {
+          var aValue = getCellSortValue(a, index);
+          var bValue = getCellSortValue(b, index);
+          var aNum = parseFloat(aValue);
+          var bNum = parseFloat(bValue);
+          var bothNumeric = !Number.isNaN(aNum) && !Number.isNaN(bNum);
+          if (bothNumeric) {
+            if (aNum < bNum) return -1 * direction;
+            if (aNum > bNum) return 1 * direction;
+            return 0;
+          }
+          if (aValue < bValue) return -1 * direction;
+          if (aValue > bValue) return 1 * direction;
+          return 0;
+        });
+        return rows;
+      }
+
+      function rowMatches(row) {
+        var status = row.getAttribute("data-status") || "";
+        var hasAttachment = row.getAttribute("data-has-attachment") === "1";
+        var text = (row.textContent || "").toLowerCase();
+
+        if (activeQuickFilter === "pending" && status !== "pending") return false;
+        if (activeQuickFilter === "completed" && status !== "completed") return false;
+        if (activeQuickFilter === "approved" && status !== "approved") return false;
+        if (activeQuickFilter === "without_receipt" && hasAttachment) return false;
+        if (searchTerm && text.indexOf(searchTerm) === -1) return false;
+        return true;
+      }
+
+      function renderExpenseRows() {
+        if (!expensesTbody) return;
+        var filtered = allExpenseRows.filter(rowMatches);
+        sortRows(filtered);
+        allExpenseRows.forEach(function (row) {
+          row.style.display = "none";
+        });
+        filtered.forEach(function (row) {
+          row.style.display = "";
+          expensesTbody.appendChild(row);
+        });
+      }
+
+      var searchInput = document.getElementById("expensesTableSearch");
+      if (searchInput) {
+        searchInput.addEventListener("input", function () {
+          searchTerm = (searchInput.value || "").trim().toLowerCase();
+          renderExpenseRows();
+        });
+      }
+
+      document.querySelectorAll(".expenses-quick-filter").forEach(function (button) {
+        button.addEventListener("click", function () {
+          activeQuickFilter = button.getAttribute("data-expenses-filter") || "all";
+          document.querySelectorAll(".expenses-quick-filter").forEach(function (btn) {
+            btn.classList.remove("active");
+          });
+          button.classList.add("active");
+          renderExpenseRows();
+        });
+      });
+
+      if (expensesTable) {
+        var headerCells = expensesTable.querySelectorAll("thead th");
+        headerCells.forEach(function (th, index) {
+          if (th.getAttribute("data-sortable") === "false") return;
+          th.style.cursor = "pointer";
+          th.addEventListener("click", function () {
+            if (sortState.columnIndex === index) {
+              sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
+            } else {
+              sortState.columnIndex = index;
+              sortState.direction = "asc";
+            }
+            renderExpenseRows();
+          });
+        });
+      }
+      renderExpenseRows();
+
+      // Avoid nested modals: close edit modal first, then open history.
+      document.querySelectorAll('.open-history-btn').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var expenseId = button.getAttribute('data-expense-id');
+          if (!expenseId) return;
+          var editModalEl = document.getElementById('expenseModal' + expenseId);
+          var historyModalEl = document.getElementById('historyModal' + expenseId);
+          if (!editModalEl || !historyModalEl) return;
+
+          var openHistory = function () {
+            var historyInstance = bootstrap.Modal.getOrCreateInstance(historyModalEl);
+            historyInstance.show();
+            editModalEl.removeEventListener('hidden.bs.modal', openHistory);
+          };
+
+          editModalEl.addEventListener('hidden.bs.modal', openHistory, { once: true });
+          var editInstance = bootstrap.Modal.getOrCreateInstance(editModalEl);
+          editInstance.hide();
+        });
+      });
+
+      var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-kt-tooltip="true"]'));
+      tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+        new bootstrap.Tooltip(tooltipTriggerEl);
+      });
+
+      var splitExpenseForm = document.getElementById("splitExpenseForm");
+      var splitCountInput = document.getElementById("splitCountInput");
+      var splitCountPlusBtn = document.getElementById("splitCountPlusBtn");
+      document.querySelectorAll(".split-action-btn").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var splitUrl = button.getAttribute("data-split-url");
+          if (!splitExpenseForm || !splitUrl) return;
+          splitExpenseForm.setAttribute("action", splitUrl);
+          if (splitCountInput) splitCountInput.value = 2;
+        });
+      });
+      if (splitCountPlusBtn && splitCountInput) {
+        splitCountPlusBtn.addEventListener("click", function () {
+          var current = parseInt(splitCountInput.value || "2", 10);
+          if (Number.isNaN(current)) current = 2;
+          splitCountInput.value = Math.min(20, current + 1);
+        });
+      }
+
+      var autoParamToasts = document.querySelectorAll('.auto-param-toast');
+      autoParamToasts.forEach(function (toastEl) {
+        bootstrap.Toast.getOrCreateInstance(toastEl).show();
+      });
+
+      function formatChileanCurrency(raw) {
+        if (!raw) {
+          return "";
+        }
+        var cleaned = raw.replace(/[^0-9,-]/g, "");
+        var parts = cleaned.split(",");
+        var integerPart = parts[0];
+        var decimalPart = parts[1] || "";
+        integerPart = integerPart.replace(/^0+(?=\d)/, "");
+        var withThousands = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+        decimalPart = decimalPart.slice(0, 2);
+        if (decimalPart.length > 0) {
+          return withThousands + "," + decimalPart;
+        }
+        return withThousands;
+      }
+
+      var amountInputs = document.querySelectorAll('input[name="amount"]');
+      amountInputs.forEach(function (input) {
+        input.addEventListener("input", function () {
+          var formatted = formatChileanCurrency(input.value);
+          input.value = formatted;
+          input.setSelectionRange(formatted.length, formatted.length);
+        });
+        input.addEventListener("blur", function () {
+          input.value = formatChileanCurrency(input.value);
+        });
+      });
+
+      var forms = document.querySelectorAll('form[action*="/expenses/"]');
+      forms.forEach(function (form) {
+        var vehicleToggle = form.querySelector('.vehicle-toggle');
+        var vehicleSection = form.querySelector('.vehicle-section');
+        var expenseTypeRow = form.querySelector('.expense-type-row');
+        var statusField = form.querySelector('[data-role="status-field"]');
+        var receiptDropzone = form.querySelector('.receipt-dropzone');
+        var receiptInput = form.querySelector('.receipt-file-input');
+        var receiptFeedback = form.querySelector('.receipt-files-feedback');
+
+        function escapeHtml(text) {
+          return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+        }
+
+        function toggleVehicleSection() {
+          if (!vehicleToggle || !vehicleSection) return;
+          if (vehicleToggle.checked) {
+            vehicleSection.classList.remove('d-none');
+            if (expenseTypeRow) {
+              expenseTypeRow.classList.add('d-none');
+              var expenseTypeFieldOn = expenseTypeRow.querySelector('select[name="expense_type_select"]');
+              var expenseTypeOtherOn = expenseTypeRow.querySelector('input[name="expense_type_other"]');
+              if (expenseTypeFieldOn) expenseTypeFieldOn.value = '';
+              if (expenseTypeOtherOn) expenseTypeOtherOn.value = '';
+            }
+          } else {
+            vehicleSection.classList.add('d-none');
+            var vehicleInput = vehicleSection.querySelector('input[name="vehicle"]');
+            var vehicleSelect = vehicleSection.querySelector('select[name="vehicle_standard"]');
+            if (vehicleInput) vehicleInput.value = '';
+            if (vehicleSelect) vehicleSelect.value = '';
+            if (expenseTypeRow) {
+              expenseTypeRow.classList.remove('d-none');
+            }
+          }
+        }
+
+        if (vehicleToggle) {
+          vehicleToggle.addEventListener('change', toggleVehicleSection);
+          toggleVehicleSection();
+        }
+
+        function updateReceiptFeedback() {
+          if (!receiptFeedback || !receiptInput) return;
+          var count = receiptInput.files ? receiptInput.files.length : 0;
+          receiptFeedback.classList.remove('text-danger');
+          receiptFeedback.classList.add('text-primary');
+          if (count === 0) {
+            receiptFeedback.textContent = 'Ningún archivo nuevo seleccionado';
+            return;
+          }
+          receiptFeedback.textContent = count + ' archivo(s) listo(s) para subir';
+        }
+
+        function normalizeExt(name) {
+          var dotIndex = name.lastIndexOf('.');
+          if (dotIndex === -1) return '';
+          return name.slice(dotIndex).toLowerCase();
+        }
+
+        function validateReceiptFiles(fileList) {
+          var validFiles = [];
+          var errors = [];
+          var allowedExt = { '.pdf': true, '.jpg': true, '.jpeg': true, '.png': true };
+          var allowedMime = { 'application/pdf': true, 'image/jpeg': true, 'image/png': true };
+          var maxBytes = 10 * 1024 * 1024;
+
+          for (var i = 0; i < fileList.length; i++) {
+            var file = fileList[i];
+            var ext = normalizeExt(file.name || '');
+            var mime = (file.type || '').toLowerCase();
+            if (!allowedExt[ext]) {
+              errors.push((file.name || 'Archivo') + ': tipo inválido (solo PDF/JPG/PNG).');
+              continue;
+            }
+            if (mime && !allowedMime[mime]) {
+              errors.push((file.name || 'Archivo') + ': tipo inválido (solo PDF/JPG/PNG).');
+              continue;
+            }
+            if ((file.size || 0) > maxBytes) {
+              errors.push((file.name || 'Archivo') + ': supera 10MB.');
+              continue;
+            }
+            validFiles.push(file);
+          }
+
+          return { validFiles: validFiles, errors: errors };
+        }
+
+        function setReceiptInputFiles(files) {
+          if (!receiptInput) return;
+          var dt = new DataTransfer();
+          for (var i = 0; i < files.length; i++) {
+            dt.items.add(files[i]);
+          }
+          receiptInput.files = dt.files;
+        }
+
+        if (receiptDropzone && receiptInput) {
+          receiptDropzone.addEventListener('click', function (event) {
+            // Let links/buttons inside keep their own behavior.
+            if (event.target.closest('a,button')) return;
+            receiptInput.click();
+          });
+
+          receiptInput.addEventListener('change', function () {
+            var validation = validateReceiptFiles(receiptInput.files || []);
+            if (validation.errors.length) {
+              setReceiptInputFiles(validation.validFiles);
+              receiptFeedback.classList.remove('text-primary');
+              receiptFeedback.classList.add('text-danger');
+              receiptFeedback.textContent = validation.errors.join(' ');
+              if (validation.validFiles.length) {
+                receiptFeedback.textContent += ' Se mantuvieron ' + validation.validFiles.length + ' archivo(s) válido(s).';
+              }
+              return;
+            }
+            updateReceiptFeedback();
+          });
+
+          ['dragenter', 'dragover'].forEach(function (eventName) {
+            receiptDropzone.addEventListener(eventName, function (event) {
+              event.preventDefault();
+              receiptDropzone.classList.add('is-dragover');
+            });
+          });
+
+          ['dragleave', 'drop'].forEach(function (eventName) {
+            receiptDropzone.addEventListener(eventName, function (event) {
+              event.preventDefault();
+              receiptDropzone.classList.remove('is-dragover');
+            });
+          });
+
+          receiptDropzone.addEventListener('drop', function (event) {
+            if (!event.dataTransfer || !event.dataTransfer.files || !event.dataTransfer.files.length) return;
+            var validation = validateReceiptFiles(event.dataTransfer.files);
+            setReceiptInputFiles(validation.validFiles);
+            if (validation.errors.length) {
+              receiptFeedback.classList.remove('text-primary');
+              receiptFeedback.classList.add('text-danger');
+              receiptFeedback.textContent = validation.errors.join(' ');
+              if (validation.validFiles.length) {
+                receiptFeedback.textContent += ' Se mantuvieron ' + validation.validFiles.length + ' archivo(s) válido(s).';
+              }
+              return;
+            }
+            updateReceiptFeedback();
+          });
+        }
+
+        var createButtons = form.querySelectorAll('.create-option-btn');
+        createButtons.forEach(function (button) {
+          var sourceInputId = button.getAttribute('data-source-input-id');
+          var sourceInput = form.querySelector('#' + sourceInputId);
+          if (sourceInput) {
+            sourceInput.addEventListener('keydown', function (event) {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                button.click();
+              }
+            });
+          }
+
+          button.addEventListener('click', function () {
+            var targetSelectName = button.getAttribute('data-target-select-name');
+            var inputId = button.getAttribute('data-source-input-id');
+            var input = form.querySelector('#' + inputId);
+            var select = form.querySelector('select[name="' + targetSelectName + '"]');
+            if (!input || !select) return;
+            var value = (input.value || '').trim();
+            if (!value) return;
+
+            var exists = false;
+            for (var i = 0; i < select.options.length; i++) {
+              if (select.options[i].value === value) {
+                exists = true;
+                break;
+              }
+            }
+            if (!exists) {
+              var option = document.createElement('option');
+              option.value = value;
+              option.innerHTML = escapeHtml(value);
+              select.appendChild(option);
+            }
+            select.value = value;
+            input.value = '';
+          });
+        });
+
+        form.addEventListener("submit", function (event) {
+          if (!statusField || statusField.value !== "completed") {
+            return;
+          }
+
+          var missing = [];
+          var requiredInputs = form.querySelectorAll('[data-required-param="true"]');
+          requiredInputs.forEach(function (field) {
+            if (field.name === 'notes') {
+              return;
+            }
+            if (
+              vehicleToggle &&
+              vehicleToggle.checked &&
+              (field.name === 'expense_type_select' || field.name === 'expense_type_other')
+            ) {
+              return;
+            }
+            var value = (field.value || '').trim();
+            if (!value) {
+              var wrapper = field.closest('.col-12, .col-md-6, .col-md-12');
+              var label = wrapper ? wrapper.querySelector('.form-label') : null;
+              missing.push(label ? label.textContent.trim() : field.name);
+            }
+          });
+
+          if (vehicleToggle && vehicleToggle.checked) {
+            var vehicleField = form.querySelector('input[name="vehicle"]');
+            var vehicleStdField = form.querySelector('select[name="vehicle_standard"]');
+            var vehicleValue = ((vehicleField && vehicleField.value) || '').trim();
+            var vehicleStdValue = ((vehicleStdField && vehicleStdField.value) || '').trim();
+            if (!vehicleValue && !vehicleStdValue) {
+              missing.push('Vehículo');
+            }
+          }
+
+          if (receiptDropzone) {
+            var existingCount = parseInt(receiptDropzone.getAttribute('data-existing-count') || '0', 10);
+            var newCount = (receiptInput && receiptInput.files) ? receiptInput.files.length : 0;
+            if ((existingCount + newCount) === 0) {
+              missing.push('Comprobante');
+            }
+          }
+
+          if (missing.length) {
+            event.preventDefault();
+            alert("No puedes pasar a 'Parametrizado'. Faltan: " + missing.join(', '));
+          }
+        });
+      });
+    });
+  </script>
+{% endblock %}

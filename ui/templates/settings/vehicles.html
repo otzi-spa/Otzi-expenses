@@ -1,0 +1,174 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Equipos/Vehículos{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Equipos / Maquinaria / Vehículos</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-6">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Agregar vehículo/equipo</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_vehicle">
+          <div class="col-12">
+            <label class="form-label">Nombre</label>
+            <input type="text" name="name" class="form-control" placeholder="Ej: Camión 1" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">External ID</label>
+            <input type="text" name="external_id" class="form-control" placeholder="Opcional">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Sync status</label>
+            <select name="sync_status" class="form-select">
+              {% for key, label in sync_status_choices.items %}
+                <option value="{{ key }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary w-100" type="submit">Agregar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Equipos/Vehículos registrados</h3>
+        <div class="card-toolbar">
+          <input type="text" class="form-control w-300px" id="vehiclesSearch" placeholder="Buscar nombre o estado">
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle" id="vehiclesTable">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th>Sync</th>
+                <th>Última sync</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for v in vehicles %}
+              <tr>
+                <td>{{ v.name }}{% if v.external_id %} <span class="text-muted">({{ v.external_id }})</span>{% endif %}</td>
+                <td>
+                  {% if v.is_active %}
+                    <span class="badge badge-light-success">Activo</span>
+                  {% else %}
+                    <span class="badge badge-light">Inactivo</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge badge-light-primary">{{ v.get_sync_status_display }}</span>
+                </td>
+                <td class="text-muted">
+                  {% if v.last_synced_at %}{{ v.last_synced_at|localtime|date:"d/m/Y H:i" }}{% else %}-{% endif %}
+                </td>
+                <td class="text-end">
+                  <button class="btn btn-sm btn-light-primary" type="button" data-bs-toggle="modal" data-bs-target="#editVehicleModal{{ v.id }}">Editar</button>
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="sync_vehicle">
+                    <input type="hidden" name="vehicle_id" value="{{ v.id }}">
+                    <button class="btn btn-sm btn-light-primary">Marcar sync</button>
+                  </form>
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="toggle_vehicle">
+                    <input type="hidden" name="vehicle_id" value="{{ v.id }}">
+                    <button class="btn btn-sm {% if v.is_active %}btn-light-danger{% else %}btn-light-success{% endif %}">
+                      {% if v.is_active %}Desactivar{% else %}Activar{% endif %}
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="text-muted">Sin vehículos/equipos cargados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% for v in vehicles %}
+<div class="modal fade" id="editVehicleModal{{ v.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Editar vehículo/equipo</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_vehicle">
+        <input type="hidden" name="vehicle_id" value="{{ v.id }}">
+        <div class="modal-body row g-3">
+          <div class="col-12">
+            <label class="form-label">Nombre</label>
+            <input type="text" name="name" class="form-control" value="{{ v.name }}" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">External ID</label>
+            <input type="text" name="external_id" class="form-control" value="{{ v.external_id|default:'' }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Sync status</label>
+            <select name="sync_status" class="form-select">
+              {% for key, label in sync_status_choices.items %}
+                <option value="{{ key }}" {% if v.sync_status == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var table = $("#vehiclesTable").DataTable({
+        info: false,
+        pageLength: 10,
+        lengthChange: false,
+        order: [],
+      });
+
+      var search = document.getElementById("vehiclesSearch");
+      if (search) {
+        search.addEventListener("keyup", function () {
+          table.search(search.value).draw();
+        });
+      }
+    });
+  </script>
+{% endblock %}

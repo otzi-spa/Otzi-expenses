@@ -1,0 +1,678 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Dashboard</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-5 mb-6">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body">
+        <form id="dashboardFilters" class="row g-3 align-items-end">
+          <div class="col-12 col-md-2">
+            <label class="form-label">Fecha inicio</label>
+            <input type="date" class="form-control" id="filterStartDate">
+          </div>
+          <div class="col-12 col-md-2">
+            <label class="form-label">Fecha fin</label>
+            <input type="date" class="form-control" id="filterEndDate">
+          </div>
+          <div class="col-12 col-md-2">
+            <label class="form-label">Estado</label>
+            <select class="form-select" id="filterStatus">
+              <option value="">Todos</option>
+              {% for value, label in status_choices %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-2">
+            <label class="form-label">Obra parametrizada</label>
+            <select class="form-select" id="filterWorksite">
+              <option value="">Todas</option>
+              {% for w in worksites %}
+              <option value="{{ w.name }}">{{ w.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-2">
+            <label class="form-label">Vehículo</label>
+            <select class="form-select" id="filterVehicle">
+              <option value="">Todos</option>
+              {% for v in vehicles %}
+              <option value="{{ v.name }}">{{ v.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-2">
+            <label class="form-label">Categoría</label>
+            <select class="form-select" id="filterCategory">
+              <option value="">Todas</option>
+              {% for c in categories %}
+              <option value="{{ c }}">{{ c }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 d-flex gap-2">
+            <button type="submit" class="btn btn-primary">Aplicar filtros</button>
+            <button type="button" class="btn btn-light" id="resetFilters">Limpiar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-5 g-xl-8 mb-2">
+  <div class="col-md-6 col-xl-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="text-muted fs-7">Gasto total mes actual</div>
+        <div class="fs-2 fw-bold" id="kpiTotalAmountCurrentMonth">$0</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="text-muted fs-7">No parametrizados</div>
+        <div class="fs-2 fw-bold" id="kpiPendingNotParam">0</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="text-muted fs-7">Ticket promedio parametrizado</div>
+        <div class="fs-2 fw-bold" id="kpiAvgTicketParam">$0</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="text-muted fs-7">Mensajes recibidos (6 meses)</div>
+        <div class="fs-2 fw-bold" id="kpiMessages6Months">0</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-5 g-xl-8 mb-2">
+  <div class="col-xl-8">
+    <div class="card h-100">
+      <div class="card-header border-0 pt-5">
+        <h3 class="card-title align-items-start flex-column">
+          <span class="card-label fw-bold fs-3">Tendencia mensual de gastos</span>
+          <span class="text-muted mt-1 fw-semibold fs-7">Monto y cantidad</span>
+        </h3>
+      </div>
+      <div class="card-body">
+        <div id="trendChart" style="height: 320px;"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card h-100">
+      <div class="card-header border-0 pt-5">
+        <h3 class="card-title fw-bold fs-3">Distribución por estado</h3>
+      </div>
+      <div class="card-body">
+        <div id="statusChart" style="height: 320px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-5 g-xl-8 mb-2">
+  <div class="col-xl-6">
+    <div class="card h-100">
+      <div class="card-header border-0 pt-5">
+        <h3 class="card-title fw-bold fs-3">Top categorías</h3>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-row-dashed align-middle">
+            <thead>
+              <tr class="text-muted fs-7 text-uppercase">
+                <th>Categoría</th>
+                <th>#</th>
+                <th>Monto</th>
+              </tr>
+            </thead>
+            <tbody id="topCategoriesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-6">
+    <div class="card h-100">
+      <div class="card-header border-0 pt-5">
+        <h3 class="card-title fw-bold fs-3">Top obras parametrizadas</h3>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-row-dashed align-middle">
+            <thead>
+              <tr class="text-muted fs-7 text-uppercase">
+                <th>Obra</th>
+                <th>#</th>
+                <th>Monto</th>
+              </tr>
+            </thead>
+            <tbody id="topWorksitesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-5 g-xl-8 mb-2">
+  <div class="col-xl-12">
+    <div class="card h-100">
+      <div class="card-header border-0 pt-5">
+        <h3 class="card-title fw-bold fs-3">Gastos ingresados por trabajador</h3>
+      </div>
+      <div class="card-body">
+        <div id="workerChart" style="height: 360px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-5 g-xl-8 mb-2">
+  <div class="col-xl-12">
+    <div class="card h-100">
+      <div class="card-header border-0 pt-5 d-flex flex-wrap align-items-end gap-4">
+        <h3 class="card-title fw-bold fs-3">Análisis por variable</h3>
+        <div class="d-flex flex-wrap gap-3 ms-auto">
+          <div>
+            <label class="form-label">Ver</label>
+            <select id="varMetric" class="form-select">
+              <option value="amount">Monto</option>
+              <option value="count">Cantidad</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Periodo</label>
+            <select id="varPeriod" class="form-select">
+              <option value="ytd">YTD</option>
+              <option value="current_month">Mes actual</option>
+              <option value="previous_month">Mes anterior</option>
+              <option value="current_year">Año actual</option>
+              <option value="previous_year">Año anterior</option>
+              <option value="last_6_months">Últimos 6 meses</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Vista</label>
+            <select id="varMode" class="form-select">
+              <option value="total">Total</option>
+              <option value="monthly">Mensual</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Variable</label>
+            <select id="varDimension" class="form-select">
+              <option value="category">Categorías</option>
+              <option value="worksite">Obras</option>
+              <option value="supplier">Proveedor</option>
+              <option value="vehicle">Vehículo</option>
+              <option value="status">Estado</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="variableChart" style="height: 390px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-5 g-xl-8 mb-2">
+  <div class="col-xl-8">
+    <div class="card h-100">
+      <div class="card-header border-0 pt-5">
+        <h3 class="card-title fw-bold fs-3">Pendientes críticos</h3>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-row-dashed align-middle">
+            <thead>
+              <tr class="text-muted fs-7 text-uppercase">
+                <th>ID</th>
+                <th>Recibido</th>
+                <th>Proveedor</th>
+                <th>Obra</th>
+                <th>Monto</th>
+                <th>Completitud</th>
+              </tr>
+            </thead>
+            <tbody id="criticalPendingBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card h-100">
+      <div class="card-header border-0 pt-5">
+        <h3 class="card-title fw-bold fs-3">Calidad de datos</h3>
+      </div>
+      <div class="card-body">
+        <div class="mb-4">
+          <div class="text-muted fs-7">Completitud general</div>
+          <div class="fs-1 fw-bold" id="qualityCompleteness">0%</div>
+        </div>
+        <div id="qualityMetrics" class="d-flex flex-column gap-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  (function () {
+    var endpoints = {
+      kpis: "/api/v1/analytics/kpis/",
+      monthlyTrend: "/api/v1/analytics/monthly-trend/",
+      statusBreakdown: "/api/v1/analytics/status-breakdown/",
+      topCategories: "/api/v1/analytics/top-categories/",
+      topWorksites: "/api/v1/analytics/top-worksites/",
+      criticalPending: "/api/v1/analytics/critical-pending/",
+      workerBreakdown: "/api/v1/analytics/worker-breakdown/",
+      variableAnalysis: "/api/v1/analytics/variable-analysis/",
+      dataQuality: "/api/v1/analytics/data-quality/"
+    };
+
+    var trendChart = null;
+    var statusChart = null;
+    var workerChart = null;
+    var variableChart = null;
+    var otziYellow = "#d7c45a";
+    var otziYellowDark = "#c8b44b";
+    var otziYellowLight = "#f1df8a";
+    var otziBlueLine = "#4ba3ff";
+
+    function formatCurrency(value) {
+      return new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      var d = new Date(value);
+      if (isNaN(d.getTime())) return "-";
+      return d.toLocaleDateString("es-CL");
+    }
+
+    function formatMonthLabel(value) {
+      if (!value) return "-";
+      // Avoid timezone shifts when backend sends month starts like YYYY-MM-DD.
+      var match = String(value).match(/^(\d{4})-(\d{2})/);
+      if (match) {
+        return match[2] + "-" + match[1];
+      }
+      var fallback = formatDate(value);
+      return fallback !== "-" ? fallback.slice(3) : "-";
+    }
+
+    function buildCommonQuery(includeDateRange) {
+      var params = new URLSearchParams();
+      params.set("date_field", "paid_at");
+
+      if (includeDateRange) {
+        var startDate = document.getElementById("filterStartDate").value;
+        var endDate = document.getElementById("filterEndDate").value;
+        if (startDate) params.set("start_date", startDate);
+        if (endDate) params.set("end_date", endDate);
+      }
+
+      var status = document.getElementById("filterStatus").value;
+      var worksite = document.getElementById("filterWorksite").value;
+      var vehicle = document.getElementById("filterVehicle").value;
+      var category = document.getElementById("filterCategory").value;
+
+      if (status) params.set("status", status);
+      if (worksite) params.set("worksite", worksite);
+      if (vehicle) params.set("vehicle", vehicle);
+      if (category) params.set("category", category);
+
+      return params;
+    }
+
+    function getUrl(baseUrl, params) {
+      var q = params.toString();
+      return q ? baseUrl + "?" + q : baseUrl;
+    }
+
+    function renderTopTable(tbodyId, rows, labelKey) {
+      var tbody = document.getElementById(tbodyId);
+      if (!rows || !rows.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center">Sin datos</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(function (row) {
+        return [
+          "<tr>",
+          "<td>" + (row[labelKey] || "-") + "</td>",
+          "<td>" + (row.total_count || 0) + "</td>",
+          "<td>$" + formatCurrency(row.total_amount || 0) + "</td>",
+          "</tr>"
+        ].join("");
+      }).join("");
+    }
+
+    function renderCriticalPending(rows) {
+      var tbody = document.getElementById("criticalPendingBody");
+      if (!rows || !rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center">Sin pendientes</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(function (row) {
+        var completeness = row.completeness || { filled: 0, total: 0, pct: 0 };
+        return [
+          "<tr>",
+          "<td>#" + row.id + "</td>",
+          "<td>" + formatDate(row.message_sent_at || row.created_at) + "</td>",
+          "<td>" + (row.supplier || "-") + "</td>",
+          "<td>" + (row.worksite || "-") + "</td>",
+          "<td>$" + formatCurrency(row.amount || 0) + "</td>",
+          "<td>" + completeness.pct + "% (" + completeness.filled + "/" + completeness.total + ")</td>",
+          "</tr>"
+        ].join("");
+      }).join("");
+    }
+
+    function renderQuality(data) {
+      var container = document.getElementById("qualityMetrics");
+      document.getElementById("qualityCompleteness").textContent = (data.completeness_pct || 0) + "%";
+
+      var metrics = data.metrics || {};
+      var rows = [
+        { key: "missing_amount", label: "Sin monto" },
+        { key: "missing_category", label: "Sin categoría" },
+        { key: "missing_worksite", label: "Sin obra parametrizada" },
+        { key: "missing_supplier", label: "Sin proveedor" },
+        { key: "without_attachment", label: "Sin comprobante" }
+      ];
+
+      container.innerHTML = rows.map(function (item) {
+        var metric = metrics[item.key] || { count: 0, pct: 0 };
+        return [
+          '<div class="d-flex justify-content-between border-bottom pb-1">',
+          "<span>" + item.label + "</span>",
+          "<span class=\"text-muted\">" + metric.count + " (" + metric.pct + "%)</span>",
+          "</div>"
+        ].join("");
+      }).join("");
+    }
+
+    function renderTrendChart(payload) {
+      var el = document.getElementById("trendChart");
+      if (!window.ApexCharts) {
+        el.innerHTML = '<div class="text-muted">ApexCharts no disponible</div>';
+        return;
+      }
+
+      var seriesData = payload.data || [];
+      var categories = seriesData.map(function (item) {
+        return formatMonthLabel(item.month);
+      });
+      var amountData = seriesData.map(function (item) { return item.total_amount || 0; });
+      var countData = seriesData.map(function (item) { return item.total_count || 0; });
+
+      var options = {
+        series: [
+          { name: "Monto", type: "column", data: amountData },
+          { name: "Cantidad", type: "line", data: countData }
+        ],
+        colors: [otziYellow, otziBlueLine],
+        chart: {
+          type: "line",
+          height: 320,
+          toolbar: { show: false }
+        },
+        stroke: { width: [0, 3] },
+        dataLabels: { enabled: false },
+        xaxis: { categories: categories },
+        yaxis: [
+          {
+            labels: {
+              formatter: function (value) { return "$" + formatCurrency(value); }
+            }
+          },
+          { opposite: true }
+        ]
+      };
+
+      if (trendChart) trendChart.destroy();
+      trendChart = new ApexCharts(el, options);
+      trendChart.render();
+    }
+
+    function renderStatusChart(payload) {
+      var el = document.getElementById("statusChart");
+      if (!window.ApexCharts) {
+        el.innerHTML = '<div class="text-muted">ApexCharts no disponible</div>';
+        return;
+      }
+
+      var rows = payload.data || [];
+      var labels = rows.map(function (row) { return row.label; });
+      var values = rows.map(function (row) { return row.count || 0; });
+      var colorByStatus = {
+        pending: "#f1c75b",
+        completed: "#4ba3ff",
+        approved: "#50cd89",
+        rejected: "#f1416c"
+      };
+      var colors = rows.map(function (row) {
+        return colorByStatus[row.status] || "#a1a5b7";
+      });
+
+      var options = {
+        series: values,
+        chart: { type: "donut", height: 320 },
+        labels: labels,
+        colors: colors,
+        dataLabels: { enabled: true },
+        legend: { position: "bottom" }
+      };
+
+      if (statusChart) statusChart.destroy();
+      statusChart = new ApexCharts(el, options);
+      statusChart.render();
+    }
+
+    function renderWorkerChart(payload) {
+      var el = document.getElementById("workerChart");
+      if (!window.ApexCharts) {
+        el.innerHTML = '<div class="text-muted">ApexCharts no disponible</div>';
+        return;
+      }
+
+      var rows = (payload.data || []).slice(0, 12);
+      if (!rows.length) {
+        el.innerHTML = '<div class="text-muted">Sin datos</div>';
+        return;
+      }
+
+      var labels = rows.map(function (row) { return row.reporter; });
+      var amountData = rows.map(function (row) { return row.total_amount || 0; });
+      var countData = rows.map(function (row) { return row.total_count || 0; });
+
+      var options = {
+        series: [
+          { name: "Monto", type: "column", data: amountData },
+          { name: "Cantidad", type: "line", data: countData }
+        ],
+        colors: [otziYellow, otziBlueLine],
+        chart: { type: "line", height: 360, toolbar: { show: false } },
+        stroke: { width: [0, 3] },
+        dataLabels: { enabled: false },
+        xaxis: { categories: labels },
+        yaxis: [
+          { labels: { formatter: function (value) { return "$" + formatCurrency(value); } } },
+          { opposite: true }
+        ]
+      };
+
+      if (workerChart) workerChart.destroy();
+      workerChart = new ApexCharts(el, options);
+      workerChart.render();
+    }
+
+    function renderVariableChart(payload) {
+      var el = document.getElementById("variableChart");
+      if (!window.ApexCharts) {
+        el.innerHTML = '<div class="text-muted">ApexCharts no disponible</div>';
+        return;
+      }
+
+      if (variableChart) {
+        variableChart.destroy();
+      }
+
+      if (payload.mode === "monthly") {
+        var optionsMonthly = {
+          series: payload.series || [],
+          colors: [otziYellow, otziYellowDark, otziYellowLight, "#e9d67a", "#bda63c", "#f4e8b7"],
+          chart: { type: "bar", stacked: true, height: 390, toolbar: { show: false } },
+          dataLabels: { enabled: false },
+          xaxis: { categories: payload.categories || [] },
+          yaxis: {
+            labels: {
+              formatter: function (value) {
+                return payload.metric === "amount" ? "$" + formatCurrency(value) : value;
+              }
+            }
+          }
+        };
+        variableChart = new ApexCharts(el, optionsMonthly);
+        variableChart.render();
+        return;
+      }
+
+      var labels = payload.labels || [];
+      var values = payload.values || [];
+      var optionsTotal = {
+        series: [{ name: payload.metric === "amount" ? "Monto" : "Cantidad", data: values }],
+        colors: [otziYellow],
+        chart: { type: "bar", height: 390, toolbar: { show: false } },
+        plotOptions: { bar: { horizontal: true } },
+        dataLabels: { enabled: false },
+        xaxis: {
+          categories: labels,
+          labels: {
+            formatter: function (value) {
+              return payload.metric === "amount" ? "$" + formatCurrency(value) : value;
+            }
+          }
+        }
+      };
+      variableChart = new ApexCharts(el, optionsTotal);
+      variableChart.render();
+    }
+
+    async function loadVariableAnalysis() {
+      var params = buildCommonQuery(false);
+      params.set("metric", document.getElementById("varMetric").value);
+      params.set("period", document.getElementById("varPeriod").value);
+      params.set("mode", document.getElementById("varMode").value);
+      params.set("dimension", document.getElementById("varDimension").value);
+
+      var response = await fetch(getUrl(endpoints.variableAnalysis, params));
+      if (!response.ok) throw new Error("No se pudo cargar análisis variable");
+      var payload = await response.json();
+      renderVariableChart(payload);
+    }
+
+    function setLoadingState(isLoading) {
+      var button = document.querySelector('#dashboardFilters button[type="submit"]');
+      if (!button) return;
+      button.disabled = isLoading;
+      button.textContent = isLoading ? "Cargando..." : "Aplicar filtros";
+    }
+
+    async function loadDashboardData() {
+      var withDateParams = buildCommonQuery(true);
+      var noDateParams = buildCommonQuery(false);
+      setLoadingState(true);
+
+      try {
+        var responses = await Promise.all([
+          fetch(getUrl(endpoints.kpis, noDateParams)),
+          fetch(getUrl(endpoints.monthlyTrend, withDateParams)),
+          fetch(getUrl(endpoints.statusBreakdown, withDateParams)),
+          fetch(getUrl(endpoints.topCategories, withDateParams)),
+          fetch(getUrl(endpoints.topWorksites, withDateParams)),
+          fetch(getUrl(endpoints.criticalPending, noDateParams)),
+          fetch(getUrl(endpoints.workerBreakdown, withDateParams)),
+          fetch(getUrl(endpoints.dataQuality, withDateParams))
+        ]);
+
+        for (var i = 0; i < responses.length; i++) {
+          if (!responses[i].ok) throw new Error("Error al cargar indicadores");
+        }
+
+        var data = await Promise.all(responses.map(function (response) { return response.json(); }));
+
+        var kpis = data[0];
+        document.getElementById("kpiTotalAmountCurrentMonth").textContent = "$" + formatCurrency(kpis.total_amount_current_month || 0);
+        document.getElementById("kpiPendingNotParam").textContent = kpis.pending_not_parametrized_count || 0;
+        document.getElementById("kpiAvgTicketParam").textContent = "$" + formatCurrency(kpis.avg_ticket_parametrized || 0);
+        document.getElementById("kpiMessages6Months").textContent = kpis.messages_received_last_6_months || 0;
+
+        renderTrendChart(data[1]);
+        renderStatusChart(data[2]);
+        renderTopTable("topCategoriesBody", data[3].data || [], "category");
+        renderTopTable("topWorksitesBody", data[4].data || [], "worksite");
+        renderCriticalPending(data[5].data || []);
+        renderWorkerChart(data[6]);
+        renderQuality(data[7] || {});
+
+        await loadVariableAnalysis();
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoadingState(false);
+      }
+    }
+
+    document.getElementById("dashboardFilters").addEventListener("submit", function (event) {
+      event.preventDefault();
+      loadDashboardData();
+    });
+
+    document.getElementById("resetFilters").addEventListener("click", function () {
+      document.getElementById("filterStartDate").value = "";
+      document.getElementById("filterEndDate").value = "";
+      document.getElementById("filterStatus").value = "";
+      document.getElementById("filterWorksite").value = "";
+      document.getElementById("filterVehicle").value = "";
+      document.getElementById("filterCategory").value = "";
+      loadDashboardData();
+    });
+
+    ["varMetric", "varPeriod", "varMode", "varDimension"].forEach(function (id) {
+      document.getElementById(id).addEventListener("change", function () {
+        loadVariableAnalysis().catch(function (error) { console.error(error); });
+      });
+    });
+
+    loadDashboardData();
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,136 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Categorías{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Categorías</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-6">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Agregar categoría</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_category">
+          <div class="col-12">
+            <label class="form-label">Nombre</label>
+            <input type="text" name="name" class="form-control" placeholder="Ej: Materiales" required>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary w-100" type="submit">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Categorías registradas</h3>
+        <div class="card-toolbar">
+          <input type="text" class="form-control w-300px" id="categoriesSearch" placeholder="Buscar categoría">
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle" id="categoriesTable">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th>Creado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in categories %}
+              <tr>
+                <td>{{ c.name }}</td>
+                <td>
+                  {% if c.is_active %}
+                    <span class="badge badge-light-success">Activo</span>
+                  {% else %}
+                    <span class="badge badge-light">Inactivo</span>
+                  {% endif %}
+                </td>
+                <td class="text-muted">{{ c.created_at|localtime|date:"d/m/Y H:i" }}</td>
+                <td class="text-end">
+                  <button class="btn btn-sm btn-light-primary" type="button" data-bs-toggle="modal" data-bs-target="#editCategoryModal{{ c.id }}">Editar</button>
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="toggle_category">
+                    <input type="hidden" name="category_id" value="{{ c.id }}">
+                    <button class="btn btn-sm {% if c.is_active %}btn-light-danger{% else %}btn-light-success{% endif %}">
+                      {% if c.is_active %}Desactivar{% else %}Activar{% endif %}
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="text-muted">Sin categorías cargadas.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% for c in categories %}
+<div class="modal fade" id="editCategoryModal{{ c.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Editar categoría</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_category">
+        <input type="hidden" name="category_id" value="{{ c.id }}">
+        <div class="modal-body">
+          <label class="form-label">Nombre</label>
+          <input type="text" name="name" class="form-control" value="{{ c.name }}" required>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var table = $("#categoriesTable").DataTable({
+        info: false,
+        pageLength: 10,
+        lengthChange: false,
+        order: [],
+      });
+
+      var search = document.getElementById("categoriesSearch");
+      if (search) {
+        search.addEventListener("keyup", function () {
+          table.search(search.value).draw();
+        });
+      }
+    });
+  </script>
+{% endblock %}

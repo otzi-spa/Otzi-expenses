@@ -1,0 +1,29 @@
+{% extends "metronic/base_auth.html" %}
+{% block page_title %}Login{% endblock %}
+{% block auth_content %}
+{% load static %}
+  <form class="form w-100" method="post" action="{% url 'login' %}">
+    {% csrf_token %}
+    <div class="text-center mb-11">
+        <img alt="Logo" src="{% static 'theme/metronic/assets/media/logos/logo-simple.svg' %}" class="h-60px h-lg-90px" />
+      <h1 class="text-dark fw-bolder mb-3">Sistema de Rendición de Gastos</h1>
+      <div class="text-gray-500 fw-semibold fs-6">Ingresar</div>
+    </div>
+
+    {% if form.errors %}
+      <div class="alert alert-danger">Usuario o contraseña inválidos.</div>
+    {% endif %}
+
+    <div class="fv-row mb-8">
+      <input class="form-control bg-transparent" type="text" name="username" placeholder="Usuario" autofocus required />
+    </div>
+    <div class="fv-row mb-3">
+      <input class="form-control bg-transparent" type="password" name="password" placeholder="Contraseña" required />
+    </div>
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <div class="d-grid mb-10">
+      <button class="btn btn-primary" type="submit">Entrar</button>
+    </div>
+  </form>
+{% endblock %}

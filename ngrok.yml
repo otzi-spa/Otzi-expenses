@@ -1,0 +1,11 @@
+version: "3"
+agent: 
+  authtoken: 34kxS7sVXMhb06b2sLsKcWwm0ST_7gzYapM8jLmNnnYyGTKuG
+tunnels:
+  web:
+    addr: 8000
+    proto: http
+  azurite:
+    addr: 10000
+    proto: http
+
