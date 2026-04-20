@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="legal-page">
+  <div class="legal-card">
+    <h1>Política de Privacidad</h1>
+    <p class="last-updated">Última actualización: 20 de abril de 2026</p>
+
+    <p>
+      En Otzi respetamos la privacidad de las personas y protegemos la información utilizada
+      para operar nuestra plataforma. Esta Política de Privacidad explica qué datos recopilamos,
+      cómo los usamos y cómo una persona puede solicitar la eliminación de su información.
+    </p>
+
+    <h2>1. Datos que recopilamos</h2>
+    <p>Podemos recopilar y procesar las siguientes categorías de datos:</p>
+    <ul>
+      <li>Números de teléfono utilizados para interactuar con el servicio.</li>
+      <li>Mensajes enviados y recibidos por WhatsApp, incluyendo texto, imágenes y archivos asociados.</li>
+      <li>Datos del usuario o de la empresa, como nombre, identificadores internos, cargo u otra información operativa entregada durante el uso del servicio.</li>
+      <li>Datos técnicos y registros de uso necesarios para monitoreo, seguridad, soporte y análisis del funcionamiento de la plataforma.</li>
+    </ul>
+
+    <h2>2. Cómo usamos los datos</h2>
+    <p>La información se utiliza únicamente para fines legítimos relacionados con el servicio, incluyendo:</p>
+    <ul>
+      <li>Procesar solicitudes enviadas por los usuarios a través de WhatsApp u otros canales conectados.</li>
+      <li>Automatizar flujos operativos, validaciones y respuestas dentro de la plataforma.</li>
+      <li>Generar métricas, analítica y mejoras del servicio.</li>
+      <li>Prevenir usos indebidos, resolver incidentes y mantener la seguridad de la aplicación.</li>
+      <li>Cumplir obligaciones legales o contractuales aplicables.</li>
+    </ul>
+
+    <h2>3. Almacenamiento y protección de datos</h2>
+    <p>
+      Los datos son almacenados utilizando medidas razonables de seguridad técnicas y organizativas.
+      Tomamos acciones para evitar accesos no autorizados, pérdida, alteración o divulgación indebida
+      de la información.
+    </p>
+    <p>
+      No compartimos datos personales con terceros no autorizados. Cuando sea necesario trabajar con
+      proveedores tecnológicos para operar la plataforma, el tratamiento de la información se limita a
+      lo estrictamente necesario para prestar el servicio de forma segura.
+    </p>
+
+    <h2>4. Conservación de la información</h2>
+    <p>
+      Conservamos la información solo durante el tiempo necesario para operar el servicio, cumplir fines
+      operativos, de soporte, seguridad, analítica y obligaciones legales aplicables.
+    </p>
+
+    <h2>5. Eliminación de datos</h2>
+    <p>
+      Si deseas solicitar la eliminación de tus datos personales, números de teléfono, mensajes de
+      WhatsApp u otra información asociada al uso del servicio, puedes escribir a
+      <a href="mailto:fsantibanez@otzi.cl">fsantibanez@otzi.cl</a>.
+    </p>
+    <p>
+      En tu solicitud, por favor incluye la mayor cantidad de antecedentes posibles para identificar
+      tu información, por ejemplo: número de teléfono, nombre, empresa y contexto de uso. Revisaremos
+      la solicitud y responderemos dentro de un plazo razonable, sujeto a obligaciones legales de
+      conservación que puedan resultar aplicables.
+    </p>
+
+    <h2>6. Contacto</h2>
+    <p>
+      Si tienes preguntas sobre esta Política de Privacidad o sobre el tratamiento de datos, puedes
+      contactarnos en <a href="mailto:fsantibanez@otzi.cl">fsantibanez@otzi.cl</a>.
+    </p>
+  </div>
+</section>
+
+<style>
+  :root {
+    color-scheme: light;
+    --page-bg: #f5f7fb;
+    --card-bg: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #dbe3ee;
+    --accent: #0f766e;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: linear-gradient(180deg, #f8fafc 0%, var(--page-bg) 100%);
+    color: var(--text);
+    line-height: 1.65;
+  }
+
+  .legal-page {
+    padding: 48px 20px;
+  }
+
+  .legal-card {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  }
+
+  h1, h2 {
+    line-height: 1.25;
+    margin-top: 0;
+  }
+
+  h1 {
+    margin-bottom: 10px;
+    font-size: 2rem;
+  }
+
+  h2 {
+    margin-top: 32px;
+    margin-bottom: 12px;
+    font-size: 1.2rem;
+    color: var(--accent);
+  }
+
+  p, ul {
+    margin: 0 0 16px;
+  }
+
+  ul {
+    padding-left: 20px;
+  }
+
+  li + li {
+    margin-top: 8px;
+  }
+
+  a {
+    color: var(--accent);
+  }
+
+  .last-updated {
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  @media (max-width: 640px) {
+    .legal-page {
+      padding: 24px 14px;
+    }
+
+    .legal-card {
+      padding: 24px 18px;
+      border-radius: 14px;
+    }
+
+    h1 {
+      font-size: 1.65rem;
+    }
+  }
+</style>
+{% endblock %}

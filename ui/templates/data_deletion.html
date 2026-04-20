@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="legal-page">
+  <div class="legal-card">
+    <h1>Eliminación de Datos</h1>
+    <p class="last-updated">Última actualización: 20 de abril de 2026</p>
+
+    <p>
+      Si deseas solicitar la eliminación de tus datos relacionados con el uso de nuestra plataforma,
+      puedes hacerlo enviando un correo electrónico a
+      <a href="mailto:fsantibanez@otzi.cl">fsantibanez@otzi.cl</a>.
+    </p>
+
+    <h2>Qué incluir en la solicitud</h2>
+    <ul>
+      <li>Tu nombre o el nombre de la empresa asociada.</li>
+      <li>El número de teléfono vinculado a WhatsApp.</li>
+      <li>Cualquier antecedente adicional que permita identificar tus datos dentro del sistema.</li>
+      <li>Una descripción breve de la solicitud de eliminación.</li>
+    </ul>
+
+    <h2>Qué ocurre después</h2>
+    <p>
+      Revisaremos la solicitud y validaremos la información necesaria para identificar los registros
+      correspondientes. Una vez confirmado, eliminaremos o anonimizaremos los datos que sea posible
+      suprimir, salvo aquellos que debamos conservar por razones legales, regulatorias o de seguridad.
+    </p>
+
+    <p>
+      Si necesitas más información sobre el tratamiento de datos, consulta nuestra
+      <a href="/privacy/">Política de Privacidad</a>.
+    </p>
+  </div>
+</section>
+
+<style>
+  :root {
+    color-scheme: light;
+    --page-bg: #f5f7fb;
+    --card-bg: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #dbe3ee;
+    --accent: #0f766e;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: linear-gradient(180deg, #f8fafc 0%, var(--page-bg) 100%);
+    color: var(--text);
+    line-height: 1.65;
+  }
+
+  .legal-page {
+    padding: 48px 20px;
+  }
+
+  .legal-card {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  }
+
+  h1, h2 {
+    line-height: 1.25;
+    margin-top: 0;
+  }
+
+  h1 {
+    margin-bottom: 10px;
+    font-size: 2rem;
+  }
+
+  h2 {
+    margin-top: 32px;
+    margin-bottom: 12px;
+    font-size: 1.2rem;
+    color: var(--accent);
+  }
+
+  p, ul {
+    margin: 0 0 16px;
+  }
+
+  ul {
+    padding-left: 20px;
+  }
+
+  li + li {
+    margin-top: 8px;
+  }
+
+  a {
+    color: var(--accent);
+  }
+
+  .last-updated {
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  @media (max-width: 640px) {
+    .legal-page {
+      padding: 24px 14px;
+    }
+
+    .legal-card {
+      padding: 24px 18px;
+      border-radius: 14px;
+    }
+
+    h1 {
+      font-size: 1.65rem;
+    }
+  }
+</style>
+{% endblock %}
