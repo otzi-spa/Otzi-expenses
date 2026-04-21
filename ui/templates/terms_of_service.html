@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="legal-page">
+  <div class="legal-card">
+    <h1>Términos y Condiciones del Servicio</h1>
+    <p class="last-updated">Última actualización: 20 de abril de 2026</p>
+
+    <p>
+      Estos Términos y Condiciones regulan el acceso y uso de la plataforma Otzi y de los
+      servicios asociados, incluyendo la recepción y procesamiento de mensajes enviados por
+      WhatsApp u otros canales habilitados. Al utilizar el servicio, aceptas estas condiciones.
+    </p>
+
+    <h2>1. Uso del servicio</h2>
+    <p>
+      El servicio está destinado a facilitar procesos operativos, automatización de solicitudes,
+      registro de información y gestión interna de datos relacionados con la operación del cliente.
+      El usuario se compromete a utilizar la plataforma de forma lícita, responsable y conforme a
+      estos términos.
+    </p>
+
+    <h2>2. Información procesada</h2>
+    <p>
+      Para prestar el servicio, la plataforma puede procesar números de teléfono, mensajes de
+      WhatsApp, archivos adjuntos y datos de usuarios o empresas. El tratamiento de esta
+      información se realiza de acuerdo con la
+      <a href="/privacy/">Política de Privacidad</a>.
+    </p>
+
+    <h2>3. Responsabilidades del usuario</h2>
+    <ul>
+      <li>Entregar información veraz y suficiente para operar correctamente el servicio.</li>
+      <li>No utilizar la plataforma para actividades ilícitas, fraudulentas o no autorizadas.</li>
+      <li>Resguardar el acceso a sus cuentas, dispositivos y canales de comunicación asociados.</li>
+      <li>Notificar oportunamente cualquier uso indebido, incidente o acceso no autorizado detectado.</li>
+    </ul>
+
+    <h2>4. Disponibilidad y mejoras</h2>
+    <p>
+      Buscamos mantener la continuidad del servicio, pero no garantizamos disponibilidad ininterrumpida
+      en todo momento. Podremos realizar mantenciones, ajustes, mejoras técnicas o cambios funcionales
+      cuando sea necesario para la operación, seguridad o evolución de la plataforma.
+    </p>
+
+    <h2>5. Limitación de responsabilidad</h2>
+    <p>
+      Otzi realizará esfuerzos razonables para operar el servicio de forma segura y confiable. Sin
+      embargo, en la medida permitida por la ley aplicable, no será responsable por interrupciones,
+      demoras, pérdidas indirectas o daños derivados del uso del servicio, de integraciones de terceros
+      o de información incorrecta proporcionada por el usuario.
+    </p>
+
+    <h2>6. Suspensión o término del acceso</h2>
+    <p>
+      Podremos suspender o restringir el acceso al servicio si detectamos incumplimientos de estos
+      términos, riesgos de seguridad, uso abusivo de la plataforma o requerimientos legales que así
+      lo exijan.
+    </p>
+
+    <h2>7. Solicitudes de eliminación de datos</h2>
+    <p>
+      Las solicitudes de eliminación de datos pueden realizarse escribiendo a
+      <a href="mailto:fsantibanez@otzi.cl">fsantibanez@otzi.cl</a>. También puedes revisar la página de
+      <a href="/data-deletion/">eliminación de datos</a> para más detalles.
+    </p>
+
+    <h2>8. Contacto</h2>
+    <p>
+      Si tienes preguntas sobre estos Términos y Condiciones, puedes escribir a
+      <a href="mailto:fsantibanez@otzi.cl">fsantibanez@otzi.cl</a>.
+    </p>
+  </div>
+</section>
+
+<style>
+  :root {
+    color-scheme: light;
+    --page-bg: #f5f7fb;
+    --card-bg: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #dbe3ee;
+    --accent: #0f766e;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: linear-gradient(180deg, #f8fafc 0%, var(--page-bg) 100%);
+    color: var(--text);
+    line-height: 1.65;
+  }
+
+  .legal-page {
+    padding: 48px 20px;
+  }
+
+  .legal-card {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  }
+
+  h1, h2 {
+    line-height: 1.25;
+    margin-top: 0;
+  }
+
+  h1 {
+    margin-bottom: 10px;
+    font-size: 2rem;
+  }
+
+  h2 {
+    margin-top: 32px;
+    margin-bottom: 12px;
+    font-size: 1.2rem;
+    color: var(--accent);
+  }
+
+  p, ul {
+    margin: 0 0 16px;
+  }
+
+  ul {
+    padding-left: 20px;
+  }
+
+  li + li {
+    margin-top: 8px;
+  }
+
+  a {
+    color: var(--accent);
+  }
+
+  .last-updated {
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  @media (max-width: 640px) {
+    .legal-page {
+      padding: 24px 14px;
+    }
+
+    .legal-card {
+      padding: 24px 18px;
+      border-radius: 14px;
+    }
+
+    h1 {
+      font-size: 1.65rem;
+    }
+  }
+</style>
+{% endblock %}

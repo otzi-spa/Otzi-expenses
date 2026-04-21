@@ -7,3 +7,7 @@ def privacy_policy(request):
 
 def data_deletion(request):
     return render(request, "data_deletion.html")
+
+
+def terms_of_service(request):
+    return render(request, "terms_of_service.html")

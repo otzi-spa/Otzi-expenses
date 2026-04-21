@@ -1,11 +1,12 @@
 from django.contrib import admin
 from django.urls import path, include
-from ui.views import data_deletion, privacy_policy
+from ui.views import data_deletion, privacy_policy, terms_of_service
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("privacy/", privacy_policy, name="privacy_policy"),
     path("data-deletion/", data_deletion, name="data_deletion"),
+    path("terms/", terms_of_service, name="terms_of_service"),
 
     # Web vistas SSR (bandeja/lista/detalle) - las pondrás en expenses/urls_ssr.py
     path("", include("expenses.urls_ssr")),
