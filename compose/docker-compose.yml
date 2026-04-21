@@ -16,6 +16,9 @@ services:
       - "8000:8000"
     volumes:
       - ..:/app
+    networks:
+      - default
+      - dq-proxy
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,3 +56,8 @@ services:
 volumes:
   pg_data:
   azurite_data:
+
+
+networks:
+  dq-proxy:
+    external: true
