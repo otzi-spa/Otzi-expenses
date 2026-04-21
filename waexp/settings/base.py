@@ -13,7 +13,7 @@ def env_bool(name: str, default: bool = False) -> bool:
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure")
 DEBUG = False
 
-_default_allowed_hosts = {"127.0.0.1", "localhost", "[::1]"}
+_default_allowed_hosts = {"expenses.otzi.cl", "127.0.0.1", "localhost", "[::1]"}
 _env_allowed_hosts = {
     host.strip()
     for host in os.environ.get("ALLOWED_HOSTS", "").split(",")
