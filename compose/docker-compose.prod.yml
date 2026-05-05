@@ -16,6 +16,9 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+    networks:
+      - default
+      - dq-proxy
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,3 +77,7 @@ services:
 volumes:
   pg_data:
   redis_data:
+
+networks:
+  dq-proxy:
+    external: true
