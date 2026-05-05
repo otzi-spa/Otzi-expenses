@@ -313,7 +313,7 @@ def whatsapp_webhook(request):
 def download_media_attachment(media_id: str, expense: Expense):
     meta = requests.get(
         f"{GRAPH_URL}/{media_id}",
-        params={"access_token": settings.WA_TEMPORARY_TOKEN},
+        params={"access_token": settings.WA_ACCESS_TOKEN},
         timeout=10,
     )
     if meta.status_code != 200:
@@ -327,7 +327,7 @@ def download_media_attachment(media_id: str, expense: Expense):
 
     media_resp = requests.get(
         url,
-        headers={"Authorization": f"Bearer {settings.WA_TEMPORARY_TOKEN}"},
+        headers={"Authorization": f"Bearer {settings.WA_ACCESS_TOKEN}"},
         timeout=20,
     )
     if media_resp.status_code != 200:
@@ -352,7 +352,7 @@ def download_media_attachment(media_id: str, expense: Expense):
 def send_whatsapp_reply(phone_number_id, to_number, message):
     url = f"{GRAPH_URL}/{phone_number_id}/messages"
     headers = {
-        "Authorization": f"Bearer {settings.WA_TEMPORARY_TOKEN}",
+        "Authorization": f"Bearer {settings.WA_ACCESS_TOKEN}",
         "Content-Type": "application/json",
     }
     data = {

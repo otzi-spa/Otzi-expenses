@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -10,15 +11,23 @@ def env_bool(name: str, default: bool = False) -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure")
-DEBUG = False
+def env_list(name: str) -> list[str]:
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
 
-_default_allowed_hosts = {"expenses.otzi.cl", "127.0.0.1", "localhost", "[::1]"}
-_env_allowed_hosts = {
-    host.strip()
-    for host in os.environ.get("ALLOWED_HOSTS", "").split(",")
-    if host.strip()
-}
+
+def host_from_url(raw_url: str) -> str:
+    return (urlparse(raw_url).hostname or "").strip()
+
+
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure")
+DEBUG = env_bool("DJANGO_DEBUG", False)
+APP_URL = os.environ.get("APP_URL", "").strip().rstrip("/")
+APP_HOST = host_from_url(APP_URL) if APP_URL else ""
+
+_default_allowed_hosts = {"127.0.0.1", "localhost", "[::1]"}
+_env_allowed_hosts = set(env_list("ALLOWED_HOSTS"))
+if APP_HOST:
+    _env_allowed_hosts.add(APP_HOST)
 ALLOWED_HOSTS = sorted(_default_allowed_hosts | _env_allowed_hosts | {".ngrok-free.dev"})
 
 INSTALLED_APPS = [
@@ -102,7 +111,7 @@ AZURE_CONNECTION_STRING = os.environ.get("AZURE_CONNECTION_STRING")
 AZURE_URL_EXPIRATION_SECS = int(os.environ.get("AZURE_URL_EXPIRATION_SECS", "3600"))
 AZURE_CUSTOM_DOMAIN = os.environ.get("AZURE_CUSTOM_DOMAIN")
 if AZURE_CUSTOM_DOMAIN:
-    AZURE_CUSTOM_DOMAIN = AZURE_CUSTOM_DOMAIN.strip().lstrip("https://").lstrip("http://")
+    AZURE_CUSTOM_DOMAIN = AZURE_CUSTOM_DOMAIN.strip().removeprefix("https://").removeprefix("http://")
 
 STORAGES = {
     "default": {
@@ -123,8 +132,8 @@ LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "dashboard"
 
 VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "otzi_whatsapp_secret")
-WA_TEMPORARY_TOKEN = os.environ.get("WA_TEMPORARY_TOKEN", "")
-APP_URL = os.environ.get("APP_URL", "").strip()
+WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "").strip() or os.environ.get("WA_TEMPORARY_TOKEN", "").strip()
+WA_TEMPORARY_TOKEN = WA_ACCESS_TOKEN
 
 _csrf_base = {
     "https://*.ngrok-free.dev",
@@ -134,10 +143,8 @@ _csrf_base = {
     "https://localhost",
     "https://127.0.0.1",
 }
-_csrf_extra = {
-    origin.strip()
-    for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
-    if origin.strip()
-}
+_csrf_extra = set(env_list("CSRF_TRUSTED_ORIGINS"))
+if APP_URL:
+    _csrf_extra.add(APP_URL)
 CSRF_TRUSTED_ORIGINS = sorted(_csrf_base | _csrf_extra)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
