@@ -1,0 +1,362 @@
+{% extends "metronic/base_app.html" %}
+{% block page_title %}Usuarios Sistema{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Usuarios del sistema</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-6">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Agregar usuario</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_system_user">
+          <div class="col-12">
+            <label class="form-label">Nombre</label>
+            <input type="text" name="first_name" class="form-control" placeholder="Nombre">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Apellido</label>
+            <input type="text" name="last_name" class="form-control" placeholder="Apellido">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Email</label>
+            <input type="email" name="email" class="form-control" placeholder="correo@dominio.cl" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Contraseña inicial</label>
+            <input type="password" name="password" class="form-control" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Rol</label>
+            <select name="role" class="form-select">
+              {% for value, label in role_choices %}
+                <option value="{{ value }}" {% if value == "reviewer" %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="is_active" id="systemUserActive" checked>
+              <label class="form-check-label" for="systemUserActive">Activo</label>
+            </div>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary w-100" type="submit">Agregar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Usuarios registrados</h3>
+        <div class="card-toolbar">
+          <div class="d-flex flex-wrap gap-2">
+            <input type="text" class="form-control w-300px" id="systemUsersSearch" placeholder="Buscar nombre o email">
+            <select class="form-select w-150px" id="systemUsersRoleFilter">
+              <option value="">Todos los roles</option>
+              {% for value, label in role_choices %}
+                <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+            <select class="form-select w-150px" id="systemUsersStatusFilter">
+              <option value="">Todos los estados</option>
+              <option value="activo">Activo</option>
+              <option value="inactivo">Inactivo</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle" id="systemUsersTable">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Email</th>
+                <th>Rol</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for system_user in system_users %}
+              <tr>
+                <td>{{ system_user.first_name }} {{ system_user.last_name }}</td>
+                <td class="fw-semibold">{{ system_user.email|default:"-" }}</td>
+                <td>
+                  <span class="badge badge-light-primary text-uppercase">{{ system_user.role }}</span>
+                </td>
+                <td>
+                  {% if system_user.is_active %}
+                    <span class="badge badge-light-success">Activo</span>
+                  {% else %}
+                    <span class="badge badge-light-danger">Inactivo</span>
+                  {% endif %}
+                  {% if system_user.is_superuser %}
+                    <span class="badge badge-light-warning">Superuser</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <div class="d-flex justify-content-end gap-1">
+                    <button type="button" class="btn btn-light btn-icon btn-sm" data-bs-toggle="modal" data-bs-target="#editSystemUser{{ system_user.id }}" data-kt-tooltip="true" title="Editar usuario" aria-label="Editar usuario">
+                      <span class="svg-icon svg-icon-3">
+                        <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                          <path d="M10.8 2.5L13.5 5.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                          <path d="M2.8 11.2L10.2 3.8L12.2 5.8L4.8 13.2L2.5 13.5L2.8 11.2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+                        </svg>
+                      </span>
+                    </button>
+                    <form method="post">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="toggle_system_user">
+                      <input type="hidden" name="user_id" value="{{ system_user.id }}">
+                      <button class="btn btn-icon btn-sm {% if system_user.is_active %}btn-light-danger{% else %}btn-light-success{% endif %}" data-kt-tooltip="true" title="{% if system_user.is_active %}Desactivar usuario{% else %}Activar usuario{% endif %}" aria-label="{% if system_user.is_active %}Desactivar usuario{% else %}Activar usuario{% endif %}">
+                        <span class="svg-icon svg-icon-3">
+                          {% if system_user.is_active %}
+                          <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                            <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/>
+                            <path d="M5.5 5.5L10.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                            <path d="M10.5 5.5L5.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                          </svg>
+                          {% else %}
+                          <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                            <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/>
+                            <path d="M5.25 8.25L7.1 10.1L10.75 6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                          </svg>
+                          {% endif %}
+                        </span>
+                      </button>
+                    </form>
+                    <form method="post">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="reset_system_user_password">
+                      <input type="hidden" name="user_id" value="{{ system_user.id }}">
+                      <button class="btn btn-light-primary btn-icon btn-sm" type="submit" data-kt-tooltip="true" title="Generar password temporal" aria-label="Generar password temporal">
+                        <span class="svg-icon svg-icon-3">
+                          <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                            <rect x="3" y="7" width="10" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+                            <path d="M5.5 7V5.5C5.5 4.12 6.62 3 8 3C9.38 3 10.5 4.12 10.5 5.5V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                            <circle cx="8" cy="10" r="1" fill="currentColor"/>
+                          </svg>
+                        </span>
+                      </button>
+                    </form>
+                    <button type="button" class="btn btn-light-info btn-icon btn-sm" data-bs-toggle="modal" data-bs-target="#auditSystemUser{{ system_user.id }}" data-kt-tooltip="true" title="Ver historial" aria-label="Ver historial">
+                      <span class="svg-icon svg-icon-3">
+                        <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                          <path d="M8 2.25A5.75 5.75 0 1 0 13.75 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                          <path d="M8 4.75V8L10.25 9.35" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                          <path d="M11.75 2.75H13.75V4.75" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                          <path d="M13.75 2.75L11.4 5.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                        </svg>
+                      </span>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="text-muted">Sin usuarios del sistema configurados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% for system_user in system_users %}
+<div class="modal fade" id="editSystemUser{{ system_user.id }}" tabindex="-1" aria-labelledby="editSystemUserLabel{{ system_user.id }}" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="editSystemUserLabel{{ system_user.id }}">Editar usuario</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_system_user">
+        <input type="hidden" name="user_id" value="{{ system_user.id }}">
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label">Nombre</label>
+              <input type="text" name="first_name" class="form-control" value="{{ system_user.first_name }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Apellido</label>
+              <input type="text" name="last_name" class="form-control" value="{{ system_user.last_name }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Email</label>
+              <input type="email" name="email" class="form-control" value="{{ system_user.email }}" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Nueva contraseña</label>
+              <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantenerla">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Rol</label>
+              <select name="role" class="form-select">
+                {% for value, label in role_choices %}
+                  <option value="{{ value }}" {% if system_user.role == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="is_active" id="systemUserActive{{ system_user.id }}" {% if system_user.is_active %}checked{% endif %}>
+                <label class="form-check-label" for="systemUserActive{{ system_user.id }}">Activo</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="auditSystemUser{{ system_user.id }}" tabindex="-1" aria-labelledby="auditSystemUserLabel{{ system_user.id }}" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="auditSystemUserLabel{{ system_user.id }}">Auditoría de {{ system_user.email }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        {% if system_user.audit_entries %}
+          <div class="d-flex flex-column gap-3">
+            {% for log in system_user.audit_entries %}
+            <div class="border rounded p-3 bg-light">
+              <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                <div>
+                  <div class="fw-semibold text-dark">{{ log.get_action_display }}</div>
+                  <div class="small text-muted">{{ log.created_at|date:"d/m/Y H:i" }}</div>
+                </div>
+                <span class="badge badge-light-primary text-uppercase">{{ log.action }}</span>
+              </div>
+
+              <div class="small mb-2">
+                <span class="text-muted">Ejecutado por:</span>
+                <span class="fw-semibold">{% if log.actor %}{{ log.actor.get_full_name|default:log.actor.email }}{% else %}Sistema{% endif %}</span>
+              </div>
+
+              {% if log.changes %}
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr class="text-muted fw-semibold fs-8 text-uppercase">
+                        <th class="ps-0">Campo</th>
+                        <th>Antes</th>
+                        <th class="pe-0">Después</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for field, change in log.changes.items %}
+                      <tr>
+                        <td class="ps-0 fw-semibold">{{ field|cut:"_"|title }}</td>
+                        <td>
+                          {% if change.before is not None %}
+                            <span class="text-muted">{{ change.before }}</span>
+                          {% else %}
+                            <span class="text-muted">-</span>
+                          {% endif %}
+                        </td>
+                        <td class="pe-0">
+                          {% if change.after is not None %}
+                            <span class="text-dark fw-semibold">{{ change.after }}</span>
+                          {% else %}
+                            <span class="text-muted">-</span>
+                          {% endif %}
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="text-muted">Sin auditoría registrada aún.</div>
+        {% endif %}
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var table = $("#systemUsersTable").DataTable({
+        info: false,
+        pageLength: 10,
+        lengthChange: false,
+        order: [],
+      });
+
+      var search = document.getElementById("systemUsersSearch");
+      var roleFilter = document.getElementById("systemUsersRoleFilter");
+      var statusFilter = document.getElementById("systemUsersStatusFilter");
+      if (search) {
+        search.addEventListener("keyup", function () {
+          table.search(search.value).draw();
+        });
+      }
+
+      $.fn.dataTable.ext.search.push(function (settings, data) {
+        if (settings.nTable.id !== "systemUsersTable") return true;
+
+        var selectedRole = roleFilter ? roleFilter.value.toLowerCase() : "";
+        var selectedStatus = statusFilter ? statusFilter.value.toLowerCase() : "";
+        var rowRole = (data[2] || "").toLowerCase();
+        var rowStatus = (data[3] || "").toLowerCase();
+
+        if (selectedRole && rowRole.indexOf(selectedRole) === -1) return false;
+        if (selectedStatus && rowStatus.indexOf(selectedStatus) === -1) return false;
+        return true;
+      });
+
+      if (roleFilter) {
+        roleFilter.addEventListener("change", function () {
+          table.draw();
+        });
+      }
+
+      if (statusFilter) {
+        statusFilter.addEventListener("change", function () {
+          table.draw();
+        });
+      }
+
+      var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-kt-tooltip="true"]'));
+      tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+        new bootstrap.Tooltip(tooltipTriggerEl);
+      });
+    });
+  </script>
+{% endblock %}
