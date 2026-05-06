@@ -12,7 +12,7 @@ services:
       POSTGRES_PORT: 5432
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-    command: gunicorn waexp.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120
+    command: gunicorn waexp.wsgi:application --bind 0.0.0.0:8000 --workers 1 --timeout 120
     ports:
       - "8000:8000"
     restart: unless-stopped
