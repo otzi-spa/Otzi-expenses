@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.urls import path, include
+from accounts.views import LoggedPasswordChangeDoneView, LoggedPasswordChangeView
 from ui.views import data_deletion, privacy_policy, terms_of_service
 
 urlpatterns = [
@@ -17,6 +18,9 @@ urlpatterns = [
 
     # Webhook WhatsApp
     path("webhook/whatsapp/", include("ingestion.api.urls")),
+
+    path("accounts/password_change/", LoggedPasswordChangeView.as_view(), name="password_change"),
+    path("accounts/password_change/done/", LoggedPasswordChangeDoneView.as_view(), name="password_change_done"),
 
     # 🔐 Auth built-in (login, logout, password_change, etc.)
     path("accounts/", include("django.contrib.auth.urls")),

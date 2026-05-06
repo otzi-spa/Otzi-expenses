@@ -44,13 +44,18 @@
                 </div>
                 <div class="d-flex flex-column">
                   <div class="fw-bold d-flex align-items-center fs-5">
-                    {{ request.user.username }}
+                    {{ request.user.get_full_name|default:request.user.email }}
                   </div>
                   <a href="#" class="fw-semibold text-muted text-hover-primary fs-7">{{ request.user.email }}</a>
                 </div>
               </div>
             </div>
             <div class="separator my-2"></div>
+            <div class="menu-item px-5">
+              <a href="{% url 'password_change' %}" class="menu-link px-5">
+                Cambiar contraseña
+              </a>
+            </div>
             <div class="menu-item px-5">
               <form method="post" action="{% url 'logout' %}">
                 {% csrf_token %}

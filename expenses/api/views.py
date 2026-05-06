@@ -374,7 +374,7 @@ class AnalyticsWorkerBreakdownView(AnalyticsBaseAPIView):
                 label = f"{(exp.wa_sender.first_name or '').strip()} {(exp.wa_sender.last_name or '').strip()}".strip()
                 reporter = label or exp.wa_sender.phone or "Sin usuario"
             elif exp.created_by:
-                reporter = exp.created_by.get_full_name() or exp.created_by.username
+                reporter = exp.created_by.get_full_name() or exp.created_by.email
             elif exp.wa_sender_phone:
                 reporter = exp.wa_sender_phone
             else:

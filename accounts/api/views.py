@@ -8,6 +8,6 @@ def me(request):
     user = request.user
     return Response({
         "id": user.id,
-        "username": user.username,
+        "email": user.email,
         "role": getattr(user, "role", None),
     })

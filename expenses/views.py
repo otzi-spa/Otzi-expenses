@@ -1,8 +1,12 @@
+from functools import wraps
+import secrets
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 from django.http import FileResponse
 from django.shortcuts import render, get_object_or_404, redirect
+from django.contrib.auth import get_user_model
+from accounts.models import UserAuditLog
 from .models import (
     Expense,
     Attachment,
@@ -46,12 +50,47 @@ def dashboard(request):
 def _settings_menu_urls():
     return {
         "settings",
+        "settings_system_users",
         "settings_users",
         "settings_vehicles",
         "settings_worksites",
         "settings_categories",
         "settings_expense_types",
     }
+
+
+def _is_admin_user(user):
+    return bool(user.is_authenticated and (user.is_superuser or getattr(user, "role", "") == "admin"))
+
+
+def _can_manage_expenses(user):
+    return bool(
+        user.is_authenticated
+        and (
+            user.is_superuser
+            or getattr(user, "role", "") in {"admin", "reviewer"}
+        )
+    )
+
+
+def _log_user_event(actor, target_user, action, changes=None):
+    UserAuditLog.objects.create(
+        actor=actor if getattr(actor, "is_authenticated", False) else None,
+        target_user=target_user,
+        action=action,
+        changes=changes or {},
+    )
+
+
+def admin_required(view_func):
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        if not _is_admin_user(request.user):
+            messages.error(request, "No tienes permisos para acceder a Configuración.")
+            return redirect("dashboard")
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
 
 
 def _normalize_empty(value):
@@ -80,7 +119,7 @@ def _collect_changes(before: dict, after: dict):
 def _log_expense_event(expense, action, actor=None, source="web", reason="", changes=None):
     actor_name = ""
     if actor:
-        actor_name = actor.get_full_name() or actor.username
+        actor_name = actor.get_full_name() or actor.email
     ExpenseAuditLog.objects.create(
         expense=expense,
         expense_snapshot_id=expense.id,
@@ -211,6 +250,10 @@ def _rebalance_split_group(group_id: str, actor=None, reason: str = "", deleted_
 def expense_detail(request, pk: int):
     expense = get_object_or_404(Expense, pk=pk)
     if request.method == "POST":
+        if not _can_manage_expenses(request.user):
+            messages.error(request, "No tienes permisos para editar gastos.")
+            return redirect("expense_list")
+
         tracked_fields = [
             "status",
             "amount",
@@ -443,6 +486,9 @@ def expense_detail(request, pk: int):
 def expense_create(request):
     if request.method != "POST":
         return redirect("expense_list")
+    if not _can_manage_expenses(request.user):
+        messages.error(request, "No tienes permisos para crear gastos.")
+        return redirect("expense_list")
 
     expense = Expense(
         source="web",
@@ -611,6 +657,7 @@ def expense_create(request):
 
 @login_required
 def expense_list(request):
+    can_manage_expenses = _can_manage_expenses(request.user)
     gastos = (
         Expense.objects.select_related("created_by", "wa_sender")
         .prefetch_related("attachments", "audit_logs")
@@ -629,12 +676,14 @@ def expense_list(request):
         logs = list(gasto.audit_logs.all())
         gasto.audit_entries = logs[:5]
         gasto.audit_entries_all = logs
-        gasto.can_approve_or_reject = gasto.status == "completed"
+        gasto.can_approve_or_reject = can_manage_expenses and gasto.status == "completed"
+        gasto.can_manage = can_manage_expenses
         gasto.split_label = ""
         if gasto.split_group_id and gasto.split_index and gasto.split_total:
             gasto.split_label = f"División {gasto.split_index}/{gasto.split_total}"
     context = {
         "gastos": gastos,
+        "can_manage_expenses": can_manage_expenses,
         "status_choices": Expense.STATUS,
         "vehicles": VehicleCatalog.objects.filter(is_active=True).order_by("name"),
         "worksites": WorksiteCatalog.objects.filter(is_active=True).order_by("name"),
@@ -667,6 +716,9 @@ def attachment_serve(request, pk: int):
 @login_required
 def expense_action(request, pk: int, action: str):
     if request.method != "POST":
+        return redirect("expense_list")
+    if not _can_manage_expenses(request.user):
+        messages.error(request, "No tienes permisos para ejecutar acciones sobre gastos.")
         return redirect("expense_list")
 
     expense = get_object_or_404(Expense, pk=pk)
@@ -847,6 +899,166 @@ def expense_action(request, pk: int, action: str):
 
 
 @login_required
+@admin_required
+def settings_system_users(request):
+    User = get_user_model()
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        if action == "add_system_user":
+            email = request.POST.get("email", "").strip().lower()
+            first_name = request.POST.get("first_name", "").strip()
+            last_name = request.POST.get("last_name", "").strip()
+            password = request.POST.get("password", "")
+            role = request.POST.get("role", "reviewer").strip() or "reviewer"
+            is_active = request.POST.get("is_active") == "on"
+
+            if role not in {"admin", "reviewer", "viewer"}:
+                role = "reviewer"
+
+            if not email:
+                messages.error(request, "El email es obligatorio.")
+            elif not password:
+                messages.error(request, "La contraseña inicial es obligatoria.")
+            elif User.objects.filter(email__iexact=email).exists():
+                messages.error(request, "Ya existe un usuario con ese email.")
+            else:
+                user = User(
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    role=role,
+                    is_active=is_active,
+                    is_staff=False,
+                    is_superuser=False,
+                )
+                user.set_password(password)
+                user.save()
+                _log_user_event(
+                    request.user,
+                    user,
+                    action="created",
+                    changes={
+                        "email": {"before": None, "after": user.email},
+                        "role": {"before": None, "after": user.role},
+                        "is_active": {"before": None, "after": user.is_active},
+                    },
+                )
+                messages.success(request, "Usuario del sistema creado.")
+
+        elif action == "update_system_user":
+            user = get_object_or_404(User, pk=request.POST.get("user_id"))
+            before = {
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role": user.role,
+                "is_active": user.is_active,
+            }
+            email = request.POST.get("email", "").strip().lower()
+            if not email:
+                messages.error(request, "El email es obligatorio.")
+                return redirect("settings_system_users")
+            if User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+                messages.error(request, "Ya existe un usuario con ese email.")
+                return redirect("settings_system_users")
+
+            user.email = email
+            user.first_name = request.POST.get("first_name", "").strip()
+            user.last_name = request.POST.get("last_name", "").strip()
+            role = request.POST.get("role", "reviewer").strip() or "reviewer"
+            if role not in {"admin", "reviewer", "viewer"}:
+                role = "reviewer"
+            user.role = role
+            user.is_active = request.POST.get("is_active") == "on"
+
+            new_password = request.POST.get("password", "")
+            if new_password:
+                user.set_password(new_password)
+
+            if new_password:
+                user.save()
+            else:
+                user.save(update_fields=["email", "first_name", "last_name", "role", "is_active"])
+
+            after = {
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role": user.role,
+                "is_active": user.is_active,
+            }
+            changes = _collect_changes(before, after)
+            _log_user_event(
+                request.user,
+                user,
+                action="updated",
+                changes=changes or {"message": "Guardado sin cambios detectables"},
+            )
+            if new_password:
+                _log_user_event(
+                    request.user,
+                    user,
+                    action="password_reset",
+                    changes={"reset_mode": {"before": None, "after": "manual_update"}},
+                )
+            messages.success(request, "Usuario del sistema actualizado.")
+
+        elif action == "toggle_system_user":
+            user = get_object_or_404(User, pk=request.POST.get("user_id"))
+            if user == request.user:
+                messages.error(request, "No puedes desactivarte a ti mismo.")
+            else:
+                old_active = user.is_active
+                user.is_active = not user.is_active
+                user.save(update_fields=["is_active"])
+                _log_user_event(
+                    request.user,
+                    user,
+                    action="activated" if user.is_active else "deactivated",
+                    changes={"is_active": {"before": old_active, "after": user.is_active}},
+                )
+                messages.info(
+                    request,
+                    f"Usuario {user.email} {'activado' if user.is_active else 'desactivado'}.",
+                )
+
+        elif action == "reset_system_user_password":
+            user = get_object_or_404(User, pk=request.POST.get("user_id"))
+            temporary_password = secrets.token_urlsafe(9)
+            user.set_password(temporary_password)
+            user.save()
+            _log_user_event(
+                request.user,
+                user,
+                action="password_reset",
+                changes={"reset_mode": {"before": None, "after": "temporary_password_generated"}},
+            )
+            messages.warning(
+                request,
+                f"Password temporal para {user.email}: {temporary_password}",
+            )
+
+        return redirect("settings_system_users")
+
+    system_users = (
+        User.objects.prefetch_related("received_user_audit_logs")
+        .order_by("-is_active", "email")
+    )
+    for system_user in system_users:
+        system_user.audit_entries = list(system_user.received_user_audit_logs.all()[:10])
+
+    context = {
+        "system_users": system_users,
+        "settings_menu_urls": _settings_menu_urls(),
+        "role_choices": User.ROLE_CHOICES,
+    }
+    return render(request, "settings/system_users.html", context)
+
+
+@login_required
+@admin_required
 def settings_users(request):
     if request.method == "POST":
         action = request.POST.get("action")
@@ -907,6 +1119,7 @@ def settings_users(request):
 
 
 @login_required
+@admin_required
 def settings_vehicles(request):
     if request.method == "POST":
         action = request.POST.get("action")
@@ -963,6 +1176,7 @@ def settings_vehicles(request):
 
 
 @login_required
+@admin_required
 def settings_worksites(request):
     if request.method == "POST":
         action = request.POST.get("action")
@@ -1019,6 +1233,7 @@ def settings_worksites(request):
 
 
 @login_required
+@admin_required
 def settings_categories(request):
     if request.method == "POST":
         action = request.POST.get("action")
@@ -1060,6 +1275,7 @@ def settings_categories(request):
 
 
 @login_required
+@admin_required
 def settings_expense_types(request):
     if request.method == "POST":
         action = request.POST.get("action")
@@ -1104,5 +1320,6 @@ def settings_expense_types(request):
 
 
 @login_required
+@admin_required
 def settings_view(request):
-    return redirect("settings_users")
+    return redirect("settings_system_users")

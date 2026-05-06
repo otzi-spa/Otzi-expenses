@@ -18,6 +18,7 @@
         </span>
         Exportar Excel
       </a>
+      {% if can_manage_expenses %}
       <button type="button" class="btn btn-add-expense d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#newExpenseModal">
         <span class="svg-icon svg-icon-5">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -26,6 +27,7 @@
         </span>
         Agregar gasto
       </button>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -47,6 +49,7 @@
 </div>
 {% endif %}
 
+{% if can_manage_expenses %}
 <div class="modal fade" id="splitExpenseModal" tabindex="-1" aria-labelledby="splitExpenseModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -72,7 +75,9 @@
     </div>
   </div>
 </div>
+{% endif %}
 
+{% if can_manage_expenses %}
 <div class="modal fade expense-edit-modal" id="newExpenseModal" tabindex="-1" aria-labelledby="newExpenseModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
@@ -239,6 +244,7 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 <div class="card">
   <div class="card-body">
@@ -291,7 +297,7 @@
             {% elif gasto.wa_sender_name %}
               {{ gasto.wa_sender_name }}
             {% elif gasto.created_by %}
-              {{ gasto.created_by.get_full_name|default:gasto.created_by.username }}
+              {{ gasto.created_by.get_full_name|default:gasto.created_by.email }}
             {% elif gasto.wa_sender_phone %}
               {{ gasto.wa_sender_phone }}
             {% else %}
@@ -358,6 +364,7 @@
                 </span>
               </button>
 
+              {% if can_manage_expenses %}
               <button
                 type="button"
                 class="btn btn-light-warning btn-icon btn-sm split-action-btn"
@@ -417,6 +424,7 @@
                   </span>
                 </button>
               </form>
+              {% endif %}
             </div>
           </td>
         </tr>
@@ -463,6 +471,14 @@
             {% csrf_token %}
             <div class="modal-body">
               <div class="row g-3">
+                {% if not can_manage_expenses %}
+                <div class="col-12">
+                  <div class="alert alert-light-info mb-0">
+                    Este usuario tiene acceso de solo lectura. No puede modificar gastos.
+                  </div>
+                </div>
+                {% endif %}
+                <fieldset {% if not can_manage_expenses %}disabled{% endif %}>
                 <div class="col-md-6">
                   <label class="form-label">Estado</label>
                   <select name="status" class="form-select" data-role="status-field" {% if gasto.status == "approved" or gasto.status == "rejected" %}disabled{% endif %}>
@@ -627,6 +643,7 @@
                   {% endif %}
                 </div>
                 {% endwith %}
+                </fieldset>
 
                 <div class="col-12">
                   <div class="accordion" id="auditAccordion{{ gasto.pk }}">
@@ -647,7 +664,7 @@
                             </div>
                             <div class="col-sm-6">
                               <div class="fw-semibold text-secondary">Registro</div>
-                              <div>Usuario creador: {% if gasto.created_by %}{{ gasto.created_by.get_full_name|default:gasto.created_by.username }}{% else %}-{% endif %}</div>
+                              <div>Usuario creador: {% if gasto.created_by %}{{ gasto.created_by.get_full_name|default:gasto.created_by.email }}{% else %}-{% endif %}</div>
                               <div>Creado: {{ gasto.created_at|localtime|date:'d/m/Y H:i' }}</div>
                               <div>Recibido: {{ gasto.message_sent_at|localtime|date:'d/m/Y H:i' }}</div>
                             </div>
@@ -677,7 +694,9 @@
             <div class="modal-footer">
               <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
               <button type="button" class="btn btn-light-primary open-history-btn" data-expense-id="{{ gasto.pk }}">Historial</button>
+              {% if can_manage_expenses %}
               <button type="submit" class="btn btn-primary">Guardar cambios</button>
+              {% endif %}
             </div>
           </form>
         </div>

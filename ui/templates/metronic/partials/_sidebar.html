@@ -44,6 +44,7 @@
         </div>
 
         <!-- Configuración -->
+        {% if request.user.is_superuser or request.user.role == "admin" %}
         <div class="menu-item menu-accordion {% if request.resolver_match.url_name in settings_menu_urls %}here show{% endif %}" data-kt-menu-trigger="click">
           <span class="menu-link">
             <span class="menu-icon">
@@ -54,9 +55,15 @@
           </span>
           <div class="menu-sub menu-sub-accordion">
             <div class="menu-item">
+              <a class="menu-link" href="{% url 'settings_system_users' %}">
+                <span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
+                <span class="menu-title">Usuarios Sistema</span>
+              </a>
+            </div>
+            <div class="menu-item">
               <a class="menu-link" href="{% url 'settings_users' %}">
                 <span class="menu-bullet"><span class="bullet bullet-dot"></span></span>
-                <span class="menu-title">Usuarios</span>
+                <span class="menu-title">Usuarios WhatsApp</span>
               </a>
             </div>
             <div class="menu-item">
@@ -85,6 +92,7 @@
             </div>
           </div>
         </div>
+        {% endif %}
       </div>
     </div>
   </div>
