@@ -52,6 +52,32 @@
       padding-bottom: 0.6rem;
     }
 
+    .app-mobile-sidebar-toggle {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      border: 1px solid #e6e9f2;
+      background: #ffffff;
+      color: #1f2437;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 6px 18px rgba(31, 36, 55, 0.08);
+    }
+
+    .app-mobile-sidebar-toggle:hover,
+    .app-mobile-sidebar-toggle:focus {
+      color: #1f2437;
+      background: #fff8d6;
+      border-color: #d7c45a;
+    }
+
+    @media (max-width: 991.98px) {
+      #kt_app_content_container {
+        overflow-x: hidden;
+      }
+    }
+
     @media (min-width: 992px) {
       #kt_app_sidebar.app-sidebar {
         position: fixed;

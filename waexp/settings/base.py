@@ -134,6 +134,18 @@ LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "dashboard"
 
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@expenses.otzi.cl")
+
 VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "otzi_whatsapp_secret")
 WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "").strip() or os.environ.get("WA_TEMPORARY_TOKEN", "").strip()
 WA_TEMPORARY_TOKEN = WA_ACCESS_TOKEN

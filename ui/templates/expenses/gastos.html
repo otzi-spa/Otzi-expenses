@@ -261,6 +261,7 @@
       </div>
     </div>
 
+    <div class="expenses-table-shell">
     <table id="expensesTable" class="table table-striped align-middle table-row-dashed fs-6 gy-5">
       <thead>
         <tr class="text-start text-muted fw-bold fs-7 text-uppercase gs-0">
@@ -435,6 +436,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
 
     {% for gasto in gastos %}
       {% for attachment in gasto.attachments.all %}
@@ -882,6 +884,18 @@
       color: #2c2609;
     }
 
+    .expenses-table-shell {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #expensesTable {
+      min-width: 1180px;
+      margin-bottom: 0;
+    }
+
     .expense-edit-modal .receipt-dropzone {
       cursor: pointer;
       transition: border-color 0.15s ease, background-color 0.15s ease;
@@ -890,6 +904,34 @@
     .expense-edit-modal .receipt-dropzone.is-dragover {
       border-color: var(--bs-primary) !important;
       background-color: var(--bs-light) !important;
+    }
+
+    @media (max-width: 991.98px) {
+      .app-toolbar .app-container {
+        align-items: flex-start !important;
+        gap: 1rem;
+        flex-direction: column;
+      }
+
+      .app-toolbar .page-heading {
+        font-size: 2rem !important;
+      }
+
+      .app-toolbar .ms-auto {
+        margin-left: 0 !important;
+        width: 100%;
+        display: grid !important;
+        grid-template-columns: 1fr;
+      }
+
+      .app-toolbar .ms-auto > .btn {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .card-body {
+        overflow-x: hidden;
+      }
     }
   </style>
 {% endblock %}

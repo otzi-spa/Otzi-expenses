@@ -5,7 +5,21 @@
   <div class="app-container container-fluid d-flex align-items-stretch justify-content-between" id="kt_app_header_container">
 
     <!--begin::Logo-->
-    <div class="d-flex align-items-center flex-grow-1 flex-lg-grow-0 me-lg-15">
+    <div class="d-flex align-items-center flex-grow-1 flex-lg-grow-0 me-lg-15 gap-3">
+      <button
+        type="button"
+        id="kt_app_sidebar_mobile_toggle"
+        class="app-mobile-sidebar-toggle d-lg-none"
+        aria-label="Abrir menú"
+      >
+        <span class="svg-icon svg-icon-2 m-0">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3 5H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M3 10H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M3 15H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+      </button>
       <a href="{% url 'dashboard' %}">
         <img alt="Logo" src="{% static 'theme/metronic/assets/media/logos/logo-simple.svg' %}" class="h-20px h-lg-30px" />
       </a>
