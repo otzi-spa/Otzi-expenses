@@ -406,7 +406,9 @@ def expense_detail(request, pk: int):
         before = {field: getattr(expense, field) for field in tracked_fields}
 
         requested_status = request.POST.get("status", expense.status)
-        if expense.status in {"approved", "rejected"}:
+        if expense.status in {"incomplete", "not_completed"}:
+            requested_status = expense.status
+        elif expense.status in {"approved", "rejected"}:
             requested_status = expense.status
         elif requested_status not in {"pending", "completed"}:
             requested_status = expense.status
@@ -477,8 +479,7 @@ def expense_detail(request, pk: int):
             else:
                 expense.expense_type = None
 
-            expense_type_other = request.POST.get("expense_type_other", "").strip()
-            expense.expense_type_other = expense_type_other or None
+            expense.expense_type_other = None
 
         notes = request.POST.get("notes", "")
         expense.notes = notes.strip()
@@ -645,7 +646,7 @@ def expense_create(request):
                 et_queryset = et_queryset.filter(policy_id=policy_id)
             et_obj = et_queryset.first()
             expense.expense_type = et_obj.name if et_obj else None
-        expense.expense_type_other = request.POST.get("expense_type_other", "").strip() or None
+        expense.expense_type_other = None
     expense.notes = request.POST.get("notes", "").strip()
 
     paid_at_raw = request.POST.get("paid_at", "").strip()

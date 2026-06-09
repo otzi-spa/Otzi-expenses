@@ -4,7 +4,8 @@ from decimal import Decimal, InvalidOperation
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
-from datetime import datetime, timezone as dt_timezone
+from django.utils import timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from django.core.files.base import ContentFile
 from expenses.models import (
     Expense,
@@ -12,7 +13,7 @@ from expenses.models import (
     AllowedSender,
     CategoryCatalog,
     ExpenseAuditLog,
-    ExpenseTypeCatalog,
+    WhatsAppExpenseConversation,
 )
 import hashlib, mimetypes
 
@@ -20,6 +21,75 @@ GRAPH_URL = "https://graph.facebook.com/v24.0"
 
 # estado por teléfono
 user_states = {}  # { phone: {"stage": "...", "expense_id": 123} }
+
+
+def _conversation_state(conversation):
+    return {
+        "stage": conversation.stage,
+        "expense_id": conversation.expense_id,
+        "conversation_id": conversation.id,
+        **(conversation.context or {}),
+    }
+
+
+def start_conversation(sender, phone, expense):
+    conversation = WhatsAppExpenseConversation.objects.create(
+        expense=expense,
+        sender=sender,
+        phone=phone,
+        stage="awaiting_doc_type",
+    )
+    user_states[phone] = _conversation_state(conversation)
+    return conversation
+
+
+def get_conversation_state(phone):
+    conversation = (
+        WhatsAppExpenseConversation.objects.filter(phone=phone, is_active=True)
+        .select_related("expense")
+        .order_by("-created_at")
+        .first()
+    )
+    if not conversation:
+        user_states.pop(phone, None)
+        return None
+    state = _conversation_state(conversation)
+    user_states[phone] = state
+    return state
+
+
+def update_conversation_state(phone, stage=None, **context_updates):
+    conversation = (
+        WhatsAppExpenseConversation.objects.filter(phone=phone, is_active=True)
+        .order_by("-created_at")
+        .first()
+    )
+    if not conversation:
+        return None
+    if stage is not None:
+        conversation.stage = stage
+    context = dict(conversation.context or {})
+    context.update(context_updates)
+    conversation.context = context
+    conversation.save(update_fields=["stage", "context", "updated_at"])
+    user_states[phone] = _conversation_state(conversation)
+    return conversation
+
+
+def finish_conversation(phone, stage="done"):
+    conversation = (
+        WhatsAppExpenseConversation.objects.filter(phone=phone, is_active=True)
+        .order_by("-created_at")
+        .first()
+    )
+    if not conversation:
+        return None
+    conversation.stage = stage
+    conversation.is_active = False
+    conversation.completed_at = timezone.now()
+    conversation.save(update_fields=["stage", "is_active", "completed_at", "updated_at"])
+    user_states[phone] = _conversation_state(conversation)
+    return conversation
 
 def norm(s: str) -> str:
     return (s or "").strip().lower()
@@ -45,31 +115,71 @@ def parse_nonnegative_decimal(text):
         return None
     return parsed if parsed >= 0 else None
 
-def get_active_expense_types():
-    return list(
-        ExpenseTypeCatalog.objects.filter(is_active=True, policy__isnull=True)
-        .order_by("name")
-        .values_list("name", flat=True)
+
+def stage_prompt(stage):
+    prompts = {
+        "awaiting_doc_type": (
+            "📄 ¿Qué tipo de documento es?\n"
+            "1) Boleta\n2) Factura\n3) Vale\n\nResponde con 1, 2 o 3."
+        ),
+        "awaiting_worksite": "🏗️ ¿Para qué obra/proyecto es este gasto?",
+        "awaiting_expense_scope": (
+            "🚘 ¿A qué corresponde este gasto?\n"
+            "1) Vehículo o equipo\n"
+            "2) Combustible\n"
+            "3) No corresponde a vehículo\n\n"
+            "Responde 1, 2 o 3."
+        ),
+        "awaiting_vehicle": "🚚 ¿Cuál es el vehículo o equipo?",
+        "awaiting_fuel_km": (
+            "🛣️ ¿Cuál era el kilometraje al momento del carguío?\n"
+            "Responde solo con el número, sin separador de miles."
+        ),
+        "awaiting_fuel_liters": (
+            "⛽ ¿Cuántos litros de combustible cargó?\n"
+            "Puedes usar coma o punto para los decimales."
+        ),
+        "awaiting_comment": "💬 Para finalizar, agrega un comentario sobre este gasto.",
+    }
+    return prompts.get(stage, "Continúa respondiendo la pregunta pendiente del gasto.")
+
+
+def request_resume_confirmation(phone_number_id, from_number, conversation):
+    if conversation.stage != "awaiting_resume":
+        update_conversation_state(
+            from_number,
+            stage="awaiting_resume",
+            resume_stage=conversation.stage,
+        )
+    resume_stage = (conversation.context or {}).get("resume_stage") or conversation.stage
+    send_whatsapp_reply(
+        phone_number_id,
+        from_number,
+        "⚠️ Tienes un gasto incompleto. Quedó pendiente este campo:\n\n"
+        f"{stage_prompt(resume_stage)}\n\n"
+        "¿Deseas seguir completándolo?\n1) Sí\n2) No",
     )
 
-def build_expense_type_prompt(expense_types):
-    lines = ["🧾 ¿Qué tipo de gasto es?"]
-    for idx, name in enumerate(expense_types, start=1):
-        lines.append(f"{idx}) {name}")
-    lines.append("")
-    lines.append("Responde con el número o el nombre de la opción.")
-    return "\n".join(lines)
 
-def parse_expense_type_choice(text, expense_types):
-    t = norm(text)
-    if not t:
-        return None
-    if t.isdigit():
-        idx = int(t)
-        if 1 <= idx <= len(expense_types):
-            return expense_types[idx - 1]
-    by_name = {norm(name): name for name in expense_types}
-    return by_name.get(t)
+def conversation_needs_resume_confirmation(conversation):
+    if conversation.stage == "awaiting_resume":
+        return False
+    inactivity_minutes = getattr(settings, "WHATSAPP_RESUME_AFTER_MINUTES", 30)
+    return conversation.updated_at <= timezone.now() - timedelta(minutes=inactivity_minutes)
+
+
+def reporter_label(sender):
+    full_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip()
+    return full_name or sender.phone
+
+
+def request_final_comment(phone_number_id, from_number):
+    update_conversation_state(from_number, stage="awaiting_comment")
+    send_whatsapp_reply(
+        phone_number_id,
+        from_number,
+        "💬 Para finalizar, agrega un comentario sobre este gasto.",
+    )
 
 
 def log_whatsapp_event(expense: Expense, action: str, changes=None, reason: str = ""):
@@ -122,8 +232,19 @@ def whatsapp_webhook(request):
                 "Si crees que es un error, contacta a un administrador.")
             return HttpResponse(status=200)
 
+        active_conversation = (
+            WhatsAppExpenseConversation.objects.filter(phone=from_number, is_active=True)
+            .select_related("expense")
+            .order_by("-created_at")
+            .first()
+        )
+
         # 1) Llega imagen: crear Expense y preguntar tipo documento
         if msg_type == "image":
+            if active_conversation:
+                request_resume_confirmation(phone_number_id, from_number, active_conversation)
+                return HttpResponse(status=200)
+
             image_id = message["image"]["id"]
             timestamp = int(message["timestamp"])
             msg_dt = datetime.fromtimestamp(timestamp, tz=dt_timezone.utc)
@@ -134,7 +255,7 @@ def whatsapp_webhook(request):
                 wa_sender=sender,
                 wa_media_id=image_id,
                 message_sent_at=msg_dt,
-                status="pending",
+                status="incomplete",
                 created_by_id=1,  # 👈 por ahora fijo
             )
             log_whatsapp_event(
@@ -149,7 +270,7 @@ def whatsapp_webhook(request):
             )
             download_media_attachment(image_id, exp)
 
-            user_states[from_number] = {"stage": "awaiting_doc_type", "expense_id": exp.id}
+            start_conversation(sender, from_number, exp)
 
             send_whatsapp_reply(
                 phone_number_id, from_number,
@@ -161,7 +282,12 @@ def whatsapp_webhook(request):
         # 2) Llega texto: avanzar flujo según stage
         if msg_type == "text":
             body = message["text"]["body"]
-            state = user_states.get(from_number)
+
+            if active_conversation and conversation_needs_resume_confirmation(active_conversation):
+                request_resume_confirmation(phone_number_id, from_number, active_conversation)
+                return HttpResponse(status=200)
+
+            state = get_conversation_state(from_number)
 
             if not state:
                 send_whatsapp_reply(phone_number_id, from_number,
@@ -171,6 +297,11 @@ def whatsapp_webhook(request):
 
             exp = Expense.objects.filter(id=state.get("expense_id")).first()
             if not exp:
+                WhatsAppExpenseConversation.objects.filter(phone=from_number, is_active=True).update(
+                    is_active=False,
+                    stage="missing_expense",
+                    completed_at=timezone.now(),
+                )
                 user_states.pop(from_number, None)
                 send_whatsapp_reply(phone_number_id, from_number,
                     "⚠️ No encontré el gasto en curso. Por favor envía la foto nuevamente."
@@ -178,6 +309,54 @@ def whatsapp_webhook(request):
                 return HttpResponse(status=200)
 
             stage = state.get("stage")
+
+            if stage == "awaiting_resume":
+                resume_choice = parse_choice(
+                    body,
+                    {
+                        "1": "yes",
+                        "si": "yes",
+                        "sí": "yes",
+                        "continuar": "yes",
+                        "2": "no",
+                        "no": "no",
+                        "cancelar": "no",
+                    },
+                )
+                if not resume_choice:
+                    send_whatsapp_reply(
+                        phone_number_id,
+                        from_number,
+                        "❌ Responde 1) Sí, para continuar, o 2) No, para dejar el gasto como no completado.",
+                    )
+                    return HttpResponse(status=200)
+
+                if resume_choice == "yes":
+                    resume_stage = state.get("resume_stage") or "awaiting_doc_type"
+                    update_conversation_state(from_number, stage=resume_stage)
+                    send_whatsapp_reply(
+                        phone_number_id,
+                        from_number,
+                        "Continuemos desde donde quedaste:\n\n" + stage_prompt(resume_stage),
+                    )
+                    return HttpResponse(status=200)
+
+                before_status = exp.status
+                exp.status = "not_completed"
+                exp.save(update_fields=["status"])
+                log_whatsapp_event(
+                    exp,
+                    action="status_changed",
+                    changes={"status": {"before": before_status, "after": exp.status}},
+                    reason="Usuario decidió no continuar el flujo de WhatsApp",
+                )
+                finish_conversation(from_number, stage="not_completed")
+                send_whatsapp_reply(
+                    phone_number_id,
+                    from_number,
+                    "El gasto quedó como No completado. Para registrar uno nuevo, envía nuevamente la foto.",
+                )
+                return HttpResponse(status=200)
 
             # A) Tipo documento
             if stage == "awaiting_doc_type":
@@ -201,7 +380,7 @@ def whatsapp_webhook(request):
                     reason="Usuario indicó tipo de documento",
                 )
 
-                user_states[from_number]["stage"] = "awaiting_worksite"
+                update_conversation_state(from_number, stage="awaiting_worksite")
                 send_whatsapp_reply(phone_number_id, from_number, "🏗️ ¿Para qué obra/proyecto es este gasto?")
                 return HttpResponse(status=200)
 
@@ -216,7 +395,7 @@ def whatsapp_webhook(request):
                     reason="Usuario indicó obra reportada",
                 )
 
-                user_states[from_number]["stage"] = "awaiting_expense_scope"
+                update_conversation_state(from_number, stage="awaiting_expense_scope")
                 send_whatsapp_reply(
                     phone_number_id, from_number,
                     "🚘 ¿A qué corresponde este gasto?\n"
@@ -268,18 +447,17 @@ def whatsapp_webhook(request):
                         ),
                     )
 
-                    user_states[from_number].update(
-                        {
-                            "stage": "awaiting_vehicle",
-                            "expense_scope": scope,
-                        }
+                    update_conversation_state(
+                        from_number,
+                        stage="awaiting_vehicle",
+                        expense_scope=scope,
                     )
                     send_whatsapp_reply(phone_number_id, from_number,
                         "🚚 ¿Cuál es el vehículo o equipo?"
                     )
                     return HttpResponse(status=200)
 
-                # No vehículo → tipo gasto
+                # No vehículo → comentario final
                 exp.is_vehicle = False
                 exp.vehicle = None
                 exp.fuel_km = None
@@ -292,17 +470,7 @@ def whatsapp_webhook(request):
                     reason="Usuario indicó que no es gasto de vehículo",
                 )
 
-                user_states[from_number]["stage"] = "awaiting_expense_type"
-                expense_types = get_active_expense_types()
-                if not expense_types:
-                    user_states[from_number]["stage"] = "done"
-                    send_whatsapp_reply(
-                        phone_number_id,
-                        from_number,
-                        "✅ Gasto registrado. No hay tipos de gasto activos en el mantenedor por ahora.",
-                    )
-                    return HttpResponse(status=200)
-                send_whatsapp_reply(phone_number_id, from_number, build_expense_type_prompt(expense_types))
+                request_final_comment(phone_number_id, from_number)
                 return HttpResponse(status=200)
 
             # D) Vehículo (texto libre)
@@ -317,7 +485,7 @@ def whatsapp_webhook(request):
                 )
 
                 if state.get("expense_scope") == "fuel":
-                    user_states[from_number]["stage"] = "awaiting_fuel_km"
+                    update_conversation_state(from_number, stage="awaiting_fuel_km")
                     send_whatsapp_reply(
                         phone_number_id,
                         from_number,
@@ -326,8 +494,7 @@ def whatsapp_webhook(request):
                     )
                     return HttpResponse(status=200)
 
-                user_states[from_number]["stage"] = "done"
-                send_whatsapp_reply(phone_number_id, from_number, "✅ Gasto registrado. ¡Gracias!")
+                request_final_comment(phone_number_id, from_number)
                 return HttpResponse(status=200)
 
             # E) Kilometraje para combustible
@@ -351,7 +518,7 @@ def whatsapp_webhook(request):
                     reason="Usuario indicó kilometraje de carguío",
                 )
 
-                user_states[from_number]["stage"] = "awaiting_fuel_liters"
+                update_conversation_state(from_number, stage="awaiting_fuel_liters")
                 send_whatsapp_reply(
                     phone_number_id,
                     from_number,
@@ -381,39 +548,40 @@ def whatsapp_webhook(request):
                     reason="Usuario indicó litros cargados",
                 )
 
-                user_states[from_number]["stage"] = "done"
-                send_whatsapp_reply(phone_number_id, from_number, "✅ Gasto de combustible registrado. ¡Gracias!")
+                request_final_comment(phone_number_id, from_number)
                 return HttpResponse(status=200)
 
-            # G) Tipo gasto
-            if stage == "awaiting_expense_type":
-                expense_types = get_active_expense_types()
-                if not expense_types:
-                    user_states[from_number]["stage"] = "done"
+            # G) Comentario final común a todos los flujos
+            if stage == "awaiting_comment":
+                comment = body.strip()
+                if not comment:
                     send_whatsapp_reply(
                         phone_number_id,
                         from_number,
-                        "✅ Gasto registrado. No hay tipos de gasto activos en el mantenedor por ahora.",
+                        "❌ El comentario no puede quedar vacío. Escribe un comentario para finalizar.",
                     )
                     return HttpResponse(status=200)
-                et = parse_expense_type_choice(body, expense_types)
-                if not et:
-                    send_whatsapp_reply(phone_number_id, from_number, "❌ Opción no válida.\n" + build_expense_type_prompt(expense_types))
-                    return HttpResponse(status=200)
 
-                exp.expense_type = et
-                exp.expense_type_other = None
-                exp.save(update_fields=["expense_type", "expense_type_other"])
+                before = exp.notes
+                user_comment = f"[{reporter_label(sender)}]\n{comment}"
+                exp.notes = f"{exp.notes.rstrip()}\n\n{user_comment}" if exp.notes.strip() else user_comment
+                exp.status = "pending"
+                exp.save(update_fields=["notes", "status"])
                 log_whatsapp_event(
                     exp,
                     action="whatsapp_update",
-                    changes={"expense_type": {"before": None, "after": et}},
-                    reason="Usuario indicó tipo de gasto",
+                    changes={
+                        "notes": {"before": before, "after": exp.notes},
+                        "status": {"before": "incomplete", "after": "pending"},
+                    },
+                    reason="Usuario agregó comentario final",
                 )
 
-                user_states[from_number]["stage"] = "done"
-                send_whatsapp_reply(phone_number_id, from_number,
-                    "✅ Gasto registrado. ¡Gracias!"
+                finish_conversation(from_number)
+                send_whatsapp_reply(
+                    phone_number_id,
+                    from_number,
+                    "✅ Gasto registrado con comentario. ¡Gracias!",
                 )
                 return HttpResponse(status=200)
 

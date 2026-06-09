@@ -473,6 +473,8 @@
       var labels = rows.map(function (row) { return row.label; });
       var values = rows.map(function (row) { return row.count || 0; });
       var colorByStatus = {
+        incomplete: "#f59e0b",
+        not_completed: "#6b7280",
         pending: "#f1c75b",
         completed: "#4ba3ff",
         approved: "#50cd89",

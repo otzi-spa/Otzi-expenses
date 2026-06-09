@@ -258,7 +258,7 @@
             </div>
             <div class="col-12">
               <div class="row g-2 expense-type-row">
-                <div class="col-12 col-md-6">
+                <div class="col-12">
                   <label class="form-label">Categoría Rindegastos</label>
                   <select name="expense_type_select" class="form-select js-searchable-select">
                     <option value="">Selecciona categoría Rindegastos</option>
@@ -266,10 +266,6 @@
                     <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}">{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                     {% endfor %}
                   </select>
-                </div>
-                <div class="col-12 col-md-6">
-                  <label class="form-label">Categoría Rindegastos (detalle)</label>
-                  <input type="text" name="expense_type_other" class="form-control" placeholder="Detalle opcional">
                 </div>
               </div>
             </div>
@@ -309,6 +305,8 @@
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
       <div class="d-flex flex-wrap align-items-center gap-2">
         <button type="button" class="btn btn-sm expenses-quick-filter active" data-expenses-filter="all">Todos</button>
+        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="incomplete">Incompletos</button>
+        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="not_completed">No completados</button>
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="pending">Pendiente</button>
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="completed">Parametrizado</button>
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="approved">Aprobado</button>
@@ -376,7 +374,11 @@
           <td>{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</td>
           <td>
             {% with gasto.get_status_display|default:gasto.status as status_label %}
-              {% if gasto.status == "completed" %}
+              {% if gasto.status == "incomplete" %}
+                <span class="badge badge-light-danger">{{ status_label }}</span>
+              {% elif gasto.status == "not_completed" %}
+                <span class="badge badge-light-dark">{{ status_label }}</span>
+              {% elif gasto.status == "completed" %}
                 <span class="badge badge-light-primary">{{ status_label }}</span>
               {% elif gasto.status == "approved" %}
                 <span class="badge badge-light-success">{{ status_label }}</span>
@@ -533,10 +535,20 @@
                 <fieldset class="row g-3" {% if not can_manage_expenses %}disabled{% endif %}>
                 <div class="col-md-4">
                   <label class="form-label">Estado</label>
-                  <select name="status" class="form-select" data-role="status-field" {% if gasto.status == "approved" or gasto.status == "rejected" %}disabled{% endif %}>
+                  <select name="status" class="form-select" data-role="status-field" {% if gasto.status == "incomplete" or gasto.status == "not_completed" or gasto.status == "approved" or gasto.status == "rejected" %}disabled{% endif %}>
+                    {% if gasto.status == "incomplete" %}
+                    <option value="incomplete" selected>Incompleto</option>
+                    {% elif gasto.status == "not_completed" %}
+                    <option value="not_completed" selected>No completado</option>
+                    {% endif %}
                     <option value="pending" {% if gasto.status == "pending" %}selected{% endif %}>Pendiente</option>
                     <option value="completed" {% if gasto.status == "completed" %}selected{% endif %}>Parametrizado</option>
                   </select>
+                  {% if gasto.status == "incomplete" %}
+                  <div class="form-text text-danger">El usuario aún no termina el flujo de WhatsApp.</div>
+                  {% elif gasto.status == "not_completed" %}
+                  <div class="form-text text-muted">El usuario decidió no continuar el flujo de WhatsApp.</div>
+                  {% endif %}
                 </div>
                 <div class="col-md-4">
                   <label class="form-label">Política</label>
@@ -632,7 +644,7 @@
                 </div>
                 <div class="col-12">
                   <div class="row g-2 expense-type-row {% if gasto.is_vehicle %}d-none{% endif %}">
-                    <div class="col-12 col-md-6">
+                    <div class="col-12">
                       <label class="form-label">Categoría Rindegastos</label>
                       <select name="expense_type_select" class="form-select js-searchable-select">
                         <option value="">Selecciona categoría Rindegastos</option>
@@ -640,10 +652,6 @@
                         <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" {% if gasto.expense_type == t.name and gasto.policy_catalog_id == t.policy_id %}selected{% endif %}>{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                         {% endfor %}
                       </select>
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <label class="form-label">Categoría Rindegastos (detalle)</label>
-                      <input type="text" name="expense_type_other" class="form-control" value="{{ gasto.expense_type_other|default:'' }}" placeholder="Detalle opcional">
                     </div>
                   </div>
                 </div>
@@ -1035,6 +1043,8 @@
         var text = (row.textContent || "").toLowerCase();
 
         if (activeQuickFilter === "pending" && status !== "pending") return false;
+        if (activeQuickFilter === "incomplete" && status !== "incomplete") return false;
+        if (activeQuickFilter === "not_completed" && status !== "not_completed") return false;
         if (activeQuickFilter === "completed" && status !== "completed") return false;
         if (activeQuickFilter === "approved" && status !== "approved") return false;
         if (activeQuickFilter === "without_receipt" && hasAttachment) return false;
@@ -1303,9 +1313,7 @@
             if (expenseTypeRow) {
               expenseTypeRow.classList.add('d-none');
               var expenseTypeFieldOn = expenseTypeRow.querySelector('select[name="expense_type_select"]');
-              var expenseTypeOtherOn = expenseTypeRow.querySelector('input[name="expense_type_other"]');
               if (expenseTypeFieldOn) expenseTypeFieldOn.value = '';
-              if (expenseTypeOtherOn) expenseTypeOtherOn.value = '';
             }
           } else {
             vehicleSection.classList.add('d-none');
@@ -1637,7 +1645,7 @@
             if (
               vehicleToggle &&
               vehicleToggle.checked &&
-              (field.name === 'expense_type_select' || field.name === 'expense_type_other')
+              field.name === 'expense_type_select'
             ) {
               return;
             }

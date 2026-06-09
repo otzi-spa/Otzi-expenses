@@ -190,4 +190,67 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "Obra (ingresada por usuario)")
         self.assertNotContains(response, 'name="worksite_standard"')
         self.assertNotContains(response, 'name="new_category_name"')
+        self.assertNotContains(response, 'name="expense_type_other"')
+        self.assertNotContains(response, "Categoría Rindegastos (detalle)")
         self.assertContains(response, 'name="supplier_rut"')
+
+
+class IncompleteExpenseStatusTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username="incomplete-admin@example.com",
+            email="incomplete-admin@example.com",
+            password="test",
+        )
+        self.client.force_login(self.user)
+        self.policy = CategoryCatalog.objects.update_or_create(
+            name="Oficina Central",
+            defaults={"external_id": "policy-office", "is_active": True},
+        )[0]
+        self.supplier = SupplierCatalog.objects.create(
+            name="Proveedor Incompleto",
+            rut="76.000.000-0",
+        )
+
+    def test_incomplete_expense_cannot_be_parametrized_from_modal(self):
+        expense = Expense.objects.create(
+            status="incomplete",
+            source="whatsapp",
+            category=self.policy.name,
+            supplier=self.supplier.name,
+            supplier_rut=self.supplier.rut,
+        )
+
+        self.client.post(
+            reverse("expense_detail", args=[expense.pk]),
+            {
+                "status": "completed",
+                "category_select": self.policy.name,
+                "supplier_select": self.supplier.name,
+                "supplier_rut": self.supplier.rut,
+            },
+        )
+
+        expense.refresh_from_db()
+        self.assertEqual(expense.status, "incomplete")
+
+    def test_not_completed_expense_cannot_be_parametrized_from_modal(self):
+        expense = Expense.objects.create(
+            status="not_completed",
+            source="whatsapp",
+            category=self.policy.name,
+            supplier=self.supplier.name,
+            supplier_rut=self.supplier.rut,
+        )
+
+        self.client.post(
+            reverse("expense_detail", args=[expense.pk]),
+            {
+                "status": "completed",
+                "category_select": self.policy.name,
+                "supplier_select": self.supplier.name,
+            },
+        )
+
+        expense.refresh_from_db()
+        self.assertEqual(expense.status, "not_completed")

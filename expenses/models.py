@@ -2,7 +2,14 @@ from django.db import models
 from django.conf import settings
 
 class Expense(models.Model):
-    STATUS = (("pending","Pendiente"),("completed","Parametrizado"),("approved","Aprobado"),("rejected","Rechazada"))
+    STATUS = (
+        ("incomplete", "Incompleto"),
+        ("not_completed", "No completado"),
+        ("pending", "Pendiente"),
+        ("completed", "Parametrizado"),
+        ("approved", "Aprobado"),
+        ("rejected", "Rechazada"),
+    )
 
     DOC_TYPE_CHOICES = [
         ("boleta", "Boleta"),
@@ -90,6 +97,34 @@ class AllowedSender(models.Model):
     def __str__(self):
         full = f"{self.first_name} {self.last_name}".strip()
         return full or self.phone
+
+
+class WhatsAppExpenseConversation(models.Model):
+    expense = models.OneToOneField(
+        Expense,
+        on_delete=models.CASCADE,
+        related_name="whatsapp_conversation",
+    )
+    sender = models.ForeignKey(
+        AllowedSender,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="whatsapp_conversations",
+    )
+    phone = models.CharField(max_length=50, db_index=True)
+    stage = models.CharField(max_length=64)
+    context = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.phone} - gasto #{self.expense_id} - {self.stage}"
 
 
 SYNC_STATUS = (
