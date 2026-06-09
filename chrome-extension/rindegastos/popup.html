@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Otzi a Rindegastos</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div>
+          <h1>Otzi a Rindegastos</h1>
+          <p>Selecciona una politica y una tanda para copiar al formulario.</p>
+        </div>
+      </header>
+
+      <section class="section">
+        <label class="file-picker">
+          <span>CSV exportado desde Expenses</span>
+          <input id="csvFileInput" type="file" accept=".csv,text/csv">
+        </label>
+        <div id="fileStatus" class="status">Sin archivo cargado.</div>
+      </section>
+
+      <section class="section">
+        <label for="policySelect">Politica</label>
+        <select id="policySelect" disabled>
+          <option value="">Carga un CSV</option>
+        </select>
+      </section>
+
+      <section class="section">
+        <label for="batchSelect">Tanda</label>
+        <select id="batchSelect" disabled>
+          <option value="">Sin tandas</option>
+        </select>
+      </section>
+
+      <section class="summary" id="summaryBox" hidden></section>
+
+      <section class="preview">
+        <div class="previewHeader">
+          <h2>Preview</h2>
+          <span id="previewCount">0 filas</span>
+        </div>
+        <div class="previewTableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Proveedor</th>
+                <th>Total</th>
+                <th>Fecha</th>
+              </tr>
+            </thead>
+            <tbody id="previewBody">
+              <tr><td colspan="4">Sin datos.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="warningsBox" class="warnings" hidden></section>
+
+      <footer class="actions">
+        <button id="copyButton" type="button" disabled>Copiar tanda</button>
+        <button id="fillButton" type="button" disabled>Rellenar Rindegastos</button>
+      </footer>
+
+      <div id="runStatus" class="runStatus" role="status"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

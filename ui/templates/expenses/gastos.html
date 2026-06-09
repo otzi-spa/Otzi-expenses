@@ -1,5 +1,5 @@
 {% extends "metronic/base_app.html" %}
-{% load tz expense_filters %}
+{% load tz l10n expense_filters %}
 {% block page_title %}Gastos{% endblock %}
 
 {% block toolbar %}
@@ -7,7 +7,7 @@
   <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
     <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Gastos</h1>
     <div class="d-flex align-items-center gap-2 ms-auto">
-      <a class="btn btn-excel-export d-inline-flex align-items-center gap-2" href="#">
+      <button type="button" class="btn btn-excel-export d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#rindegastosExportModal">
         <span class="svg-icon svg-icon-5">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M3 1.5H9.5L13 5V14.5H3V1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
@@ -16,8 +16,8 @@
             <path d="M8.7 8.65H11.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
           </svg>
         </span>
-        Exportar Excel
-      </a>
+        Exportar Rindegastos
+      </button>
       {% if can_manage_expenses %}
       <button type="button" class="btn btn-add-expense d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#newExpenseModal">
         <span class="svg-icon svg-icon-5">
@@ -49,6 +49,47 @@
 </div>
 {% endif %}
 
+<div class="modal fade" id="rindegastosExportModal" tabindex="-1" aria-labelledby="rindegastosExportModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="rindegastosExportModalLabel">Exportar Rindegastos</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="get" action="{% url 'expense_rindegastos_export' %}">
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label">Gastos a exportar</label>
+              <select name="status_scope" class="form-select">
+                <option value="completed" selected>Solo parametrizados</option>
+                <option value="all">Todos los estados</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Desde</label>
+              <input type="date" name="start_date" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Hasta</label>
+              <input type="date" name="end_date" class="form-control">
+            </div>
+            <div class="col-12">
+              <div class="alert alert-light-info mb-0">
+                El archivo incluye un resumen por política y luego las filas para copiar a Rindegastos. Los comprobantes no se exportan en este MVP.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Descargar CSV</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 {% if can_manage_expenses %}
 <div class="modal fade" id="splitExpenseModal" tabindex="-1" aria-labelledby="splitExpenseModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -77,6 +118,33 @@
 </div>
 {% endif %}
 
+<div class="modal fade" id="supplierQuickModal" tabindex="-1" aria-labelledby="supplierQuickModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="supplierQuickModalLabel">Agregar proveedor</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Proveedor</label>
+            <input type="text" class="form-control" id="supplierQuickName" placeholder="Nombre proveedor">
+          </div>
+          <div class="col-12">
+            <label class="form-label">RUT proveedor</label>
+            <input type="text" class="form-control" id="supplierQuickRut" placeholder="Ej: 76.123.456-7">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="supplierQuickSaveBtn">Agregar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% if can_manage_expenses %}
 <div class="modal fade expense-edit-modal" id="newExpenseModal" tabindex="-1" aria-labelledby="newExpenseModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -97,47 +165,60 @@
               </select>
             </div>
             <div class="col-md-6">
-              <label class="form-label">Categoría</label>
+              <label class="form-label">Política</label>
               <select name="category_select" class="form-select" data-required-param="true">
-                <option value="">Selecciona categoría</option>
+                <option value="">Selecciona política</option>
                 {% for c in categories_catalog %}
-                <option value="{{ c.name }}">{{ c.name }}</option>
+                <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-currency="{{ c.currency|default:'' }}">{{ c.name }}</option>
                 {% endfor %}
               </select>
+              <input type="hidden" name="category_policy_id" value="">
               <div class="input-group mt-2" id="newCategoryGroupCreate">
-                <input type="text" class="form-control create-option-input" id="newCategoryCreate" name="new_category_name" placeholder="Nueva categoría">
+                <input type="text" class="form-control create-option-input" id="newCategoryCreate" name="new_category_name" placeholder="Nueva política">
                 <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="category_select" data-source-input-id="newCategoryCreate">+</button>
               </div>
             </div>
             <div class="col-md-6">
+              <label class="form-label">Centro de Costo / Faena</label>
+              <select name="rindegastos_cost_center" class="form-select" data-rindegastos-field="Centro de Costo / Faena" data-required-param="true">
+                <option value="">Selecciona centro de costo/faena</option>
+              </select>
+            </div>
+            <div class="col-md-3">
               <label class="form-label">Monto</label>
               <input type="text" inputmode="decimal" name="amount" class="form-control" placeholder="0" data-required-param="true">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-3">
               <label class="form-label">Moneda</label>
-              <input type="text" name="currency" class="form-control" value="CLP" data-required-param="true">
+              <select name="currency" class="form-select" data-required-param="true" data-current-value="CLP">
+                <option value="CLP" selected>CLP</option>
+              </select>
             </div>
             <div class="col-md-6">
               <label class="form-label">Proveedor</label>
               <select name="supplier_select" class="form-select" data-required-param="true">
                 <option value="">Selecciona proveedor</option>
                 {% for s in suppliers_catalog %}
-                <option value="{{ s }}">{{ s }}</option>
+                <option value="{{ s.name }}" data-rut="{{ s.rut|default:'' }}">{{ s.name }}</option>
                 {% endfor %}
               </select>
               <div class="input-group mt-2" id="newSupplierGroupCreate">
-                <input type="text" class="form-control create-option-input" id="newSupplierCreate" name="new_supplier_name" placeholder="Nuevo proveedor">
-                <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="supplier_select" data-source-input-id="newSupplierCreate">+</button>
+                <input type="text" class="form-control create-option-input" name="new_supplier_name" placeholder="Nuevo proveedor" readonly>
+                <button class="btn btn-light-primary supplier-modal-btn" type="button">+</button>
               </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">RUT proveedor</label>
+              <input type="text" name="supplier_rut" class="form-control" placeholder="Ej: 76.123.456-7">
             </div>
             <div class="col-md-6">
               <label class="form-label">Obra</label>
               <div class="row g-2">
                 <div class="col-12 col-lg-6">
-                  <input type="text" name="worksite" class="form-control" placeholder="Obra reportada" data-required-param="true">
+                  <input type="text" name="worksite" class="form-control" placeholder="Obra reportada">
                 </div>
                 <div class="col-12 col-lg-6">
-                  <select name="worksite_standard" class="form-select" data-required-param="true">
+                  <select name="worksite_standard" class="form-select">
                     <option value="">Selecciona obra (estándar)</option>
                     {% for ws in worksites %}
                       <option value="{{ ws.name }}">{{ ws.name }}</option>
@@ -154,18 +235,19 @@
                 </div>
               </div>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
               <label class="form-label">Fecha del gasto</label>
               <input type="date" name="paid_at" class="form-control" data-required-param="true">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
               <label class="form-label">Tipo de documento</label>
-              <select name="document_type" class="form-select" data-required-param="true">
-                <option value="">-</option>
-                <option value="boleta">Boleta</option>
-                <option value="factura">Factura</option>
-                <option value="vale">Vale</option>
+              <select name="rindegastos_document_type" class="form-select" data-rindegastos-field="Tipo de Documento" data-required-param="true">
+                <option value="">Selecciona tipo de documento</option>
               </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Número de documento</label>
+              <input type="text" name="document_number" class="form-control" placeholder="Número de documento">
             </div>
             <div class="col-12">
               <label class="form-label">¿Es para vehículo?</label>
@@ -175,25 +257,27 @@
               </div>
             </div>
             <div class="col-12 vehicle-section d-none">
-              <label class="form-label">Vehículo</label>
+              <label class="form-label">Vehículo o equipo</label>
               <div class="row g-2">
-                <div class="col-12 col-lg-6">
-                  <input type="text" name="vehicle" class="form-control" placeholder="Vehículo reportado">
-                </div>
-                <div class="col-12 col-lg-6">
-                  <select name="vehicle_standard" class="form-select">
-                    <option value="">Selecciona vehículo (estándar)</option>
-                    {% for v in vehicles %}
-                      <option value="{{ v.name }}">{{ v.name }}</option>
-                    {% empty %}
-                      <option value="" disabled>No hay vehículos cargados</option>
-                    {% endfor %}
+                <div class="col-12">
+                  <select name="vehicle" class="form-select" data-rindegastos-field="Vehiculo o Equipo">
+                    <option value="">Selecciona vehículo o equipo</option>
                   </select>
+                  <div class="form-text">Las opciones se sincronizan desde la política seleccionada en Rindegastos.</div>
                 </div>
-                <div class="col-12 col-lg-6 offset-lg-6">
-                  <div class="input-group">
-                    <input type="text" name="new_vehicle_name" class="form-control create-option-input" id="newVehicleCreate" placeholder="Crear nuevo vehículo desde aquí">
-                    <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="vehicle_standard" data-source-input-id="newVehicleCreate">+</button>
+                <div class="col-12">
+                  <div class="row g-2 fuel-fields">
+                    <div class="col-12 col-md-6">
+                      <label class="form-label">Km carguío</label>
+                      <input type="number" min="0" step="0.01" name="fuel_km" class="form-control" placeholder="Kilometraje al cargar" disabled>
+                    </div>
+                    <div class="col-12 col-md-6">
+                      <label class="form-label">Litros combustible</label>
+                      <input type="number" min="0" step="0.001" name="fuel_liters" class="form-control" placeholder="Litros cargados" disabled>
+                    </div>
+                    <div class="col-12">
+                      <div class="form-text fuel-fields-help">Disponibles para la política Combustibles.</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -201,16 +285,16 @@
             <div class="col-12">
               <div class="row g-2 expense-type-row">
                 <div class="col-12 col-md-6">
-                  <label class="form-label">Tipo de gasto</label>
-                  <select name="expense_type_select" class="form-select" data-required-param="true">
-                    <option value="">Selecciona tipo de gasto</option>
+                  <label class="form-label">Categoría Rindegastos</label>
+                  <select name="expense_type_select" class="form-select">
+                    <option value="">Selecciona categoría Rindegastos</option>
                     {% for t in expense_types_catalog %}
-                    <option value="{{ t.name }}">{{ t.name }}</option>
+                    <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}">{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                     {% endfor %}
                   </select>
                 </div>
                 <div class="col-12 col-md-6">
-                  <label class="form-label">Tipo de gasto (detalle)</label>
+                  <label class="form-label">Categoría Rindegastos (detalle)</label>
                   <input type="text" name="expense_type_other" class="form-control" placeholder="Detalle opcional">
                 </div>
               </div>
@@ -270,7 +354,7 @@
           <th data-sortable="true">Usuario que reporta</th>
           <th data-sortable="true">Proveedor</th>
           <th data-sortable="true">Monto</th>
-          <th data-sortable="true">Categoría</th>
+          <th data-sortable="true">Política</th>
           <th data-sortable="true">Obra</th>
           <th data-sortable="true">Vehículo</th>
           <th data-sortable="true">Status</th>
@@ -480,7 +564,7 @@
                   </div>
                 </div>
                 {% endif %}
-                <fieldset {% if not can_manage_expenses %}disabled{% endif %}>
+                <fieldset class="row g-3" {% if not can_manage_expenses %}disabled{% endif %}>
                 <div class="col-md-6">
                   <label class="form-label">Estado</label>
                   <select name="status" class="form-select" data-role="status-field" {% if gasto.status == "approved" or gasto.status == "rejected" %}disabled{% endif %}>
@@ -489,49 +573,60 @@
                   </select>
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label">Categoría</label>
+                  <label class="form-label">Política</label>
                   <select name="category_select" class="form-select" data-required-param="true">
-                    <option value="">Selecciona categoría</option>
-                    {% if gasto.category %}<option value="{{ gasto.category }}" selected>{{ gasto.category }}</option>{% endif %}
+                    <option value="">Selecciona política</option>
                     {% for c in categories_catalog %}
-                    <option value="{{ c.name }}">{{ c.name }}</option>
+                    <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-currency="{{ c.currency|default:'' }}" {% if gasto.category == c.name %}selected{% endif %}>{{ c.name }}</option>
                     {% endfor %}
                   </select>
+                  <input type="hidden" name="category_policy_id" value="{{ gasto.policy_catalog_id|default:'' }}">
                   <div class="input-group mt-2" id="newCategoryGroup{{ gasto.pk }}">
-                    <input type="text" class="form-control create-option-input" id="newCategory{{ gasto.pk }}" name="new_category_name" placeholder="Nueva categoría">
+                    <input type="text" class="form-control create-option-input" id="newCategory{{ gasto.pk }}" name="new_category_name" placeholder="Nueva política">
                     <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="category_select" data-source-input-id="newCategory{{ gasto.pk }}">+</button>
                   </div>
                 </div>
                 <div class="col-md-6">
+                  <label class="form-label">Centro de Costo / Faena</label>
+                  <select name="rindegastos_cost_center" class="form-select" data-rindegastos-field="Centro de Costo / Faena" data-current-value="{{ gasto.rindegastos_cost_center|default:'' }}" data-required-param="true">
+                    <option value="">Selecciona centro de costo/faena</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
                   <label class="form-label">Monto</label>
                   <input type="text" inputmode="decimal" name="amount" class="form-control" value="{{ gasto.amount|cl_currency }}" placeholder="0" data-required-param="true">
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-3">
                   <label class="form-label">Moneda</label>
-                  <input type="text" name="currency" class="form-control" value="{{ gasto.currency|default_if_none:'' }}" data-required-param="true">
+                  <select name="currency" class="form-select" data-required-param="true" data-current-value="{{ gasto.currency|default:'CLP' }}">
+                    <option value="{{ gasto.currency|default:'CLP' }}" selected>{{ gasto.currency|default:'CLP' }}</option>
+                  </select>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Proveedor</label>
                   <select name="supplier_select" class="form-select" data-required-param="true">
                     <option value="">Selecciona proveedor</option>
-                    {% if gasto.supplier %}<option value="{{ gasto.supplier }}" selected>{{ gasto.supplier }}</option>{% endif %}
                     {% for s in suppliers_catalog %}
-                    <option value="{{ s }}">{{ s }}</option>
+                    <option value="{{ s.name }}" data-rut="{{ s.rut|default:'' }}" {% if gasto.supplier == s.name %}selected{% endif %}>{{ s.name }}</option>
                     {% endfor %}
                   </select>
                   <div class="input-group mt-2" id="newSupplierGroup{{ gasto.pk }}">
-                    <input type="text" class="form-control create-option-input" id="newSupplier{{ gasto.pk }}" name="new_supplier_name" placeholder="Nuevo proveedor">
-                    <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="supplier_select" data-source-input-id="newSupplier{{ gasto.pk }}">+</button>
+                    <input type="text" class="form-control create-option-input" name="new_supplier_name" placeholder="Nuevo proveedor" readonly>
+                    <button class="btn btn-light-primary supplier-modal-btn" type="button">+</button>
                   </div>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">RUT proveedor</label>
+                  <input type="text" name="supplier_rut" class="form-control" value="{{ gasto.supplier_rut|default:'' }}" placeholder="Ej: 76.123.456-7">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Obra</label>
                   <div class="row g-2">
                     <div class="col-12 col-lg-6">
-                      <input type="text" name="worksite" class="form-control" value="{{ gasto.worksite|default:'' }}" placeholder="Obra reportada" data-required-param="true">
+                      <input type="text" name="worksite" class="form-control" value="{{ gasto.worksite|default:'' }}" placeholder="Obra reportada">
                     </div>
                     <div class="col-12 col-lg-6">
-                      <select name="worksite_standard" class="form-select" data-required-param="true">
+                      <select name="worksite_standard" class="form-select">
                         <option value="">Selecciona obra (estándar)</option>
                         {% for ws in worksites %}
                           <option value="{{ ws.name }}" {% if gasto.worksite_standard == ws.name %}selected{% endif %}>{{ ws.name }}</option>
@@ -548,18 +643,19 @@
                     </div>
                   </div>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-4">
                   <label class="form-label">Fecha del gasto</label>
                   <input type="date" name="paid_at" class="form-control" value="{{ gasto.paid_at|date:'Y-m-d' }}" data-required-param="true">
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-4">
                   <label class="form-label">Tipo de documento</label>
-                  <select name="document_type" class="form-select" data-required-param="true">
-                    <option value="">-</option>
-                    {% for val, label in gasto.DOC_TYPE_CHOICES %}
-                      <option value="{{ val }}" {% if gasto.document_type == val %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
+                  <select name="rindegastos_document_type" class="form-select" data-rindegastos-field="Tipo de Documento" data-current-value="{{ gasto.rindegastos_document_type|default:'' }}" data-required-param="true">
+                    <option value="">Selecciona tipo de documento</option>
                   </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Número de documento</label>
+                  <input type="text" name="document_number" class="form-control" value="{{ gasto.document_number|default:'' }}" placeholder="Número de documento">
                 </div>
                 <div class="col-12">
                   <label class="form-label">¿Es para vehículo?</label>
@@ -569,25 +665,27 @@
                   </div>
                 </div>
                 <div class="col-12 vehicle-section {% if not gasto.is_vehicle %}d-none{% endif %}">
-                  <label class="form-label">Vehículo</label>
+                  <label class="form-label">Vehículo o equipo</label>
                   <div class="row g-2">
-                    <div class="col-12 col-lg-6">
-                      <input type="text" name="vehicle" class="form-control" value="{{ gasto.vehicle|default:'' }}" placeholder="Vehículo reportado">
-                    </div>
-                    <div class="col-12 col-lg-6">
-                      <select name="vehicle_standard" class="form-select">
-                        <option value="">Selecciona vehículo (estándar)</option>
-                        {% for v in vehicles %}
-                          <option value="{{ v.name }}" {% if gasto.vehicle == v.name %}selected{% endif %}>{{ v.name }}</option>
-                        {% empty %}
-                          <option value="" disabled>No hay vehículos cargados</option>
-                        {% endfor %}
+                    <div class="col-12">
+                      <select name="vehicle" class="form-select" data-rindegastos-field="Vehiculo o Equipo" data-current-value="{{ gasto.vehicle|default:'' }}">
+                        <option value="">Selecciona vehículo o equipo</option>
                       </select>
+                      <div class="form-text">Las opciones se sincronizan desde Rindegastos. Un valor de WhatsApp se conserva hasta que selecciones otro.</div>
                     </div>
-                    <div class="col-12 col-lg-6 offset-lg-6">
-                      <div class="input-group">
-                        <input type="text" name="new_vehicle_name" class="form-control create-option-input" id="newVehicle{{ gasto.pk }}" placeholder="Crear nuevo vehículo desde aquí">
-                        <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="vehicle_standard" data-source-input-id="newVehicle{{ gasto.pk }}">+</button>
+                    <div class="col-12">
+                      <div class="row g-2 fuel-fields">
+                        <div class="col-12 col-md-6">
+                          <label class="form-label">Km carguío</label>
+                          <input type="number" min="0" step="0.01" name="fuel_km" class="form-control" value="{{ gasto.fuel_km|unlocalize|default_if_none:'' }}" placeholder="Kilometraje al cargar" {% if gasto.category != "Combustibles" %}disabled{% endif %}>
+                        </div>
+                        <div class="col-12 col-md-6">
+                          <label class="form-label">Litros combustible</label>
+                          <input type="number" min="0" step="0.001" name="fuel_liters" class="form-control" value="{{ gasto.fuel_liters|unlocalize|default_if_none:'' }}" placeholder="Litros cargados" {% if gasto.category != "Combustibles" %}disabled{% endif %}>
+                        </div>
+                        <div class="col-12">
+                          <div class="form-text fuel-fields-help">Disponibles para la política Combustibles.</div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -595,17 +693,16 @@
                 <div class="col-12">
                   <div class="row g-2 expense-type-row {% if gasto.is_vehicle %}d-none{% endif %}">
                     <div class="col-12 col-md-6">
-                      <label class="form-label">Tipo de gasto</label>
-                      <select name="expense_type_select" class="form-select" data-required-param="true">
-                        <option value="">Selecciona tipo de gasto</option>
-                        {% if gasto.expense_type %}<option value="{{ gasto.expense_type }}" selected>{{ gasto.expense_type }}</option>{% endif %}
+                      <label class="form-label">Categoría Rindegastos</label>
+                      <select name="expense_type_select" class="form-select">
+                        <option value="">Selecciona categoría Rindegastos</option>
                         {% for t in expense_types_catalog %}
-                        <option value="{{ t.name }}">{{ t.name }}</option>
+                        <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" {% if gasto.expense_type == t.name and gasto.policy_catalog_id == t.policy_id %}selected{% endif %}>{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                         {% endfor %}
                       </select>
                     </div>
                     <div class="col-12 col-md-6">
-                      <label class="form-label">Tipo de gasto (detalle)</label>
+                      <label class="form-label">Categoría Rindegastos (detalle)</label>
                       <input type="text" name="expense_type_other" class="form-control" value="{{ gasto.expense_type_other|default:'' }}" placeholder="Detalle opcional">
                     </div>
                   </div>
@@ -938,6 +1035,7 @@
 
 {% block extra_js %}
   {{ block.super }}
+  {{ rindegastos_field_options|json_script:"rindegastos-field-options-data" }}
   <script>
     document.addEventListener("DOMContentLoaded", function () {
       var expensesTable = document.getElementById("expensesTable");
@@ -946,6 +1044,21 @@
       var activeQuickFilter = "all";
       var searchTerm = "";
       var sortState = { columnIndex: 0, direction: "desc" };
+      var rindegastosFieldOptionsEl = document.getElementById("rindegastos-field-options-data");
+      var rindegastosFieldOptions = [];
+      var activeSupplierForm = null;
+      if (rindegastosFieldOptionsEl) {
+        try {
+          rindegastosFieldOptions = JSON.parse(rindegastosFieldOptionsEl.textContent || "[]");
+        } catch (error) {
+          rindegastosFieldOptions = [];
+        }
+      }
+      var supplierQuickModalEl = document.getElementById('supplierQuickModal');
+      var supplierQuickModal = supplierQuickModalEl ? bootstrap.Modal.getOrCreateInstance(supplierQuickModalEl) : null;
+      var supplierQuickName = document.getElementById('supplierQuickName');
+      var supplierQuickRut = document.getElementById('supplierQuickRut');
+      var supplierQuickSaveBtn = document.getElementById('supplierQuickSaveBtn');
 
       function getCellSortValue(row, index) {
         var cell = row.cells[index];
@@ -1039,6 +1152,16 @@
       }
       renderExpenseRows();
 
+      var rindegastosExportModal = document.getElementById("rindegastosExportModal");
+      var rindegastosExportForm = rindegastosExportModal ? rindegastosExportModal.querySelector("form") : null;
+      if (rindegastosExportForm) {
+        rindegastosExportForm.addEventListener("submit", function () {
+          window.setTimeout(function () {
+            bootstrap.Modal.getOrCreateInstance(rindegastosExportModal).hide();
+          }, 150);
+        });
+      }
+
       // Avoid nested modals: close edit modal first, then open history.
       document.querySelectorAll('.open-history-btn').forEach(function (button) {
         button.addEventListener('click', function () {
@@ -1118,11 +1241,38 @@
         });
       });
 
+      function ensureSelectOption(select, value, label, attributes) {
+        if (!select || !value) return null;
+        var option = Array.from(select.options).find(function (item) { return item.value === value; });
+        if (!option) {
+          option = document.createElement('option');
+          option.value = value;
+          option.textContent = label || value;
+          select.appendChild(option);
+        }
+        Object.keys(attributes || {}).forEach(function (key) {
+          option.setAttribute(key, attributes[key]);
+        });
+        return option;
+      }
+
       var forms = document.querySelectorAll('form[action*="/expenses/"]');
       forms.forEach(function (form) {
         var vehicleToggle = form.querySelector('.vehicle-toggle');
         var vehicleSection = form.querySelector('.vehicle-section');
+        var fuelKmInput = form.querySelector('input[name="fuel_km"]');
+        var fuelLitersInput = form.querySelector('input[name="fuel_liters"]');
+        var fuelFieldsHelp = form.querySelector('.fuel-fields-help');
         var expenseTypeRow = form.querySelector('.expense-type-row');
+        var policySelect = form.querySelector('select[name="category_select"]');
+        var policyIdInput = form.querySelector('input[name="category_policy_id"]');
+        var currencySelect = form.querySelector('select[name="currency"]');
+        var expenseTypeSelect = form.querySelector('select[name="expense_type_select"]');
+        var supplierSelect = form.querySelector('select[name="supplier_select"]');
+        var supplierRutInput = form.querySelector('input[name="supplier_rut"]');
+        var newSupplierInput = form.querySelector('input[name="new_supplier_name"]');
+        var supplierModalBtn = form.querySelector('.supplier-modal-btn');
+        var rindegastosFieldSelects = Array.from(form.querySelectorAll('select[data-rindegastos-field]'));
         var statusField = form.querySelector('[data-role="status-field"]');
         var receiptDropzone = form.querySelector('.receipt-dropzone');
         var receiptInput = form.querySelector('.receipt-file-input');
@@ -1137,9 +1287,28 @@
             .replace(/'/g, '&#039;');
         }
 
+        function normalizedPolicyName() {
+          return policySelect ? (policySelect.value || '').trim().toLowerCase() : '';
+        }
+
+        function isFuelPolicy() {
+          return normalizedPolicyName() === 'combustibles';
+        }
+
         function toggleVehicleSection() {
           if (!vehicleToggle || !vehicleSection) return;
-          if (vehicleToggle.checked) {
+          var fuelPolicy = isFuelPolicy();
+          var hasReportedFuelData = Boolean(
+            (fuelKmInput && (fuelKmInput.value || '').trim()) ||
+            (fuelLitersInput && (fuelLitersInput.value || '').trim())
+          );
+          if (fuelPolicy) {
+            vehicleToggle.checked = true;
+            vehicleToggle.disabled = true;
+          } else {
+            vehicleToggle.disabled = false;
+          }
+          if (vehicleToggle.checked || hasReportedFuelData) {
             vehicleSection.classList.remove('d-none');
             if (expenseTypeRow) {
               expenseTypeRow.classList.add('d-none');
@@ -1150,12 +1319,27 @@
             }
           } else {
             vehicleSection.classList.add('d-none');
-            var vehicleInput = vehicleSection.querySelector('input[name="vehicle"]');
-            var vehicleSelect = vehicleSection.querySelector('select[name="vehicle_standard"]');
-            if (vehicleInput) vehicleInput.value = '';
-            if (vehicleSelect) vehicleSelect.value = '';
+            var vehicleSelect = vehicleSection.querySelector('select[name="vehicle"]');
+            if (vehicleSelect) {
+              vehicleSelect.value = '';
+              vehicleSelect.setAttribute('data-current-value', '');
+            }
             if (expenseTypeRow) {
               expenseTypeRow.classList.remove('d-none');
+            }
+          }
+
+          [fuelKmInput, fuelLitersInput].forEach(function (field) {
+            if (!field) return;
+            field.disabled = !fuelPolicy;
+          });
+          if (fuelFieldsHelp) {
+            if (fuelPolicy) {
+              fuelFieldsHelp.textContent = 'Obligatorios para la política Combustibles.';
+            } else if (hasReportedFuelData) {
+              fuelFieldsHelp.textContent = 'Datos reportados por WhatsApp. Selecciona Combustibles para editarlos.';
+            } else {
+              fuelFieldsHelp.textContent = 'Disponibles para la política Combustibles.';
             }
           }
         }
@@ -1163,6 +1347,129 @@
         if (vehicleToggle) {
           vehicleToggle.addEventListener('change', toggleVehicleSection);
           toggleVehicleSection();
+        }
+
+        function selectedPolicyMeta() {
+          if (!policySelect) return { id: '', currency: '' };
+          var selectedOption = policySelect.options[policySelect.selectedIndex];
+          return {
+            id: selectedOption ? (selectedOption.getAttribute('data-policy-id') || '').trim() : '',
+            currency: selectedOption ? (selectedOption.getAttribute('data-currency') || '').trim() : '',
+            name: selectedOption ? (selectedOption.value || '').trim() : '',
+          };
+        }
+
+        function updateCurrencySelect(currency) {
+          if (!currencySelect) return;
+          var currentValue = currency || currencySelect.value || currencySelect.getAttribute('data-current-value') || 'CLP';
+          currencySelect.innerHTML = '';
+          ensureSelectOption(currencySelect, currentValue, currentValue);
+          currencySelect.value = currentValue;
+          currencySelect.setAttribute('data-current-value', currentValue);
+        }
+
+        function filterExpenseTypesByPolicy(selectedPolicyId) {
+          if (!expenseTypeSelect) return;
+          var currentValue = expenseTypeSelect.value;
+          var currentVisible = false;
+          Array.from(expenseTypeSelect.options).forEach(function (option) {
+            if (!option.value) {
+              option.hidden = false;
+              return;
+            }
+            var policyId = (option.getAttribute('data-policy-id') || '').trim();
+            var visible = !policyId || !selectedPolicyId || policyId === selectedPolicyId;
+            option.hidden = !visible;
+            if (visible && option.value === currentValue) {
+              currentVisible = true;
+            }
+          });
+          if (currentValue && !currentVisible) {
+            expenseTypeSelect.value = '';
+          }
+        }
+
+        function populateRindegastosFieldSelect(select, selectedPolicyId) {
+          var fieldName = select.getAttribute('data-rindegastos-field') || '';
+          var placeholder = select.options[0] ? select.options[0].textContent : 'Selecciona una opción';
+          var currentValue = select.value || select.getAttribute('data-current-value') || '';
+          var currentOption = select.options[select.selectedIndex];
+          var preserveMissingValue = !select.hasAttribute('data-options-initialized') ||
+            Boolean(currentOption && currentOption.getAttribute('data-source') === 'reported');
+          select.innerHTML = '';
+
+          var placeholderOption = document.createElement('option');
+          placeholderOption.value = '';
+          placeholderOption.textContent = placeholder;
+          select.appendChild(placeholderOption);
+
+          var options = rindegastosFieldOptions.filter(function (item) {
+            return String(item.policy_id || '') === String(selectedPolicyId || '') && item.field_name === fieldName;
+          });
+          var seenValues = {};
+          options.forEach(function (item) {
+            if (!item.value || seenValues[item.value]) return;
+            seenValues[item.value] = true;
+            var option = document.createElement('option');
+            option.value = item.value;
+            option.textContent = item.value;
+            if (item.code) option.setAttribute('data-code', item.code);
+            select.appendChild(option);
+          });
+
+          if (currentValue && !seenValues[currentValue] && preserveMissingValue) {
+            var reportedOption = document.createElement('option');
+            reportedOption.value = currentValue;
+            reportedOption.textContent = currentValue + ' (reportado por WhatsApp)';
+            reportedOption.setAttribute('data-source', 'reported');
+            select.appendChild(reportedOption);
+          }
+          if (currentValue && (seenValues[currentValue] || preserveMissingValue)) {
+            select.value = currentValue;
+          } else {
+            select.value = '';
+          }
+          select.setAttribute('data-current-value', select.value);
+          select.setAttribute('data-options-initialized', 'true');
+        }
+
+        function updatePolicyDependentFields() {
+          var meta = selectedPolicyMeta();
+          if (policyIdInput) policyIdInput.value = meta.id;
+          updateCurrencySelect(meta.currency);
+          filterExpenseTypesByPolicy(meta.id);
+          rindegastosFieldSelects.forEach(function (select) {
+            populateRindegastosFieldSelect(select, meta.id);
+          });
+          toggleVehicleSection();
+        }
+
+        if (policySelect) {
+          policySelect.addEventListener('change', updatePolicyDependentFields);
+          updatePolicyDependentFields();
+        } else {
+          updateCurrencySelect('');
+        }
+
+        function syncSupplierRut() {
+          if (!supplierSelect || !supplierRutInput) return;
+          var selectedOption = supplierSelect.options[supplierSelect.selectedIndex];
+          var rut = selectedOption ? (selectedOption.getAttribute('data-rut') || '').trim() : '';
+          if (rut) supplierRutInput.value = rut;
+        }
+
+        if (supplierSelect) {
+          supplierSelect.addEventListener('change', syncSupplierRut);
+          syncSupplierRut();
+        }
+
+        if (supplierModalBtn) {
+          supplierModalBtn.addEventListener('click', function () {
+            activeSupplierForm = form;
+            if (supplierQuickName) supplierQuickName.value = '';
+            if (supplierQuickRut) supplierQuickRut.value = '';
+            if (supplierQuickModal) supplierQuickModal.show();
+          });
         }
 
         function updateReceiptFeedback() {
@@ -1334,27 +1641,26 @@
             }
             var value = (field.value || '').trim();
             if (!value) {
-              var wrapper = field.closest('.col-12, .col-md-6, .col-md-12');
+              var wrapper = field.closest('.col-12, .col-md-3, .col-md-4, .col-md-6, .col-md-12');
               var label = wrapper ? wrapper.querySelector('.form-label') : null;
               missing.push(label ? label.textContent.trim() : field.name);
             }
           });
 
           if (vehicleToggle && vehicleToggle.checked) {
-            var vehicleField = form.querySelector('input[name="vehicle"]');
-            var vehicleStdField = form.querySelector('select[name="vehicle_standard"]');
+            var vehicleField = form.querySelector('select[name="vehicle"]');
             var vehicleValue = ((vehicleField && vehicleField.value) || '').trim();
-            var vehicleStdValue = ((vehicleStdField && vehicleStdField.value) || '').trim();
-            if (!vehicleValue && !vehicleStdValue) {
+            if (!vehicleValue) {
               missing.push('Vehículo');
             }
           }
 
-          if (receiptDropzone) {
-            var existingCount = parseInt(receiptDropzone.getAttribute('data-existing-count') || '0', 10);
-            var newCount = (receiptInput && receiptInput.files) ? receiptInput.files.length : 0;
-            if ((existingCount + newCount) === 0) {
-              missing.push('Comprobante');
+          if (isFuelPolicy()) {
+            if (!fuelKmInput || !(fuelKmInput.value || '').trim()) {
+              missing.push('Km carguío');
+            }
+            if (!fuelLitersInput || !(fuelLitersInput.value || '').trim()) {
+              missing.push('Litros combustible');
             }
           }
 
@@ -1364,6 +1670,24 @@
           }
         });
       });
+
+      if (supplierQuickSaveBtn) {
+        supplierQuickSaveBtn.addEventListener('click', function () {
+          if (!activeSupplierForm || !supplierQuickName) return;
+          var name = (supplierQuickName.value || '').trim();
+          var rut = supplierQuickRut ? (supplierQuickRut.value || '').trim() : '';
+          if (!name) return;
+
+          var supplierSelect = activeSupplierForm.querySelector('select[name="supplier_select"]');
+          var supplierRutInput = activeSupplierForm.querySelector('input[name="supplier_rut"]');
+          var newSupplierInput = activeSupplierForm.querySelector('input[name="new_supplier_name"]');
+          var option = ensureSelectOption(supplierSelect, name, name, { 'data-rut': rut });
+          if (option && supplierSelect) supplierSelect.value = name;
+          if (supplierRutInput) supplierRutInput.value = rut;
+          if (newSupplierInput) newSupplierInput.value = name;
+          if (supplierQuickModal) supplierQuickModal.hide();
+        });
+      }
     });
   </script>
 {% endblock %}

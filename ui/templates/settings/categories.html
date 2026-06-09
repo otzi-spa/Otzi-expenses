@@ -1,11 +1,11 @@
 {% extends "metronic/base_app.html" %}
 {% load tz %}
-{% block page_title %}Categorías{% endblock %}
+{% block page_title %}Políticas{% endblock %}
 
 {% block toolbar %}
 <div class="app-toolbar py-3">
   <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
-    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Categorías</h1>
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Políticas</h1>
   </div>
 </div>
 {% endblock %}
@@ -13,9 +13,26 @@
 {% block content %}
 <div class="row g-6">
   <div class="col-12 col-xl-4">
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="card-title">Sincronizar Rindegastos</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="sync_rindegastos">
+          <div class="col-12 text-muted">
+            Trae políticas, categorías, impuestos, campos extra y usuarios desde la API de Rindegastos.
+          </div>
+          <div class="col-12">
+            <button class="btn btn-light-primary w-100" type="submit">Sincronizar catálogos</button>
+          </div>
+        </form>
+      </div>
+    </div>
     <div class="card h-100">
       <div class="card-header">
-        <h3 class="card-title">Agregar categoría</h3>
+        <h3 class="card-title">Agregar política</h3>
       </div>
       <div class="card-body">
         <form method="post" class="row g-3">
@@ -36,9 +53,9 @@
   <div class="col-12 col-xl-8">
     <div class="card h-100">
       <div class="card-header">
-        <h3 class="card-title">Categorías registradas</h3>
+        <h3 class="card-title">Políticas registradas</h3>
         <div class="card-toolbar">
-          <input type="text" class="form-control w-300px" id="categoriesSearch" placeholder="Buscar categoría">
+          <input type="text" class="form-control w-300px" id="categoriesSearch" placeholder="Buscar política">
         </div>
       </div>
       <div class="card-body">
@@ -47,7 +64,10 @@
             <thead>
               <tr>
                 <th>Nombre</th>
+                <th>ID Rindegastos</th>
+                <th>Moneda</th>
                 <th>Estado</th>
+                <th>Sync</th>
                 <th>Creado</th>
                 <th></th>
               </tr>
@@ -56,6 +76,8 @@
               {% for c in categories %}
               <tr>
                 <td>{{ c.name }}</td>
+                <td class="text-muted">{{ c.external_id|default:"-" }}</td>
+                <td>{{ c.currency|default:"-" }}</td>
                 <td>
                   {% if c.is_active %}
                     <span class="badge badge-light-success">Activo</span>
@@ -63,6 +85,7 @@
                     <span class="badge badge-light">Inactivo</span>
                   {% endif %}
                 </td>
+                <td class="text-muted">{{ c.last_synced_at|localtime|date:"d/m/Y H:i"|default:"Manual" }}</td>
                 <td class="text-muted">{{ c.created_at|localtime|date:"d/m/Y H:i" }}</td>
                 <td class="text-end">
                   <button class="btn btn-sm btn-light-primary" type="button" data-bs-toggle="modal" data-bs-target="#editCategoryModal{{ c.id }}">Editar</button>
@@ -77,7 +100,7 @@
                 </td>
               </tr>
               {% empty %}
-              <tr><td colspan="4" class="text-muted">Sin categorías cargadas.</td></tr>
+              <tr><td colspan="7" class="text-muted">Sin políticas cargadas.</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -92,7 +115,7 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Editar categoría</h5>
+        <h5 class="modal-title">Editar política</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <form method="post">

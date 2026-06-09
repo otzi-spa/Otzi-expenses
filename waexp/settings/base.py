@@ -107,6 +107,10 @@ REST_FRAMEWORK = {
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "")
 
+RINDEGASTOS_API_BASE_URL = os.environ.get("RINDEGASTOS_API_BASE_URL", "https://api.rindegastos.com/v1").rstrip("/")
+RINDEGASTOS_API_TOKEN = os.environ.get("RINDEGASTOS_API_TOKEN", "").strip()
+RINDEGASTOS_API_TIMEOUT = int(os.environ.get("RINDEGASTOS_API_TIMEOUT", "20"))
+
 AZURE_ACCOUNT_NAME = os.environ.get("AZURE_ACCOUNT_NAME")
 AZURE_ACCOUNT_KEY = os.environ.get("AZURE_ACCOUNT_KEY")
 AZURE_CONTAINER = os.environ.get("AZURE_CONTAINER", "waexp-media")

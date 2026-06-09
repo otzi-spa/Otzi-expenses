@@ -1,9 +1,14 @@
 from functools import wraps
+import base64
+import csv
+import hashlib
+import hmac
 import secrets
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
-from django.http import FileResponse
+from django.conf import settings
+from django.http import FileResponse, HttpResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth import get_user_model
 from accounts.models import UserAuditLog
@@ -14,7 +19,7 @@ from .models import (
     CategoryCatalog,
     ExpenseAuditLog,
     ExpenseTypeCatalog,
-    VehicleCatalog,
+    RindegastosExpenseFieldCatalog,
     WorksiteCatalog,
     SYNC_STATUS,
 )
@@ -22,11 +27,27 @@ from django.contrib.auth.decorators import login_required
 from django.utils.dateparse import parse_date
 from django.contrib import messages
 from django.utils import timezone
+from .rindegastos_client import RindegastosAPIError
+from .rindegastos_sync import RindegastosCatalogSync
 
 
 ALLOWED_RECEIPT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 ALLOWED_RECEIPT_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 MAX_RECEIPT_SIZE_BYTES = 10 * 1024 * 1024
+
+RINDEGASTOS_POLICIES = [
+    "Departamento Maquinaria",
+    "Oficina Central",
+    "Combustibles",
+    "Autopista de Antofagasta 2025",
+    "Vialidad Choapa COMA",
+    "Vialidad Puerto Aysén",
+    "Vialidad Coyhaique",
+    "Vialidad Cochrane Lechada",
+    "Embalse los Aromos III",
+    "Curimon III",
+    "Autopista de Antofagasta 2026",
+]
 
 
 @login_required
@@ -41,7 +62,13 @@ def dashboard(request):
     context = {
         "status_choices": Expense.STATUS,
         "worksites": WorksiteCatalog.objects.filter(is_active=True).order_by("name"),
-        "vehicles": VehicleCatalog.objects.filter(is_active=True).order_by("name"),
+        "vehicles": (
+            Expense.objects.exclude(vehicle__isnull=True)
+            .exclude(vehicle="")
+            .values_list("vehicle", flat=True)
+            .distinct()
+            .order_by("vehicle")
+        ),
         "categories": categories,
     }
     return render(request, "dashboard.html", context)
@@ -52,7 +79,6 @@ def _settings_menu_urls():
         "settings",
         "settings_system_users",
         "settings_users",
-        "settings_vehicles",
         "settings_worksites",
         "settings_categories",
         "settings_expense_types",
@@ -98,6 +124,26 @@ def _normalize_empty(value):
     return text or None
 
 
+def _is_fuel_policy(policy_name):
+    return (policy_name or "").strip().casefold() == "combustibles"
+
+
+def _parse_optional_decimal(raw_value):
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    normalized = value.replace(" ", "").replace(",", ".")
+    return Decimal(normalized)
+
+
+def _ensure_rindegastos_policies():
+    for policy_name in RINDEGASTOS_POLICIES:
+        policy, _ = CategoryCatalog.objects.get_or_create(name=policy_name, defaults={"is_active": True})
+        if not policy.is_active:
+            policy.is_active = True
+            policy.save(update_fields=["is_active"])
+
+
 def _field_value_for_compare(value):
     if isinstance(value, Decimal):
         return str(value)
@@ -139,26 +185,73 @@ def _missing_fields_for_parametrization(expense, has_receipt=None):
     if not _normalize_empty(expense.currency):
         missing.append("Moneda")
     if not _normalize_empty(expense.category) or expense.category == "Sin Categoria":
-        missing.append("Categoría")
+        missing.append("Política")
     if not _normalize_empty(expense.supplier):
         missing.append("Proveedor")
-    if not _normalize_empty(expense.worksite):
-        missing.append("Obra reportada")
-    if not _normalize_empty(expense.worksite_standard):
-        missing.append("Obra parametrizada")
+    if not _normalize_empty(expense.rindegastos_cost_center):
+        missing.append("Centro de Costo / Faena")
     if not expense.paid_at:
         missing.append("Fecha del gasto")
-    if not _normalize_empty(expense.document_type):
+    if not _normalize_empty(expense.rindegastos_document_type):
         missing.append("Tipo de documento")
-    if not expense.is_vehicle and not _normalize_empty(expense.expense_type):
-        missing.append("Tipo de gasto")
     if expense.is_vehicle and not _normalize_empty(expense.vehicle):
         missing.append("Vehículo")
-    if has_receipt is None:
-        has_receipt = expense.attachments.exists()
-    if not has_receipt:
-        missing.append("Comprobante")
+    if _is_fuel_policy(expense.category):
+        if expense.fuel_km is None:
+            missing.append("Km carguío")
+        if expense.fuel_liters is None:
+            missing.append("Litros combustible")
     return missing
+
+
+def _rindegastos_field_options_payload():
+    target_names = {"Centro de Costo / Faena", "Tipo de Documento", "Vehiculo o Equipo"}
+    payload = []
+    fields = (
+        RindegastosExpenseFieldCatalog.objects.filter(is_active=True, name__in=target_names)
+        .select_related("policy")
+        .order_by("policy__name", "name")
+    )
+    for field in fields:
+        for option in field.options or []:
+            if isinstance(option, dict):
+                value = (option.get("Value") or option.get("Name") or option.get("value") or "").strip()
+                code = (option.get("Code") or option.get("code") or "").strip()
+            else:
+                value = str(option).strip()
+                code = ""
+            if not value:
+                continue
+            payload.append(
+                {
+                    "policy_id": field.policy_id,
+                    "field_name": field.name,
+                    "value": value,
+                    "code": code,
+                }
+            )
+    return payload
+
+
+def _supplier_options_payload():
+    suppliers = {}
+    rows = (
+        Expense.objects.exclude(supplier__isnull=True)
+        .exclude(supplier="")
+        .values("supplier", "supplier_rut")
+        .order_by("supplier", "-id")
+    )
+    for row in rows:
+        name = (row["supplier"] or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        rut = (row["supplier_rut"] or "").strip()
+        if key not in suppliers:
+            suppliers[key] = {"name": name, "rut": rut}
+        elif rut and not suppliers[key]["rut"]:
+            suppliers[key]["rut"] = rut
+    return sorted(suppliers.values(), key=lambda item: item["name"].casefold())
 
 
 def _validate_receipt_file(uploaded_file):
@@ -260,13 +353,19 @@ def expense_detail(request, pk: int):
             "currency",
             "category",
             "supplier",
+            "supplier_rut",
             "worksite",
             "worksite_standard",
+            "rindegastos_cost_center",
             "notes",
             "paid_at",
             "document_type",
+            "rindegastos_document_type",
+            "document_number",
             "is_vehicle",
             "vehicle",
+            "fuel_km",
+            "fuel_liters",
             "expense_type",
             "expense_type_other",
         ]
@@ -306,7 +405,7 @@ def expense_detail(request, pk: int):
                 cat_obj.is_active = True
                 cat_obj.save(update_fields=["is_active"])
             expense.category = cat_obj.name
-            messages.success(request, f"Categoría '{cat_obj.name}' creada desde el modal.")
+            messages.success(request, f"Política '{cat_obj.name}' creada desde el modal.")
         elif category_select and category_select != "__new__":
             cat_obj, _ = CategoryCatalog.objects.get_or_create(name=category_select, defaults={"is_active": True})
             if not cat_obj.is_active:
@@ -327,6 +426,8 @@ def expense_detail(request, pk: int):
             expense.supplier = supplier_select
         else:
             expense.supplier = supplier_legacy.strip()
+
+        expense.supplier_rut = request.POST.get("supplier_rut", "").strip() or None
 
         worksite_raw = request.POST.get("worksite", "")
         expense.worksite = worksite_raw.strip()
@@ -352,29 +453,22 @@ def expense_detail(request, pk: int):
 
         document_type = request.POST.get("document_type", "").strip()
         expense.document_type = document_type or None
+        expense.rindegastos_cost_center = request.POST.get("rindegastos_cost_center", "").strip() or None
+        expense.rindegastos_document_type = (
+            request.POST.get("rindegastos_document_type", "").strip() or document_type or None
+        )
+        expense.document_number = request.POST.get("document_number", "").strip() or None
 
         is_vehicle_raw = request.POST.get("is_vehicle")
-        expense.is_vehicle = bool(is_vehicle_raw)
+        expense.is_vehicle = bool(is_vehicle_raw) or _is_fuel_policy(expense.category)
 
-        vehicle_raw = request.POST.get("vehicle", "")
-        new_vehicle_name = request.POST.get("new_vehicle_name", "").strip()
-        if new_vehicle_name:
-            vh, _ = VehicleCatalog.objects.get_or_create(name=new_vehicle_name, defaults={"is_active": True})
-            if not vh.is_active:
-                vh.is_active = True
-                vh.save(update_fields=["is_active"])
-            messages.success(request, f"Vehículo '{vh.name}' creado desde el modal.")
-            if not request.POST.get("vehicle_standard", "").strip():
-                request.POST = request.POST.copy()
-                request.POST["vehicle_standard"] = vh.name
-
-        vehicle_std = request.POST.get("vehicle_standard", "").strip()
-        if vehicle_std:
-            vh_std_obj, _ = VehicleCatalog.objects.get_or_create(name=vehicle_std, defaults={"is_active": True})
-            if not vh_std_obj.is_active:
-                vh_std_obj.is_active = True
-                vh_std_obj.save(update_fields=["is_active"])
-        expense.vehicle = (vehicle_std or vehicle_raw.strip()) if expense.is_vehicle else None
+        expense.vehicle = (request.POST.get("vehicle", "").strip() or None) if expense.is_vehicle else None
+        if _is_fuel_policy(expense.category):
+            try:
+                expense.fuel_km = _parse_optional_decimal(request.POST.get("fuel_km"))
+                expense.fuel_liters = _parse_optional_decimal(request.POST.get("fuel_liters"))
+            except InvalidOperation:
+                messages.error(request, "Km carguío o litros combustible tienen un valor inválido.")
 
         expense_type_select = request.POST.get("expense_type_select", "").strip()
         if expense.is_vehicle:
@@ -382,10 +476,14 @@ def expense_detail(request, pk: int):
             expense.expense_type_other = None
         else:
             if expense_type_select:
-                et_obj = ExpenseTypeCatalog.objects.filter(
+                et_queryset = ExpenseTypeCatalog.objects.filter(
                     is_active=True,
                     name=expense_type_select,
-                ).first()
+                )
+                policy_id = request.POST.get("category_policy_id", "").strip()
+                if policy_id:
+                    et_queryset = et_queryset.filter(policy_id=policy_id)
+                et_obj = et_queryset.first()
                 expense.expense_type = et_obj.name if et_obj else None
             else:
                 expense.expense_type = None
@@ -537,6 +635,8 @@ def expense_create(request):
     elif supplier_select and supplier_select != "__new__":
         expense.supplier = supplier_select
 
+    expense.supplier_rut = request.POST.get("supplier_rut", "").strip() or None
+
     expense.worksite = request.POST.get("worksite", "").strip()
 
     new_worksite_name = request.POST.get("new_worksite_name", "").strip()
@@ -559,27 +659,23 @@ def expense_create(request):
     expense.worksite_standard = worksite_std or None
 
     expense.document_type = request.POST.get("document_type", "").strip() or None
+    expense.rindegastos_cost_center = request.POST.get("rindegastos_cost_center", "").strip() or None
+    expense.rindegastos_document_type = (
+        request.POST.get("rindegastos_document_type", "").strip() or expense.document_type or None
+    )
+    expense.document_number = request.POST.get("document_number", "").strip() or None
 
-    expense.is_vehicle = bool(request.POST.get("is_vehicle"))
-    vehicle_raw = request.POST.get("vehicle", "").strip()
-    new_vehicle_name = request.POST.get("new_vehicle_name", "").strip()
-    if new_vehicle_name:
-        vh, _ = VehicleCatalog.objects.get_or_create(name=new_vehicle_name, defaults={"is_active": True})
-        if not vh.is_active:
-            vh.is_active = True
-            vh.save(update_fields=["is_active"])
-        messages.success(request, f"Vehículo '{vh.name}' creado desde el modal.")
-        if not request.POST.get("vehicle_standard", "").strip():
-            request.POST = request.POST.copy()
-            request.POST["vehicle_standard"] = vh.name
-
-    vehicle_std = request.POST.get("vehicle_standard", "").strip()
-    if vehicle_std:
-        vh_std_obj, _ = VehicleCatalog.objects.get_or_create(name=vehicle_std, defaults={"is_active": True})
-        if not vh_std_obj.is_active:
-            vh_std_obj.is_active = True
-            vh_std_obj.save(update_fields=["is_active"])
-    expense.vehicle = (vehicle_std or vehicle_raw) if expense.is_vehicle else None
+    expense.is_vehicle = bool(request.POST.get("is_vehicle")) or _is_fuel_policy(expense.category)
+    expense.vehicle = (request.POST.get("vehicle", "").strip() or None) if expense.is_vehicle else None
+    if _is_fuel_policy(expense.category):
+        try:
+            expense.fuel_km = _parse_optional_decimal(request.POST.get("fuel_km"))
+            expense.fuel_liters = _parse_optional_decimal(request.POST.get("fuel_liters"))
+        except InvalidOperation:
+            messages.error(request, "Km carguío o litros combustible tienen un valor inválido.")
+    else:
+        expense.fuel_km = None
+        expense.fuel_liters = None
 
     expense_type_select = request.POST.get("expense_type_select", "").strip()
     if expense.is_vehicle:
@@ -587,10 +683,14 @@ def expense_create(request):
         expense.expense_type_other = None
     else:
         if expense_type_select:
-            et_obj = ExpenseTypeCatalog.objects.filter(
+            et_queryset = ExpenseTypeCatalog.objects.filter(
                 is_active=True,
                 name=expense_type_select,
-            ).first()
+            )
+            policy_id = request.POST.get("category_policy_id", "").strip()
+            if policy_id:
+                et_queryset = et_queryset.filter(policy_id=policy_id)
+            et_obj = et_queryset.first()
             expense.expense_type = et_obj.name if et_obj else None
         expense.expense_type_other = request.POST.get("expense_type_other", "").strip() or None
     expense.notes = request.POST.get("notes", "").strip()
@@ -658,6 +758,7 @@ def expense_create(request):
 @login_required
 def expense_list(request):
     can_manage_expenses = _can_manage_expenses(request.user)
+    _ensure_rindegastos_policies()
     gastos = (
         Expense.objects.select_related("created_by", "wa_sender")
         .prefetch_related("attachments", "audit_logs")
@@ -668,6 +769,11 @@ def expense_list(request):
         for s in AllowedSender.objects.filter(is_deleted=False)
     }
     for gasto in gastos:
+        gasto.policy_catalog_id = None
+        if gasto.category:
+            policy_catalog = CategoryCatalog.objects.filter(name=gasto.category).only("id").first()
+            if policy_catalog:
+                gasto.policy_catalog_id = policy_catalog.id
         if not gasto.wa_sender and gasto.wa_sender_phone:
             sender = senders_by_phone.get(gasto.wa_sender_phone)
             if sender:
@@ -685,20 +791,149 @@ def expense_list(request):
         "gastos": gastos,
         "can_manage_expenses": can_manage_expenses,
         "status_choices": Expense.STATUS,
-        "vehicles": VehicleCatalog.objects.filter(is_active=True).order_by("name"),
         "worksites": WorksiteCatalog.objects.filter(is_active=True).order_by("name"),
-        "categories_catalog": CategoryCatalog.objects.filter(is_active=True).order_by("name"),
-        "expense_types_catalog": ExpenseTypeCatalog.objects.filter(is_active=True).order_by("name"),
-        "suppliers_catalog": (
-            Expense.objects.exclude(supplier__isnull=True)
-            .exclude(supplier="")
-            .values_list("supplier", flat=True)
-            .distinct()
-            .order_by("supplier")
+        "categories_catalog": CategoryCatalog.objects.filter(is_active=True).order_by(
+            "-external_id",
+            "name",
         ),
+        "expense_types_catalog": ExpenseTypeCatalog.objects.filter(is_active=True).select_related("policy").order_by(
+            "policy__name",
+            "group_name",
+            "name",
+        ),
+        "rindegastos_field_options": _rindegastos_field_options_payload(),
+        "suppliers_catalog": _supplier_options_payload(),
         "settings_menu_urls": _settings_menu_urls(),
     }
     return render(request, "expenses/gastos.html", context)
+
+
+def _reporter_label(expense):
+    if expense.wa_sender:
+        full_name = f"{expense.wa_sender.first_name or ''} {expense.wa_sender.last_name or ''}".strip()
+        return full_name or expense.wa_sender.phone or ""
+    if hasattr(expense, "wa_sender_name"):
+        return expense.wa_sender_name
+    if expense.created_by:
+        return expense.created_by.get_full_name() or expense.created_by.email or ""
+    return expense.wa_sender_phone or ""
+
+
+def _export_amount(amount):
+    if amount is None:
+        return ""
+    if amount == amount.to_integral():
+        return int(amount)
+    return amount
+
+
+def _expense_export_id(expense_id):
+    key = str(settings.SECRET_KEY).encode("utf-8")
+    message = f"expense:{expense_id}".encode("utf-8")
+    digest = hmac.new(key, message, hashlib.sha256).digest()
+    token = base64.b32encode(digest[:5]).decode("ascii").rstrip("=")
+    return f"OTZ-{token}"
+
+
+def _rindegastos_note(note, export_id):
+    clean_note = (note or "").strip()
+    suffix = f"Gasto id {export_id}"
+    if not clean_note:
+        return suffix
+    return f"{clean_note}. {suffix}"
+
+
+@login_required
+def expense_rindegastos_export(request):
+    status_scope = request.GET.get("status_scope", "completed")
+    start_date = parse_date(request.GET.get("start_date", "") or "")
+    end_date = parse_date(request.GET.get("end_date", "") or "")
+
+    queryset = (
+        Expense.objects.select_related("created_by", "wa_sender")
+        .prefetch_related("attachments")
+        .order_by("category", "paid_at", "id")
+    )
+    if status_scope != "all":
+        queryset = queryset.filter(status="completed")
+    if start_date:
+        queryset = queryset.filter(paid_at__gte=start_date)
+    if end_date:
+        queryset = queryset.filter(paid_at__lte=end_date)
+
+    expenses = list(queryset)
+    policy_by_name = {
+        policy.name: policy
+        for policy in CategoryCatalog.objects.filter(name__in={expense.category for expense in expenses if expense.category})
+    }
+    summary = {}
+    for expense in expenses:
+        policy = expense.category or "Sin Politica"
+        summary[policy] = summary.get(policy, 0) + 1
+
+    today = timezone.localdate().isoformat()
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="rindegastos-export-{today}.csv"'
+    response.write("\ufeff")
+    writer = csv.writer(response)
+
+    writer.writerow(["politica", "cantidad"])
+    for policy, count in sorted(summary.items()):
+        writer.writerow([policy, count])
+
+    writer.writerow([])
+    writer.writerow(
+        [
+            "politica",
+            "expenses_id",
+            "proveedor",
+            "total",
+            "moneda",
+            "impuesto",
+            "valor_impuesto",
+            "otros_impuestos",
+            "fecha",
+            "centro_costo_faena",
+            "nombre_quien_rinde",
+            "numero_documento",
+            "rut_proveedor",
+            "tipo_documento",
+            "vehiculo_equipo",
+            "km_carguio",
+            "litros_combustible",
+            "categoria_rindegastos",
+            "nota",
+        ]
+    )
+
+    for expense in expenses:
+        export_id = _expense_export_id(expense.id)
+        policy = policy_by_name.get(expense.category)
+        writer.writerow(
+            [
+                expense.category or "",
+                export_id,
+                expense.supplier or "",
+                _export_amount(expense.amount),
+                (policy.currency if policy and policy.currency else expense.currency) or "CLP",
+                "",
+                "",
+                "",
+                f"{expense.paid_at.day}/{expense.paid_at.month}/{expense.paid_at.year}" if expense.paid_at else "",
+                expense.rindegastos_cost_center or "",
+                _reporter_label(expense),
+                expense.document_number or "",
+                expense.supplier_rut or "",
+                expense.rindegastos_document_type or "",
+                expense.vehicle or "",
+                _export_amount(expense.fuel_km),
+                _export_amount(expense.fuel_liters),
+                expense.expense_type or "",
+                _rindegastos_note(expense.notes, export_id),
+            ]
+        )
+
+    return response
 
 
 @login_required
@@ -826,7 +1061,9 @@ def expense_action(request, pk: int, action: str):
                 category=expense.category,
                 worksite=expense.worksite,
                 worksite_standard=expense.worksite_standard,
+                rindegastos_cost_center=expense.rindegastos_cost_center,
                 supplier=expense.supplier,
+                supplier_rut=expense.supplier_rut,
                 paid_at=expense.paid_at,
                 notes=expense.notes,
                 wa_message_id=None,
@@ -837,8 +1074,12 @@ def expense_action(request, pk: int, action: str):
                 created_by=expense.created_by,
                 message_sent_at=expense.message_sent_at,
                 document_type=expense.document_type,
+                rindegastos_document_type=expense.rindegastos_document_type,
+                document_number=expense.document_number,
                 is_vehicle=expense.is_vehicle,
                 vehicle=expense.vehicle,
+                fuel_km=expense.fuel_km,
+                fuel_liters=expense.fuel_liters,
                 expense_type=expense.expense_type,
                 expense_type_other=expense.expense_type_other,
                 split_group_id=group_id,
@@ -1120,63 +1361,6 @@ def settings_users(request):
 
 @login_required
 @admin_required
-def settings_vehicles(request):
-    if request.method == "POST":
-        action = request.POST.get("action")
-
-        if action == "add_vehicle":
-            name = request.POST.get("name", "").strip()
-            external_id = request.POST.get("external_id", "").strip() or None
-            sync_status = request.POST.get("sync_status", "manual")
-            if not name:
-                messages.error(request, "El nombre del vehículo/equipo es obligatorio.")
-            else:
-                VehicleCatalog.objects.create(
-                    name=name,
-                    external_id=external_id,
-                    sync_status=sync_status,
-                    last_synced_at=timezone.now(),
-                )
-                messages.success(request, "Vehículo/equipo agregado.")
-
-        elif action == "toggle_vehicle":
-            v = get_object_or_404(VehicleCatalog, pk=request.POST.get("vehicle_id"))
-            v.is_active = not v.is_active
-            v.save(update_fields=["is_active"])
-            messages.info(request, f"Vehículo '{v.name}' {'activado' if v.is_active else 'desactivado'}.")
-
-        elif action == "sync_vehicle":
-            v = get_object_or_404(VehicleCatalog, pk=request.POST.get("vehicle_id"))
-            v.sync_status = request.POST.get("sync_status", "synced")
-            v.last_synced_at = timezone.now()
-            v.save(update_fields=["sync_status", "last_synced_at"])
-            messages.success(request, f"Vehículo '{v.name}' marcado como sincronizado.")
-        elif action == "update_vehicle":
-            v = get_object_or_404(VehicleCatalog, pk=request.POST.get("vehicle_id"))
-            name = request.POST.get("name", "").strip()
-            if not name:
-                messages.error(request, "El nombre del vehículo/equipo es obligatorio.")
-            else:
-                v.name = name
-                v.external_id = request.POST.get("external_id", "").strip() or None
-                sync_status = request.POST.get("sync_status", "").strip()
-                if sync_status in dict(SYNC_STATUS):
-                    v.sync_status = sync_status
-                v.save(update_fields=["name", "external_id", "sync_status"])
-                messages.success(request, "Vehículo/equipo actualizado.")
-
-        return redirect("settings_vehicles")
-
-    context = {
-        "vehicles": VehicleCatalog.objects.order_by("name"),
-        "sync_status_choices": dict(SYNC_STATUS),
-        "settings_menu_urls": _settings_menu_urls(),
-    }
-    return render(request, "settings/vehicles.html", context)
-
-
-@login_required
-@admin_required
 def settings_worksites(request):
     if request.method == "POST":
         action = request.POST.get("action")
@@ -1237,34 +1421,48 @@ def settings_worksites(request):
 def settings_categories(request):
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "add_category":
+        if action == "sync_rindegastos":
+            try:
+                stats = RindegastosCatalogSync().sync_all()
+                messages.success(
+                    request,
+                    "Sincronización Rindegastos completada: "
+                    f"{stats['policies']} políticas, "
+                    f"{stats['categories']} categorías, "
+                    f"{stats['taxes']} impuestos, "
+                    f"{stats['expense_fields']} campos extra, "
+                    f"{stats['users']} usuarios.",
+                )
+            except RindegastosAPIError as exc:
+                messages.error(request, f"No se pudo sincronizar Rindegastos: {exc}")
+        elif action == "add_category":
             name = request.POST.get("name", "").strip()
             if not name:
-                messages.error(request, "El nombre de la categoría es obligatorio.")
+                messages.error(request, "El nombre de la política es obligatorio.")
             else:
                 obj, created = CategoryCatalog.objects.get_or_create(name=name, defaults={"is_active": True})
                 if not created and not obj.is_active:
                     obj.is_active = True
                     obj.save(update_fields=["is_active"])
-                messages.success(request, f"Categoría '{obj.name}' guardada.")
+                messages.success(request, f"Política '{obj.name}' guardada.")
         elif action == "toggle_category":
             category = get_object_or_404(CategoryCatalog, pk=request.POST.get("category_id"))
             category.is_active = not category.is_active
             category.save(update_fields=["is_active"])
-            messages.info(request, f"Categoría '{category.name}' {'activada' if category.is_active else 'desactivada'}.")
+            messages.info(request, f"Política '{category.name}' {'activada' if category.is_active else 'desactivada'}.")
         elif action == "update_category":
             category = get_object_or_404(CategoryCatalog, pk=request.POST.get("category_id"))
             name = request.POST.get("name", "").strip()
             if not name:
-                messages.error(request, "El nombre de la categoría es obligatorio.")
+                messages.error(request, "El nombre de la política es obligatorio.")
             else:
                 exists = CategoryCatalog.objects.exclude(pk=category.pk).filter(name=name).exists()
                 if exists:
-                    messages.error(request, "Ya existe una categoría con ese nombre.")
+                    messages.error(request, "Ya existe una política con ese nombre.")
                 else:
                     category.name = name
                     category.save(update_fields=["name"])
-                    messages.success(request, "Categoría actualizada.")
+                    messages.success(request, "Política actualizada.")
         return redirect("settings_categories")
 
     context = {
@@ -1282,38 +1480,45 @@ def settings_expense_types(request):
         if action == "add_expense_type":
             name = request.POST.get("name", "").strip()
             if not name:
-                messages.error(request, "El nombre del tipo de gasto es obligatorio.")
+                messages.error(request, "El nombre de la categoría Rindegastos es obligatorio.")
             else:
-                obj, created = ExpenseTypeCatalog.objects.get_or_create(name=name, defaults={"is_active": True})
+                obj, created = ExpenseTypeCatalog.objects.get_or_create(
+                    policy=None,
+                    name=name,
+                    defaults={"is_active": True},
+                )
                 if not created and not obj.is_active:
                     obj.is_active = True
                     obj.save(update_fields=["is_active"])
-                messages.success(request, f"Tipo de gasto '{obj.name}' guardado.")
+                messages.success(request, f"Categoría Rindegastos '{obj.name}' guardada.")
         elif action == "toggle_expense_type":
             expense_type = get_object_or_404(ExpenseTypeCatalog, pk=request.POST.get("expense_type_id"))
             expense_type.is_active = not expense_type.is_active
             expense_type.save(update_fields=["is_active"])
             messages.info(
                 request,
-                f"Tipo de gasto '{expense_type.name}' {'activado' if expense_type.is_active else 'desactivado'}.",
+                f"Categoría Rindegastos '{expense_type.name}' {'activado' if expense_type.is_active else 'desactivado'}.",
             )
         elif action == "update_expense_type":
             expense_type = get_object_or_404(ExpenseTypeCatalog, pk=request.POST.get("expense_type_id"))
             name = request.POST.get("name", "").strip()
             if not name:
-                messages.error(request, "El nombre del tipo de gasto es obligatorio.")
+                messages.error(request, "El nombre de la categoría Rindegastos es obligatorio.")
             else:
-                exists = ExpenseTypeCatalog.objects.exclude(pk=expense_type.pk).filter(name=name).exists()
+                exists = ExpenseTypeCatalog.objects.exclude(pk=expense_type.pk).filter(
+                    policy=expense_type.policy,
+                    name=name,
+                ).exists()
                 if exists:
-                    messages.error(request, "Ya existe un tipo de gasto con ese nombre.")
+                    messages.error(request, "Ya existe una categoría Rindegastos con ese nombre.")
                 else:
                     expense_type.name = name
                     expense_type.save(update_fields=["name"])
-                    messages.success(request, "Tipo de gasto actualizado.")
+                    messages.success(request, "Categoría Rindegastos actualizada.")
         return redirect("settings_expense_types")
 
     context = {
-        "expense_types": ExpenseTypeCatalog.objects.order_by("name"),
+        "expense_types": ExpenseTypeCatalog.objects.select_related("policy").order_by("policy__name", "name"),
         "settings_menu_urls": _settings_menu_urls(),
     }
     return render(request, "settings/expense_types.html", context)

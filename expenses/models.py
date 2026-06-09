@@ -24,7 +24,9 @@ class Expense(models.Model):
     worksite = models.CharField(max_length=255, blank=True, null=True)
     # Obra estandarizada elegida por administrador (catálogo)
     worksite_standard = models.CharField(max_length=255, blank=True, null=True)
+    rindegastos_cost_center = models.CharField(max_length=255, blank=True, null=True)
     supplier = models.CharField(max_length=128, blank=True)
+    supplier_rut = models.CharField(max_length=32, blank=True, null=True)
     paid_at = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
     wa_message_id = models.CharField(max_length=128, unique=True, null=True, blank=True)
@@ -45,8 +47,13 @@ class Expense(models.Model):
     message_sent_at = models.DateTimeField(null=True, blank=True)
 
     document_type = models.CharField(max_length=20, choices=DOC_TYPE_CHOICES, blank=True, null=True)
+    rindegastos_document_type = models.CharField(max_length=255, blank=True, null=True)
+    document_number = models.CharField(max_length=64, blank=True, null=True)
     is_vehicle = models.BooleanField(default=False)
-    vehicle = models.CharField(max_length=255, blank=True, null=True)  # 👈 libre por ahora (luego lo cambiamos)
+    # Valor seleccionado desde Rindegastos o texto capturado previamente por WhatsApp.
+    vehicle = models.CharField(max_length=255, blank=True, null=True)
+    fuel_km = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    fuel_liters = models.DecimalField(max_digits=12, decimal_places=3, blank=True, null=True)
 
     expense_type = models.CharField(max_length=255, blank=True, null=True)
     expense_type_other = models.CharField(max_length=255, blank=True, null=True)
@@ -92,22 +99,6 @@ SYNC_STATUS = (
 )
 
 
-class VehicleCatalog(models.Model):
-    name = models.CharField(max_length=255)
-    external_id = models.CharField(max_length=255, blank=True, null=True)
-    sync_status = models.CharField(max_length=16, choices=SYNC_STATUS, default="manual")
-    last_synced_at = models.DateTimeField(blank=True, null=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name = "Vehículo/Maquinaria"
-        verbose_name_plural = "Vehículos/Maquinarias"
-
-    def __str__(self):
-        return self.name
-
-
 class WorksiteCatalog(models.Model):
     name = models.CharField(max_length=255)
     external_id = models.CharField(max_length=255, blank=True, null=True)
@@ -126,28 +117,112 @@ class WorksiteCatalog(models.Model):
 
 class CategoryCatalog(models.Model):
     name = models.CharField(max_length=255, unique=True)
+    external_id = models.CharField(max_length=255, blank=True, null=True)
+    code = models.CharField(max_length=255, blank=True, null=True)
+    currency = models.CharField(max_length=8, blank=True, null=True)
+    sync_status = models.CharField(max_length=16, choices=SYNC_STATUS, default="manual")
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Categoría"
-        verbose_name_plural = "Categorías"
+        verbose_name = "Política"
+        verbose_name_plural = "Políticas"
 
     def __str__(self):
         return self.name
 
 
 class ExpenseTypeCatalog(models.Model):
-    name = models.CharField(max_length=255, unique=True)
+    name = models.CharField(max_length=255)
+    policy = models.ForeignKey(
+        CategoryCatalog,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="rindegastos_categories",
+    )
+    external_id = models.CharField(max_length=255, blank=True, null=True)
+    group_name = models.CharField(max_length=255, blank=True, null=True)
+    group_code = models.CharField(max_length=255, blank=True, null=True)
+    account_code = models.CharField(max_length=255, blank=True, null=True)
+    instructions = models.TextField(blank=True)
+    sync_status = models.CharField(max_length=16, choices=SYNC_STATUS, default="manual")
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Tipo de gasto"
-        verbose_name_plural = "Tipos de gasto"
+        verbose_name = "Categoría Rindegastos"
+        verbose_name_plural = "Categorías Rindegastos"
+        unique_together = ("policy", "name", "group_name")
 
     def __str__(self):
         return self.name
+
+
+class RindegastosTaxCatalog(models.Model):
+    policy = models.ForeignKey(CategoryCatalog, on_delete=models.CASCADE, related_name="rindegastos_taxes")
+    name = models.CharField(max_length=255)
+    tax_type = models.CharField(max_length=64, blank=True, null=True)
+    value = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    sync_status = models.CharField(max_length=16, choices=SYNC_STATUS, default="synced")
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Impuesto Rindegastos"
+        verbose_name_plural = "Impuestos Rindegastos"
+        unique_together = ("policy", "name", "tax_type")
+
+    def __str__(self):
+        return f"{self.policy.name} - {self.name}"
+
+
+class RindegastosExpenseFieldCatalog(models.Model):
+    policy = models.ForeignKey(CategoryCatalog, on_delete=models.CASCADE, related_name="rindegastos_expense_fields")
+    name = models.CharField(max_length=255)
+    field_type = models.CharField(max_length=64, blank=True, null=True)
+    default_value = models.CharField(max_length=255, blank=True, null=True)
+    default_code = models.CharField(max_length=255, blank=True, null=True)
+    options = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+    sync_status = models.CharField(max_length=16, choices=SYNC_STATUS, default="synced")
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Campo extra Rindegastos"
+        verbose_name_plural = "Campos extra Rindegastos"
+        unique_together = ("policy", "name")
+
+    def __str__(self):
+        return f"{self.policy.name} - {self.name}"
+
+
+class RindegastosUserCatalog(models.Model):
+    external_id = models.CharField(max_length=255, unique=True)
+    first_name = models.CharField(max_length=255, blank=True, null=True)
+    last_name = models.CharField(max_length=255, blank=True, null=True)
+    full_name = models.CharField(max_length=255)
+    email = models.EmailField(blank=True)
+    is_active = models.BooleanField(default=True)
+    sync_status = models.CharField(max_length=16, choices=SYNC_STATUS, default="synced")
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Usuario Rindegastos"
+        verbose_name_plural = "Usuarios Rindegastos"
+
+    def __str__(self):
+        return self.full_name or self.email or self.external_id
 
 
 class ExpenseAuditLog(models.Model):

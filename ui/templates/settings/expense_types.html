@@ -1,11 +1,11 @@
 {% extends "metronic/base_app.html" %}
 {% load tz %}
-{% block page_title %}Tipos de gasto{% endblock %}
+{% block page_title %}Categorías Rindegastos{% endblock %}
 
 {% block toolbar %}
 <div class="app-toolbar py-3">
   <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
-    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Tipos de gasto</h1>
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Categorías Rindegastos</h1>
   </div>
 </div>
 {% endblock %}
@@ -15,7 +15,7 @@
   <div class="col-12 col-xl-4">
     <div class="card h-100">
       <div class="card-header">
-        <h3 class="card-title">Agregar tipo de gasto</h3>
+        <h3 class="card-title">Agregar categoría Rindegastos</h3>
       </div>
       <div class="card-body">
         <form method="post" class="row g-3">
@@ -36,7 +36,7 @@
   <div class="col-12 col-xl-8">
     <div class="card h-100">
       <div class="card-header">
-        <h3 class="card-title">Tipos registrados</h3>
+        <h3 class="card-title">Categorías registradas</h3>
         <div class="card-toolbar">
           <input type="text" class="form-control w-300px" id="expenseTypesSearch" placeholder="Buscar tipo">
         </div>
@@ -47,7 +47,10 @@
             <thead>
               <tr>
                 <th>Nombre</th>
+                <th>Política</th>
+                <th>Grupo</th>
                 <th>Estado</th>
+                <th>Sync</th>
                 <th>Creado</th>
                 <th></th>
               </tr>
@@ -56,6 +59,8 @@
               {% for t in expense_types %}
               <tr>
                 <td>{{ t.name }}</td>
+                <td>{{ t.policy.name|default:"Manual" }}</td>
+                <td>{{ t.group_name|default:"-" }}</td>
                 <td>
                   {% if t.is_active %}
                     <span class="badge badge-light-success">Activo</span>
@@ -63,6 +68,7 @@
                     <span class="badge badge-light">Inactivo</span>
                   {% endif %}
                 </td>
+                <td class="text-muted">{{ t.last_synced_at|localtime|date:"d/m/Y H:i"|default:"Manual" }}</td>
                 <td class="text-muted">{{ t.created_at|localtime|date:"d/m/Y H:i" }}</td>
                 <td class="text-end">
                   <button class="btn btn-sm btn-light-primary" type="button" data-bs-toggle="modal" data-bs-target="#editExpenseTypeModal{{ t.id }}">Editar</button>
@@ -77,7 +83,7 @@
                 </td>
               </tr>
               {% empty %}
-              <tr><td colspan="4" class="text-muted">Sin tipos de gasto cargados.</td></tr>
+              <tr><td colspan="7" class="text-muted">Sin categorías cargadas.</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -92,7 +98,7 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Editar tipo de gasto</h5>
+        <h5 class="modal-title">Editar categoría Rindegastos</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <form method="post">

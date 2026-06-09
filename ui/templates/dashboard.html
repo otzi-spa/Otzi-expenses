@@ -52,7 +52,7 @@
             </select>
           </div>
           <div class="col-12 col-md-2">
-            <label class="form-label">Categoría</label>
+            <label class="form-label">Política</label>
             <select class="form-select" id="filterCategory">
               <option value="">Todas</option>
               {% for c in categories %}
@@ -135,14 +135,14 @@
   <div class="col-xl-6">
     <div class="card h-100">
       <div class="card-header border-0 pt-5">
-        <h3 class="card-title fw-bold fs-3">Top categorías</h3>
+        <h3 class="card-title fw-bold fs-3">Top políticas</h3>
       </div>
       <div class="card-body">
         <div class="table-responsive">
           <table class="table table-row-dashed align-middle">
             <thead>
               <tr class="text-muted fs-7 text-uppercase">
-                <th>Categoría</th>
+                <th>Política</th>
                 <th>#</th>
                 <th>Monto</th>
               </tr>
@@ -223,7 +223,7 @@
           <div>
             <label class="form-label">Variable</label>
             <select id="varDimension" class="form-select">
-              <option value="category">Categorías</option>
+              <option value="category">Políticas</option>
               <option value="worksite">Obras</option>
               <option value="supplier">Proveedor</option>
               <option value="vehicle">Vehículo</option>
@@ -402,7 +402,7 @@
       var metrics = data.metrics || {};
       var rows = [
         { key: "missing_amount", label: "Sin monto" },
-        { key: "missing_category", label: "Sin categoría" },
+        { key: "missing_category", label: "Sin política" },
         { key: "missing_worksite", label: "Sin obra parametrizada" },
         { key: "missing_supplier", label: "Sin proveedor" },
         { key: "without_attachment", label: "Sin comprobante" }

@@ -1,11 +1,19 @@
 # ingestion/views_webhook.py
 import json, requests
+from decimal import Decimal, InvalidOperation
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from datetime import datetime, timezone as dt_timezone
 from django.core.files.base import ContentFile
-from expenses.models import Expense, Attachment, AllowedSender, ExpenseAuditLog, ExpenseTypeCatalog
+from expenses.models import (
+    Expense,
+    Attachment,
+    AllowedSender,
+    CategoryCatalog,
+    ExpenseAuditLog,
+    ExpenseTypeCatalog,
+)
 import hashlib, mimetypes
 
 GRAPH_URL = "https://graph.facebook.com/v24.0"
@@ -23,9 +31,23 @@ def parse_choice(text, mapping):
     t = norm(text)
     return mapping.get(t)
 
+
+def parse_nonnegative_decimal(text):
+    value = (text or "").strip().lower()
+    for suffix in ("kilómetros", "kilometros", "kms", "km", "litros", "litro", "lts", "lt", "l"):
+        if value.endswith(suffix):
+            value = value[: -len(suffix)].strip()
+            break
+    value = value.replace(" ", "").replace(",", ".")
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
 def get_active_expense_types():
     return list(
-        ExpenseTypeCatalog.objects.filter(is_active=True)
+        ExpenseTypeCatalog.objects.filter(is_active=True, policy__isnull=True)
         .order_by("name")
         .values_list("name", flat=True)
     )
@@ -194,44 +216,75 @@ def whatsapp_webhook(request):
                     reason="Usuario indicó obra reportada",
                 )
 
-                user_states[from_number]["stage"] = "awaiting_is_vehicle"
+                user_states[from_number]["stage"] = "awaiting_expense_scope"
                 send_whatsapp_reply(
                     phone_number_id, from_number,
-                    "🚘 ¿Es para vehículo?\n1) Sí\n2) No\n\nResponde 1 o 2."
+                    "🚘 ¿A qué corresponde este gasto?\n"
+                    "1) Vehículo o equipo\n"
+                    "2) Combustible\n"
+                    "3) No corresponde a vehículo\n\n"
+                    "Responde 1, 2 o 3."
                 )
                 return HttpResponse(status=200)
 
-            # C) ¿Vehículo? (sí/no)
-            if stage == "awaiting_is_vehicle":
-                yn = parse_choice(body, {
-                    "1": "yes", "si": "yes", "sí": "yes",
-                    "2": "no",  "no": "no",
+            # C) Alcance vehículo/combustible
+            if stage == "awaiting_expense_scope":
+                scope = parse_choice(body, {
+                    "1": "vehicle", "vehiculo": "vehicle", "vehículo": "vehicle",
+                    "equipo": "vehicle", "vehiculo o equipo": "vehicle", "vehículo o equipo": "vehicle",
+                    "2": "fuel", "combustible": "fuel", "bencina": "fuel", "diesel": "fuel", "diésel": "fuel",
+                    "3": "no", "no": "no", "ninguno": "no",
                 })
-                if not yn:
+                if not scope:
                     send_whatsapp_reply(phone_number_id, from_number,
-                        "❌ Responde 1) Sí o 2) No."
+                        "❌ Responde 1) Vehículo o equipo, 2) Combustible o 3) No corresponde."
                     )
                     return HttpResponse(status=200)
 
-                if yn == "yes":
+                if scope in {"vehicle", "fuel"}:
+                    before_category = exp.category
                     exp.is_vehicle = True
-                    exp.save(update_fields=["is_vehicle"])
+                    if scope == "fuel":
+                        policy, _ = CategoryCatalog.objects.get_or_create(
+                            name="Combustibles",
+                            defaults={"is_active": True},
+                        )
+                        if not policy.is_active:
+                            policy.is_active = True
+                            policy.save(update_fields=["is_active"])
+                        exp.category = policy.name
+                    exp.save(update_fields=["is_vehicle", "category"])
                     log_whatsapp_event(
                         exp,
                         action="whatsapp_update",
-                        changes={"is_vehicle": {"before": False, "after": True}},
-                        reason="Usuario marcó gasto de vehículo",
+                        changes={
+                            "is_vehicle": {"before": False, "after": True},
+                            "category": {"before": before_category, "after": exp.category},
+                        },
+                        reason=(
+                            "Usuario indicó gasto de combustible"
+                            if scope == "fuel"
+                            else "Usuario marcó gasto de vehículo"
+                        ),
                     )
 
-                    user_states[from_number]["stage"] = "awaiting_vehicle"
+                    user_states[from_number].update(
+                        {
+                            "stage": "awaiting_vehicle",
+                            "expense_scope": scope,
+                        }
+                    )
                     send_whatsapp_reply(phone_number_id, from_number,
-                        "🚚 ¿Cuál vehículo es? (texto libre por ahora)"
+                        "🚚 ¿Cuál es el vehículo o equipo?"
                     )
                     return HttpResponse(status=200)
 
                 # No vehículo → tipo gasto
                 exp.is_vehicle = False
-                exp.save(update_fields=["is_vehicle"])
+                exp.vehicle = None
+                exp.fuel_km = None
+                exp.fuel_liters = None
+                exp.save(update_fields=["is_vehicle", "vehicle", "fuel_km", "fuel_liters"])
                 log_whatsapp_event(
                     exp,
                     action="whatsapp_update",
@@ -263,11 +316,76 @@ def whatsapp_webhook(request):
                     reason="Usuario indicó vehículo",
                 )
 
+                if state.get("expense_scope") == "fuel":
+                    user_states[from_number]["stage"] = "awaiting_fuel_km"
+                    send_whatsapp_reply(
+                        phone_number_id,
+                        from_number,
+                        "🛣️ ¿Cuál era el kilometraje al momento del carguío?\n"
+                        "Responde solo con el número, sin separador de miles.",
+                    )
+                    return HttpResponse(status=200)
+
                 user_states[from_number]["stage"] = "done"
                 send_whatsapp_reply(phone_number_id, from_number, "✅ Gasto registrado. ¡Gracias!")
                 return HttpResponse(status=200)
 
-            # E) Tipo gasto
+            # E) Kilometraje para combustible
+            if stage == "awaiting_fuel_km":
+                fuel_km = parse_nonnegative_decimal(body)
+                if fuel_km is None:
+                    send_whatsapp_reply(
+                        phone_number_id,
+                        from_number,
+                        "❌ Ingresa un kilometraje válido. Ejemplo: 154320",
+                    )
+                    return HttpResponse(status=200)
+
+                before = exp.fuel_km
+                exp.fuel_km = fuel_km
+                exp.save(update_fields=["fuel_km"])
+                log_whatsapp_event(
+                    exp,
+                    action="whatsapp_update",
+                    changes={"fuel_km": {"before": before, "after": str(fuel_km)}},
+                    reason="Usuario indicó kilometraje de carguío",
+                )
+
+                user_states[from_number]["stage"] = "awaiting_fuel_liters"
+                send_whatsapp_reply(
+                    phone_number_id,
+                    from_number,
+                    "⛽ ¿Cuántos litros de combustible cargó?\n"
+                    "Puedes usar coma o punto para los decimales.",
+                )
+                return HttpResponse(status=200)
+
+            # F) Litros para combustible
+            if stage == "awaiting_fuel_liters":
+                fuel_liters = parse_nonnegative_decimal(body)
+                if fuel_liters is None or fuel_liters <= 0:
+                    send_whatsapp_reply(
+                        phone_number_id,
+                        from_number,
+                        "❌ Ingresa una cantidad de litros mayor a cero. Ejemplo: 45,5",
+                    )
+                    return HttpResponse(status=200)
+
+                before = exp.fuel_liters
+                exp.fuel_liters = fuel_liters
+                exp.save(update_fields=["fuel_liters"])
+                log_whatsapp_event(
+                    exp,
+                    action="whatsapp_update",
+                    changes={"fuel_liters": {"before": before, "after": str(fuel_liters)}},
+                    reason="Usuario indicó litros cargados",
+                )
+
+                user_states[from_number]["stage"] = "done"
+                send_whatsapp_reply(phone_number_id, from_number, "✅ Gasto de combustible registrado. ¡Gracias!")
+                return HttpResponse(status=200)
+
+            # G) Tipo gasto
             if stage == "awaiting_expense_type":
                 expense_types = get_active_expense_types()
                 if not expense_types:
