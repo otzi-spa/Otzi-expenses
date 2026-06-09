@@ -11,6 +11,7 @@ from .views import (
     settings_categories,
     settings_expense_types,
     settings_system_users,
+    settings_suppliers,
     settings_users,
     settings_worksites,
 )
@@ -26,6 +27,7 @@ urlpatterns = [
     path("configuracion/usuarios-sistema/", settings_system_users, name="settings_system_users"),
     path("configuracion/usuarios/", settings_users, name="settings_users"),
     path("configuracion/obras/", settings_worksites, name="settings_worksites"),
+    path("configuracion/proveedores/", settings_suppliers, name="settings_suppliers"),
     path("configuracion/categorias/", settings_categories, name="settings_categories"),
     path("configuracion/tipos-gasto/", settings_expense_types, name="settings_expense_types"),
 ]

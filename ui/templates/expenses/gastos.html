@@ -157,30 +157,30 @@
         {% csrf_token %}
         <div class="modal-body">
           <div class="row g-3">
-            <div class="col-md-6">
+            <div class="col-md-4">
               <label class="form-label">Estado</label>
               <select name="status" class="form-select" data-role="status-field">
                 <option value="pending" selected>Pendiente</option>
                 <option value="completed">Parametrizado</option>
               </select>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
               <label class="form-label">Política</label>
-              <select name="category_select" class="form-select" data-required-param="true">
+              <select name="category_select" class="form-select js-searchable-select" data-required-param="true">
                 <option value="">Selecciona política</option>
                 {% for c in categories_catalog %}
                 <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-currency="{{ c.currency|default:'' }}">{{ c.name }}</option>
                 {% endfor %}
               </select>
               <input type="hidden" name="category_policy_id" value="">
-              <div class="input-group mt-2" id="newCategoryGroupCreate">
-                <input type="text" class="form-control create-option-input" id="newCategoryCreate" name="new_category_name" placeholder="Nueva política">
-                <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="category_select" data-source-input-id="newCategoryCreate">+</button>
-              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Obra (ingresada por usuario)</label>
+              <input type="text" name="worksite" class="form-control" placeholder="Obra reportada">
             </div>
             <div class="col-md-6">
               <label class="form-label">Centro de Costo / Faena</label>
-              <select name="rindegastos_cost_center" class="form-select" data-rindegastos-field="Centro de Costo / Faena" data-required-param="true">
+              <select name="rindegastos_cost_center" class="form-select js-searchable-select" data-rindegastos-field="Centro de Costo / Faena" data-required-param="true">
                 <option value="">Selecciona centro de costo/faena</option>
               </select>
             </div>
@@ -196,44 +196,18 @@
             </div>
             <div class="col-md-6">
               <label class="form-label">Proveedor</label>
-              <select name="supplier_select" class="form-select" data-required-param="true">
+              <select name="supplier_select" class="form-select js-searchable-select" data-required-param="true">
                 <option value="">Selecciona proveedor</option>
                 {% for s in suppliers_catalog %}
                 <option value="{{ s.name }}" data-rut="{{ s.rut|default:'' }}">{{ s.name }}</option>
                 {% endfor %}
               </select>
-              <div class="input-group mt-2" id="newSupplierGroupCreate">
-                <input type="text" class="form-control create-option-input" name="new_supplier_name" placeholder="Nuevo proveedor" readonly>
-                <button class="btn btn-light-primary supplier-modal-btn" type="button">+</button>
-              </div>
+              <input type="hidden" name="new_supplier_name" value="">
+              <button class="btn btn-sm btn-light-primary supplier-modal-btn mt-2" type="button">Agregar proveedor</button>
             </div>
             <div class="col-md-6">
               <label class="form-label">RUT proveedor</label>
-              <input type="text" name="supplier_rut" class="form-control" placeholder="Ej: 76.123.456-7">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Obra</label>
-              <div class="row g-2">
-                <div class="col-12 col-lg-6">
-                  <input type="text" name="worksite" class="form-control" placeholder="Obra reportada">
-                </div>
-                <div class="col-12 col-lg-6">
-                  <select name="worksite_standard" class="form-select">
-                    <option value="">Selecciona obra (estándar)</option>
-                    {% for ws in worksites %}
-                      <option value="{{ ws.name }}">{{ ws.name }}</option>
-                    {% empty %}
-                      <option value="" disabled>No hay obras cargadas</option>
-                    {% endfor %}
-                  </select>
-                </div>
-                <div class="col-12">
-                  <div class="input-group">
-                    <input type="text" name="new_worksite_name" class="form-control create-option-input" id="newWorksiteCreate" placeholder="Crear nueva obra desde aquí">
-                    <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="worksite_standard" data-source-input-id="newWorksiteCreate">+</button>
-                  </div>
-                </div>
-              </div>
+              <input type="text" name="supplier_rut" class="form-control" placeholder="Selecciona o agrega un proveedor" disabled>
             </div>
             <div class="col-md-4">
               <label class="form-label">Fecha del gasto</label>
@@ -241,7 +215,7 @@
             </div>
             <div class="col-md-4">
               <label class="form-label">Tipo de documento</label>
-              <select name="rindegastos_document_type" class="form-select" data-rindegastos-field="Tipo de Documento" data-required-param="true">
+              <select name="rindegastos_document_type" class="form-select js-searchable-select" data-rindegastos-field="Tipo de Documento" data-required-param="true">
                 <option value="">Selecciona tipo de documento</option>
               </select>
             </div>
@@ -260,7 +234,7 @@
               <label class="form-label">Vehículo o equipo</label>
               <div class="row g-2">
                 <div class="col-12">
-                  <select name="vehicle" class="form-select" data-rindegastos-field="Vehiculo o Equipo">
+                  <select name="vehicle" class="form-select js-searchable-select" data-rindegastos-field="Vehiculo o Equipo">
                     <option value="">Selecciona vehículo o equipo</option>
                   </select>
                   <div class="form-text">Las opciones se sincronizan desde la política seleccionada en Rindegastos.</div>
@@ -286,7 +260,7 @@
               <div class="row g-2 expense-type-row">
                 <div class="col-12 col-md-6">
                   <label class="form-label">Categoría Rindegastos</label>
-                  <select name="expense_type_select" class="form-select">
+                  <select name="expense_type_select" class="form-select js-searchable-select">
                     <option value="">Selecciona categoría Rindegastos</option>
                     {% for t in expense_types_catalog %}
                     <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}">{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
@@ -398,15 +372,7 @@
             {% endif %}
           </td>
           <td>{{ gasto.category|default:"-" }}</td>
-          <td>
-            {% if gasto.worksite_standard %}
-              <div class="fw-semibold">{{ gasto.worksite_standard }}</div>
-              <div class="text-muted fs-8">Reportada: {{ gasto.worksite|default:"-" }}</div>
-            {% else %}
-              <div class="text-muted">Sin parametrizar</div>
-              <div class="text-muted fs-8">Reportada: {{ gasto.worksite|default:"-" }}</div>
-            {% endif %}
-          </td>
+          <td>{{ gasto.worksite|default:"-" }}</td>
           <td>{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</td>
           <td>
             {% with gasto.get_status_display|default:gasto.status as status_label %}
@@ -565,30 +531,30 @@
                 </div>
                 {% endif %}
                 <fieldset class="row g-3" {% if not can_manage_expenses %}disabled{% endif %}>
-                <div class="col-md-6">
+                <div class="col-md-4">
                   <label class="form-label">Estado</label>
                   <select name="status" class="form-select" data-role="status-field" {% if gasto.status == "approved" or gasto.status == "rejected" %}disabled{% endif %}>
                     <option value="pending" {% if gasto.status == "pending" %}selected{% endif %}>Pendiente</option>
                     <option value="completed" {% if gasto.status == "completed" %}selected{% endif %}>Parametrizado</option>
                   </select>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-4">
                   <label class="form-label">Política</label>
-                  <select name="category_select" class="form-select" data-required-param="true">
+                  <select name="category_select" class="form-select js-searchable-select" data-required-param="true">
                     <option value="">Selecciona política</option>
                     {% for c in categories_catalog %}
                     <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-currency="{{ c.currency|default:'' }}" {% if gasto.category == c.name %}selected{% endif %}>{{ c.name }}</option>
                     {% endfor %}
                   </select>
                   <input type="hidden" name="category_policy_id" value="{{ gasto.policy_catalog_id|default:'' }}">
-                  <div class="input-group mt-2" id="newCategoryGroup{{ gasto.pk }}">
-                    <input type="text" class="form-control create-option-input" id="newCategory{{ gasto.pk }}" name="new_category_name" placeholder="Nueva política">
-                    <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="category_select" data-source-input-id="newCategory{{ gasto.pk }}">+</button>
-                  </div>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Obra (ingresada por usuario)</label>
+                  <input type="text" name="worksite" class="form-control" value="{{ gasto.worksite|default:'' }}" placeholder="Obra reportada">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Centro de Costo / Faena</label>
-                  <select name="rindegastos_cost_center" class="form-select" data-rindegastos-field="Centro de Costo / Faena" data-current-value="{{ gasto.rindegastos_cost_center|default:'' }}" data-required-param="true">
+                  <select name="rindegastos_cost_center" class="form-select js-searchable-select" data-rindegastos-field="Centro de Costo / Faena" data-current-value="{{ gasto.rindegastos_cost_center|default:'' }}" data-required-param="true">
                     <option value="">Selecciona centro de costo/faena</option>
                   </select>
                 </div>
@@ -604,44 +570,18 @@
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Proveedor</label>
-                  <select name="supplier_select" class="form-select" data-required-param="true">
+                  <select name="supplier_select" class="form-select js-searchable-select" data-required-param="true">
                     <option value="">Selecciona proveedor</option>
                     {% for s in suppliers_catalog %}
                     <option value="{{ s.name }}" data-rut="{{ s.rut|default:'' }}" {% if gasto.supplier == s.name %}selected{% endif %}>{{ s.name }}</option>
                     {% endfor %}
                   </select>
-                  <div class="input-group mt-2" id="newSupplierGroup{{ gasto.pk }}">
-                    <input type="text" class="form-control create-option-input" name="new_supplier_name" placeholder="Nuevo proveedor" readonly>
-                    <button class="btn btn-light-primary supplier-modal-btn" type="button">+</button>
-                  </div>
+                  <input type="hidden" name="new_supplier_name" value="">
+                  <button class="btn btn-sm btn-light-primary supplier-modal-btn mt-2" type="button">Agregar proveedor</button>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">RUT proveedor</label>
-                  <input type="text" name="supplier_rut" class="form-control" value="{{ gasto.supplier_rut|default:'' }}" placeholder="Ej: 76.123.456-7">
-                </div>
-                <div class="col-md-6">
-                  <label class="form-label">Obra</label>
-                  <div class="row g-2">
-                    <div class="col-12 col-lg-6">
-                      <input type="text" name="worksite" class="form-control" value="{{ gasto.worksite|default:'' }}" placeholder="Obra reportada">
-                    </div>
-                    <div class="col-12 col-lg-6">
-                      <select name="worksite_standard" class="form-select">
-                        <option value="">Selecciona obra (estándar)</option>
-                        {% for ws in worksites %}
-                          <option value="{{ ws.name }}" {% if gasto.worksite_standard == ws.name %}selected{% endif %}>{{ ws.name }}</option>
-                        {% empty %}
-                          <option value="" disabled>No hay obras cargadas</option>
-                        {% endfor %}
-                      </select>
-                    </div>
-                    <div class="col-12">
-                      <div class="input-group">
-                        <input type="text" name="new_worksite_name" class="form-control create-option-input" id="newWorksite{{ gasto.pk }}" placeholder="Crear nueva obra desde aquí">
-                        <button class="btn btn-light-primary create-option-btn" type="button" data-target-select-name="worksite_standard" data-source-input-id="newWorksite{{ gasto.pk }}">+</button>
-                      </div>
-                    </div>
-                  </div>
+                  <input type="text" name="supplier_rut" class="form-control" value="{{ gasto.supplier_rut|default:'' }}" placeholder="Selecciona o agrega un proveedor" disabled>
                 </div>
                 <div class="col-md-4">
                   <label class="form-label">Fecha del gasto</label>
@@ -649,7 +589,7 @@
                 </div>
                 <div class="col-md-4">
                   <label class="form-label">Tipo de documento</label>
-                  <select name="rindegastos_document_type" class="form-select" data-rindegastos-field="Tipo de Documento" data-current-value="{{ gasto.rindegastos_document_type|default:'' }}" data-required-param="true">
+                  <select name="rindegastos_document_type" class="form-select js-searchable-select" data-rindegastos-field="Tipo de Documento" data-current-value="{{ gasto.rindegastos_document_type|default:'' }}" data-required-param="true">
                     <option value="">Selecciona tipo de documento</option>
                   </select>
                 </div>
@@ -668,7 +608,7 @@
                   <label class="form-label">Vehículo o equipo</label>
                   <div class="row g-2">
                     <div class="col-12">
-                      <select name="vehicle" class="form-select" data-rindegastos-field="Vehiculo o Equipo" data-current-value="{{ gasto.vehicle|default:'' }}">
+                      <select name="vehicle" class="form-select js-searchable-select" data-rindegastos-field="Vehiculo o Equipo" data-current-value="{{ gasto.vehicle|default:'' }}">
                         <option value="">Selecciona vehículo o equipo</option>
                       </select>
                       <div class="form-text">Las opciones se sincronizan desde Rindegastos. Un valor de WhatsApp se conserva hasta que selecciones otro.</div>
@@ -694,7 +634,7 @@
                   <div class="row g-2 expense-type-row {% if gasto.is_vehicle %}d-none{% endif %}">
                     <div class="col-12 col-md-6">
                       <label class="form-label">Categoría Rindegastos</label>
-                      <select name="expense_type_select" class="form-select">
+                      <select name="expense_type_select" class="form-select js-searchable-select">
                         <option value="">Selecciona categoría Rindegastos</option>
                         {% for t in expense_types_catalog %}
                         <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" {% if gasto.expense_type == t.name and gasto.policy_catalog_id == t.policy_id %}selected{% endif %}>{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
@@ -1256,6 +1196,56 @@
         return option;
       }
 
+      function refreshSearchableSelect(select) {
+        if (
+          !select ||
+          typeof window.jQuery === 'undefined' ||
+          typeof window.jQuery.fn.select2 === 'undefined' ||
+          !window.jQuery(select).hasClass('select2-hidden-accessible')
+        ) {
+          return;
+        }
+        window.jQuery(select).trigger('change.select2');
+      }
+
+      function initSearchableSelect(select) {
+        if (
+          !select ||
+          typeof window.jQuery === 'undefined' ||
+          typeof window.jQuery.fn.select2 === 'undefined' ||
+          window.jQuery(select).hasClass('select2-hidden-accessible')
+        ) {
+          return;
+        }
+
+        var modal = select.closest('.modal');
+        var placeholderOption = Array.from(select.options).find(function (option) {
+          return !option.value;
+        });
+        var defaultMatcher = window.jQuery.fn.select2.defaults.defaults.matcher;
+        var options = {
+          width: '100%',
+          allowClear: true,
+          minimumResultsForSearch: 0,
+          placeholder: placeholderOption ? placeholderOption.textContent.trim() : 'Selecciona una opción',
+          matcher: function (params, data) {
+            if (data.element && data.element.hidden) return null;
+            if (typeof defaultMatcher === 'function') {
+              return defaultMatcher(params, data);
+            }
+            if (!params.term || String(data.text || '').toLowerCase().indexOf(params.term.toLowerCase()) !== -1) {
+              return data;
+            }
+            return null;
+          },
+        };
+        if (modal) {
+          options.dropdownParent = window.jQuery(modal);
+        }
+
+        window.jQuery(select).select2(options);
+      }
+
       var forms = document.querySelectorAll('form[action*="/expenses/"]');
       forms.forEach(function (form) {
         var vehicleToggle = form.querySelector('.vehicle-toggle');
@@ -1431,6 +1421,7 @@
           }
           select.setAttribute('data-current-value', select.value);
           select.setAttribute('data-options-initialized', 'true');
+          refreshSearchableSelect(select);
         }
 
         function updatePolicyDependentFields() {
@@ -1451,11 +1442,21 @@
           updateCurrencySelect('');
         }
 
+        Array.from(form.querySelectorAll('.js-searchable-select')).forEach(initSearchableSelect);
+
         function syncSupplierRut() {
           if (!supplierSelect || !supplierRutInput) return;
           var selectedOption = supplierSelect.options[supplierSelect.selectedIndex];
           var rut = selectedOption ? (selectedOption.getAttribute('data-rut') || '').trim() : '';
-          if (rut) supplierRutInput.value = rut;
+          var isNewSupplier = Boolean(
+            selectedOption && selectedOption.getAttribute('data-new-supplier') === 'true'
+          );
+          supplierRutInput.value = rut;
+          supplierRutInput.disabled = !isNewSupplier;
+          supplierRutInput.required = isNewSupplier;
+          if (!isNewSupplier && newSupplierInput) {
+            newSupplierInput.value = '';
+          }
         }
 
         if (supplierSelect) {
@@ -1617,6 +1618,7 @@
               select.appendChild(option);
             }
             select.value = value;
+            refreshSearchableSelect(select);
             input.value = '';
           });
         });
@@ -1676,15 +1678,46 @@
           if (!activeSupplierForm || !supplierQuickName) return;
           var name = (supplierQuickName.value || '').trim();
           var rut = supplierQuickRut ? (supplierQuickRut.value || '').trim() : '';
-          if (!name) return;
+          if (!name || !rut) {
+            if (!name) supplierQuickName.focus();
+            else supplierQuickRut.focus();
+            return;
+          }
 
           var supplierSelect = activeSupplierForm.querySelector('select[name="supplier_select"]');
           var supplierRutInput = activeSupplierForm.querySelector('input[name="supplier_rut"]');
           var newSupplierInput = activeSupplierForm.querySelector('input[name="new_supplier_name"]');
-          var option = ensureSelectOption(supplierSelect, name, name, { 'data-rut': rut });
-          if (option && supplierSelect) supplierSelect.value = name;
-          if (supplierRutInput) supplierRutInput.value = rut;
-          if (newSupplierInput) newSupplierInput.value = name;
+          var existingOption = supplierSelect ? Array.from(supplierSelect.options).find(function (item) {
+            return (item.value || '').trim().toLowerCase() === name.toLowerCase();
+          }) : null;
+          var option = existingOption || ensureSelectOption(
+            supplierSelect,
+            name,
+            name,
+            {
+              'data-rut': rut,
+              'data-new-supplier': 'true',
+            }
+          );
+          if (option && supplierSelect) {
+            supplierSelect.value = name;
+            refreshSearchableSelect(supplierSelect);
+          }
+          if (existingOption) {
+            if (newSupplierInput) newSupplierInput.value = '';
+            if (supplierRutInput) {
+              supplierRutInput.value = existingOption.getAttribute('data-rut') || '';
+              supplierRutInput.disabled = true;
+              supplierRutInput.required = false;
+            }
+          } else {
+            if (supplierRutInput) {
+              supplierRutInput.value = rut;
+              supplierRutInput.disabled = false;
+              supplierRutInput.required = true;
+            }
+            if (newSupplierInput) newSupplierInput.value = name;
+          }
           if (supplierQuickModal) supplierQuickModal.hide();
         });
       }

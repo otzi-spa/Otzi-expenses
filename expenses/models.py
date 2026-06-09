@@ -115,6 +115,22 @@ class WorksiteCatalog(models.Model):
         return self.name
 
 
+class SupplierCatalog(models.Model):
+    name = models.CharField(max_length=128, unique=True)
+    rut = models.CharField(max_length=32)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Proveedor"
+        verbose_name_plural = "Proveedores"
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+
 class CategoryCatalog(models.Model):
     name = models.CharField(max_length=255, unique=True)
     external_id = models.CharField(max_length=255, blank=True, null=True)

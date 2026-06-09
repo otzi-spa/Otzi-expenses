@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from expenses.models import CategoryCatalog, Expense, RindegastosExpenseFieldCatalog
+from expenses.models import CategoryCatalog, Expense, RindegastosExpenseFieldCatalog, SupplierCatalog
 from expenses.views import _missing_fields_for_parametrization
 
 
@@ -113,7 +113,10 @@ class RindegastosVehicleOptionsTests(TestCase):
         response = self.client.get(reverse("expense_list"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-rindegastos-field="Vehiculo o Equipo"')
+        self.assertContains(
+            response,
+            'class="form-select js-searchable-select" data-rindegastos-field="Vehiculo o Equipo"',
+        )
         self.assertIn(
             {
                 "policy_id": policy.id,
@@ -123,3 +126,68 @@ class RindegastosVehicleOptionsTests(TestCase):
             },
             response.context["rindegastos_field_options"],
         )
+
+
+class SupplierCatalogFlowTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username="supplier-admin@example.com",
+            email="supplier-admin@example.com",
+            password="test",
+        )
+        self.client.force_login(self.user)
+        self.policy = CategoryCatalog.objects.update_or_create(
+            name="Oficina Central",
+            defaults={
+                "external_id": "policy-office",
+                "is_active": True,
+            },
+        )[0]
+
+    def test_new_supplier_is_saved_in_catalog_with_expense(self):
+        response = self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "new_supplier_name": "Proveedor Nuevo",
+                "supplier_select": "Proveedor Nuevo",
+                "supplier_rut": "76.123.456-7",
+                "worksite": "Obra reportada",
+            },
+        )
+
+        self.assertRedirects(response, reverse("expense_list"))
+        supplier = SupplierCatalog.objects.get(name="Proveedor Nuevo")
+        expense = Expense.objects.get(supplier="Proveedor Nuevo")
+        self.assertEqual(supplier.rut, "76.123.456-7")
+        self.assertEqual(expense.supplier_rut, supplier.rut)
+        self.assertEqual(expense.worksite, "Obra reportada")
+        self.assertIsNone(expense.worksite_standard)
+
+    def test_existing_supplier_uses_catalog_rut(self):
+        SupplierCatalog.objects.create(
+            name="Proveedor Existente",
+            rut="77.777.777-7",
+        )
+
+        self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "supplier_select": "Proveedor Existente",
+                "supplier_rut": "11.111.111-1",
+            },
+        )
+
+        expense = Expense.objects.get(supplier="Proveedor Existente")
+        self.assertEqual(expense.supplier_rut, "77.777.777-7")
+
+    def test_modal_uses_synced_policies_and_has_no_standard_worksite(self):
+        response = self.client.get(reverse("expense_list"))
+
+        self.assertContains(response, "Obra (ingresada por usuario)")
+        self.assertNotContains(response, 'name="worksite_standard"')
+        self.assertNotContains(response, 'name="new_category_name"')
+        self.assertContains(response, 'name="supplier_rut"')

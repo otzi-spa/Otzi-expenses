@@ -20,6 +20,7 @@ from .models import (
     ExpenseAuditLog,
     ExpenseTypeCatalog,
     RindegastosExpenseFieldCatalog,
+    SupplierCatalog,
     WorksiteCatalog,
     SYNC_STATUS,
 )
@@ -80,6 +81,7 @@ def _settings_menu_urls():
         "settings_system_users",
         "settings_users",
         "settings_worksites",
+        "settings_suppliers",
         "settings_categories",
         "settings_expense_types",
     }
@@ -233,25 +235,57 @@ def _rindegastos_field_options_payload():
     return payload
 
 
-def _supplier_options_payload():
-    suppliers = {}
-    rows = (
-        Expense.objects.exclude(supplier__isnull=True)
-        .exclude(supplier="")
-        .values("supplier", "supplier_rut")
-        .order_by("supplier", "-id")
+def _apply_synced_policy(expense, raw_policy_name):
+    policy_name = (raw_policy_name or "").strip()
+    policy = (
+        CategoryCatalog.objects.filter(
+            name=policy_name,
+            is_active=True,
+            external_id__isnull=False,
+        )
+        .exclude(external_id="")
+        .first()
     )
-    for row in rows:
-        name = (row["supplier"] or "").strip()
-        if not name:
-            continue
-        key = name.casefold()
-        rut = (row["supplier_rut"] or "").strip()
-        if key not in suppliers:
-            suppliers[key] = {"name": name, "rut": rut}
-        elif rut and not suppliers[key]["rut"]:
-            suppliers[key]["rut"] = rut
-    return sorted(suppliers.values(), key=lambda item: item["name"].casefold())
+    if not policy:
+        return False
+    expense.category = policy.name
+    return True
+
+
+def _apply_supplier(expense, request):
+    supplier_name = request.POST.get("supplier_select", "").strip()
+    new_supplier_name = request.POST.get("new_supplier_name", "").strip()
+
+    if new_supplier_name:
+        existing = SupplierCatalog.objects.filter(name__iexact=new_supplier_name).first()
+        if existing:
+            supplier = existing
+            if not supplier.is_active:
+                supplier.is_active = True
+                supplier.save(update_fields=["is_active", "updated_at"])
+        else:
+            new_supplier_rut = request.POST.get("supplier_rut", "").strip()
+            if not new_supplier_rut:
+                messages.error(request, "El RUT es obligatorio para crear un proveedor.")
+                return False
+            supplier = SupplierCatalog.objects.create(
+                name=new_supplier_name,
+                rut=new_supplier_rut,
+                is_active=True,
+            )
+    elif supplier_name:
+        supplier = SupplierCatalog.objects.filter(name__iexact=supplier_name, is_active=True).first()
+        if not supplier:
+            messages.error(request, "El proveedor seleccionado no está disponible en el mantenedor.")
+            return False
+    else:
+        expense.supplier = ""
+        expense.supplier_rut = None
+        return True
+
+    expense.supplier = supplier.name
+    expense.supplier_rut = supplier.rut or None
+    return True
 
 
 def _validate_receipt_file(uploaded_file):
@@ -396,60 +430,15 @@ def expense_detail(request, pk: int):
         if currency:
             expense.currency = currency
 
-        category_select = request.POST.get("category_select", "").strip()
-        new_category_name = request.POST.get("new_category_name", "").strip()
-        category_legacy = request.POST.get("category", "").strip()
-        if (category_select == "__new__" and new_category_name) or (not category_select and new_category_name):
-            cat_obj, _ = CategoryCatalog.objects.get_or_create(name=new_category_name, defaults={"is_active": True})
-            if not cat_obj.is_active:
-                cat_obj.is_active = True
-                cat_obj.save(update_fields=["is_active"])
-            expense.category = cat_obj.name
-            messages.success(request, f"Política '{cat_obj.name}' creada desde el modal.")
-        elif category_select and category_select != "__new__":
-            cat_obj, _ = CategoryCatalog.objects.get_or_create(name=category_select, defaults={"is_active": True})
-            if not cat_obj.is_active:
-                cat_obj.is_active = True
-                cat_obj.save(update_fields=["is_active"])
-            expense.category = cat_obj.name
-        elif category_legacy:
-            expense.category = category_legacy
-        else:
-            expense.category = Expense._meta.get_field("category").default
+        if not _apply_synced_policy(expense, request.POST.get("category_select")):
+            messages.error(request, "Selecciona una política vigente sincronizada desde Rindegastos.")
+            return redirect("expense_list")
 
-        supplier_select = request.POST.get("supplier_select", "").strip()
-        new_supplier_name = request.POST.get("new_supplier_name", "").strip()
-        supplier_legacy = request.POST.get("supplier", "")
-        if (supplier_select == "__new__" and new_supplier_name) or (not supplier_select and new_supplier_name):
-            expense.supplier = new_supplier_name.strip()
-        elif supplier_select and supplier_select != "__new__":
-            expense.supplier = supplier_select
-        else:
-            expense.supplier = supplier_legacy.strip()
-
-        expense.supplier_rut = request.POST.get("supplier_rut", "").strip() or None
+        if not _apply_supplier(expense, request):
+            return redirect("expense_list")
 
         worksite_raw = request.POST.get("worksite", "")
         expense.worksite = worksite_raw.strip()
-
-        new_worksite_name = request.POST.get("new_worksite_name", "").strip()
-        if new_worksite_name:
-            ws, _ = WorksiteCatalog.objects.get_or_create(name=new_worksite_name, defaults={"is_active": True})
-            if not ws.is_active:
-                ws.is_active = True
-                ws.save(update_fields=["is_active"])
-            messages.success(request, f"Obra '{ws.name}' creada desde el modal.")
-            if not request.POST.get("worksite_standard", "").strip():
-                request.POST = request.POST.copy()
-                request.POST["worksite_standard"] = ws.name
-
-        worksite_std = request.POST.get("worksite_standard", "").strip()
-        if worksite_std:
-            ws_std_obj, _ = WorksiteCatalog.objects.get_or_create(name=worksite_std, defaults={"is_active": True})
-            if not ws_std_obj.is_active:
-                ws_std_obj.is_active = True
-                ws_std_obj.save(update_fields=["is_active"])
-        expense.worksite_standard = worksite_std or None
 
         document_type = request.POST.get("document_type", "").strip()
         expense.document_type = document_type or None
@@ -613,50 +602,14 @@ def expense_create(request):
     if currency:
         expense.currency = currency
 
-    category_select = request.POST.get("category_select", "").strip()
-    new_category_name = request.POST.get("new_category_name", "").strip()
-    if (category_select == "__new__" and new_category_name) or (not category_select and new_category_name):
-        cat_obj, _ = CategoryCatalog.objects.get_or_create(name=new_category_name, defaults={"is_active": True})
-        if not cat_obj.is_active:
-            cat_obj.is_active = True
-            cat_obj.save(update_fields=["is_active"])
-        expense.category = cat_obj.name
-    elif category_select and category_select != "__new__":
-        cat_obj, _ = CategoryCatalog.objects.get_or_create(name=category_select, defaults={"is_active": True})
-        if not cat_obj.is_active:
-            cat_obj.is_active = True
-            cat_obj.save(update_fields=["is_active"])
-        expense.category = cat_obj.name
+    if not _apply_synced_policy(expense, request.POST.get("category_select")):
+        messages.error(request, "Selecciona una política vigente sincronizada desde Rindegastos.")
+        return redirect("expense_list")
 
-    supplier_select = request.POST.get("supplier_select", "").strip()
-    new_supplier_name = request.POST.get("new_supplier_name", "").strip()
-    if (supplier_select == "__new__" and new_supplier_name) or (not supplier_select and new_supplier_name):
-        expense.supplier = new_supplier_name
-    elif supplier_select and supplier_select != "__new__":
-        expense.supplier = supplier_select
-
-    expense.supplier_rut = request.POST.get("supplier_rut", "").strip() or None
+    if not _apply_supplier(expense, request):
+        return redirect("expense_list")
 
     expense.worksite = request.POST.get("worksite", "").strip()
-
-    new_worksite_name = request.POST.get("new_worksite_name", "").strip()
-    if new_worksite_name:
-        ws, _ = WorksiteCatalog.objects.get_or_create(name=new_worksite_name, defaults={"is_active": True})
-        if not ws.is_active:
-            ws.is_active = True
-            ws.save(update_fields=["is_active"])
-        messages.success(request, f"Obra '{ws.name}' creada desde el modal.")
-        if not request.POST.get("worksite_standard", "").strip():
-            request.POST = request.POST.copy()
-            request.POST["worksite_standard"] = ws.name
-
-    worksite_std = request.POST.get("worksite_standard", "").strip()
-    if worksite_std:
-        ws_std_obj, _ = WorksiteCatalog.objects.get_or_create(name=worksite_std, defaults={"is_active": True})
-        if not ws_std_obj.is_active:
-            ws_std_obj.is_active = True
-            ws_std_obj.save(update_fields=["is_active"])
-    expense.worksite_standard = worksite_std or None
 
     expense.document_type = request.POST.get("document_type", "").strip() or None
     expense.rindegastos_cost_center = request.POST.get("rindegastos_cost_center", "").strip() or None
@@ -758,7 +711,6 @@ def expense_create(request):
 @login_required
 def expense_list(request):
     can_manage_expenses = _can_manage_expenses(request.user)
-    _ensure_rindegastos_policies()
     gastos = (
         Expense.objects.select_related("created_by", "wa_sender")
         .prefetch_related("attachments", "audit_logs")
@@ -791,10 +743,10 @@ def expense_list(request):
         "gastos": gastos,
         "can_manage_expenses": can_manage_expenses,
         "status_choices": Expense.STATUS,
-        "worksites": WorksiteCatalog.objects.filter(is_active=True).order_by("name"),
-        "categories_catalog": CategoryCatalog.objects.filter(is_active=True).order_by(
-            "-external_id",
-            "name",
+        "categories_catalog": (
+            CategoryCatalog.objects.filter(is_active=True, external_id__isnull=False)
+            .exclude(external_id="")
+            .order_by("name")
         ),
         "expense_types_catalog": ExpenseTypeCatalog.objects.filter(is_active=True).select_related("policy").order_by(
             "policy__name",
@@ -802,7 +754,7 @@ def expense_list(request):
             "name",
         ),
         "rindegastos_field_options": _rindegastos_field_options_payload(),
-        "suppliers_catalog": _supplier_options_payload(),
+        "suppliers_catalog": SupplierCatalog.objects.filter(is_active=True).order_by("name"),
         "settings_menu_urls": _settings_menu_urls(),
     }
     return render(request, "expenses/gastos.html", context)
@@ -1414,6 +1366,55 @@ def settings_worksites(request):
         "settings_menu_urls": _settings_menu_urls(),
     }
     return render(request, "settings/worksites.html", context)
+
+
+@login_required
+@admin_required
+def settings_suppliers(request):
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        if action == "add_supplier":
+            name = request.POST.get("name", "").strip()
+            rut = request.POST.get("rut", "").strip()
+            if not name or not rut:
+                messages.error(request, "Nombre y RUT son obligatorios.")
+            elif SupplierCatalog.objects.filter(name__iexact=name).exists():
+                messages.error(request, "Ya existe un proveedor con ese nombre.")
+            else:
+                SupplierCatalog.objects.create(name=name, rut=rut)
+                messages.success(request, "Proveedor agregado.")
+
+        elif action == "update_supplier":
+            supplier = get_object_or_404(SupplierCatalog, pk=request.POST.get("supplier_id"))
+            name = request.POST.get("name", "").strip()
+            rut = request.POST.get("rut", "").strip()
+            if not name or not rut:
+                messages.error(request, "Nombre y RUT son obligatorios.")
+            elif SupplierCatalog.objects.filter(name__iexact=name).exclude(pk=supplier.pk).exists():
+                messages.error(request, "Ya existe un proveedor con ese nombre.")
+            else:
+                supplier.name = name
+                supplier.rut = rut
+                supplier.save(update_fields=["name", "rut", "updated_at"])
+                messages.success(request, "Proveedor actualizado.")
+
+        elif action == "toggle_supplier":
+            supplier = get_object_or_404(SupplierCatalog, pk=request.POST.get("supplier_id"))
+            supplier.is_active = not supplier.is_active
+            supplier.save(update_fields=["is_active", "updated_at"])
+            messages.info(
+                request,
+                f"Proveedor '{supplier.name}' {'activado' if supplier.is_active else 'desactivado'}.",
+            )
+
+        return redirect("settings_suppliers")
+
+    context = {
+        "suppliers": SupplierCatalog.objects.order_by("-is_active", "name"),
+        "settings_menu_urls": _settings_menu_urls(),
+    }
+    return render(request, "settings/suppliers.html", context)
 
 
 @login_required
