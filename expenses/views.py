@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 from django.conf import settings
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth import get_user_model
 from accounts.models import UserAuditLog
@@ -243,6 +243,60 @@ def _rindegastos_field_options_payload():
                 }
             )
     return payload
+
+
+def _serialize_rindegastos_options(policy):
+    target_names = {"Centro de Costo / Faena", "Tipo de Documento", "Vehiculo o Equipo"}
+    fields = RindegastosExpenseFieldCatalog.objects.filter(
+        policy=policy,
+        is_active=True,
+        name__in=target_names,
+    ).order_by("name")
+    options = []
+    for field in fields:
+        for option in field.options or []:
+            if isinstance(option, dict):
+                value = (option.get("Value") or option.get("Name") or option.get("value") or "").strip()
+                code = (option.get("Code") or option.get("code") or "").strip()
+            else:
+                value = str(option).strip()
+                code = ""
+            if value:
+                options.append(
+                    {
+                        "field_name": field.name,
+                        "value": value,
+                        "code": code,
+                    }
+                )
+
+    categories = [
+        {
+            "value": item.name,
+            "label": f"{item.name} / {item.group_name}" if item.group_name else item.name,
+        }
+        for item in ExpenseTypeCatalog.objects.filter(policy=policy, is_active=True).order_by("group_name", "name")
+    ]
+    return {
+        "policy": {
+            "external_id": policy.external_id,
+            "name": policy.name,
+            "currency": policy.currency or "",
+        },
+        "field_options": options,
+        "categories": categories,
+    }
+
+
+@login_required
+def rindegastos_policy_options(request, external_id):
+    policy = get_object_or_404(
+        CategoryCatalog,
+        external_id=external_id,
+        is_active=True,
+        sync_status="synced",
+    )
+    return JsonResponse(_serialize_rindegastos_options(policy))
 
 
 def _apply_synced_policy(expense, raw_policy_name):
@@ -1495,12 +1549,13 @@ def settings_suppliers(request):
 def settings_categories(request):
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "sync_rindegastos":
+        if action in {"sync_rindegastos", "rebuild_rindegastos"}:
             try:
-                stats = RindegastosCatalogSync().sync_all()
+                rebuild = action == "rebuild_rindegastos"
+                stats = RindegastosCatalogSync().sync_all(rebuild=rebuild)
                 messages.success(
                     request,
-                    "Sincronización Rindegastos completada: "
+                    f"{'Reconstrucción' if rebuild else 'Sincronización'} Rindegastos completada: "
                     f"{stats['policies']} políticas, "
                     f"{stats['categories']} categorías, "
                     f"{stats['taxes']} impuestos, "

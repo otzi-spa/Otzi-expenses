@@ -169,7 +169,7 @@
               <select name="category_select" class="form-select js-searchable-select" data-required-param="true">
                 <option value="">Selecciona política</option>
                 {% for c in categories_catalog %}
-                <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-external-id="{{ c.external_id|default:'' }}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}">{{ c.name }}</option>
+                <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-external-id="{{ c.external_id|default:'' }}" data-policy-options-url="{% url 'rindegastos_policy_options' c.external_id %}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}">{{ c.name }}</option>
                 {% endfor %}
               </select>
               <input type="hidden" name="category_policy_id" value="">
@@ -597,7 +597,7 @@
                   <select name="category_select" class="form-select js-searchable-select" data-required-param="true">
                     <option value="">Selecciona política</option>
                     {% for c in categories_catalog %}
-                    <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-external-id="{{ c.external_id|default:'' }}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}" {% if gasto.category == c.name %}selected{% endif %}>{{ c.name }}</option>
+                    <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-external-id="{{ c.external_id|default:'' }}" data-policy-options-url="{% url 'rindegastos_policy_options' c.external_id %}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}" {% if gasto.category == c.name %}selected{% endif %}>{{ c.name }}</option>
                     {% endfor %}
                   </select>
                   <input type="hidden" name="category_policy_id" value="{{ gasto.policy_catalog_id|default:'' }}">
@@ -1543,6 +1543,9 @@
         var receiptDropzone = form.querySelector('.receipt-dropzone');
         var receiptInput = form.querySelector('.receipt-file-input');
         var receiptFeedback = form.querySelector('.receipt-files-feedback');
+        var policyOptionsRequest = 0;
+        var policyOptionsCache = {};
+        var activePolicyExternalId = '';
 
         function escapeHtml(text) {
           return text
@@ -1640,6 +1643,8 @@
             id: selectedOption ? (selectedOption.getAttribute('data-policy-id') || '').trim() : '',
             externalId: selectedOption ?
               (selectedOption.getAttribute('data-policy-external-id') || '').trim() : '',
+            optionsUrl: selectedOption ?
+              (selectedOption.getAttribute('data-policy-options-url') || '').trim() : '',
             currency: selectedOption ? (selectedOption.getAttribute('data-currency') || '').trim() : '',
             name: selectedOption ? (selectedOption.value || '').trim() : '',
             key: normalizePolicyKey(
@@ -1657,38 +1662,40 @@
           currencySelect.setAttribute('data-current-value', currentValue);
         }
 
-        function filterExpenseTypesByPolicy(selectedPolicyId, selectedPolicyExternalId, selectedPolicyKey) {
+        function populateExpenseTypes(categories, preserveCurrent) {
           if (!expenseTypeSelect) return;
-          var currentValue = expenseTypeSelect.value;
-          var currentVisible = false;
-          Array.from(expenseTypeSelect.options).forEach(function (option) {
-            if (!option.value) {
-              option.hidden = false;
-              return;
-            }
-            var policyId = (option.getAttribute('data-policy-id') || '').trim();
-            var policyExternalId = (option.getAttribute('data-policy-external-id') || '').trim();
-            var policyKey = normalizePolicyKey(option.getAttribute('data-policy-name') || '');
-            var visible = !policyId || !selectedPolicyId ||
-              (selectedPolicyExternalId && policyExternalId === selectedPolicyExternalId) ||
-              (selectedPolicyKey && policyKey === selectedPolicyKey) ||
-              policyId === selectedPolicyId;
-            option.hidden = !visible;
-            if (visible && option.value === currentValue) {
-              currentVisible = true;
-            }
+          var currentValue = preserveCurrent ?
+            (expenseTypeSelect.value || expenseTypeSelect.getAttribute('data-current-value') || '') : '';
+          var placeholder = expenseTypeSelect.options[0] ?
+            expenseTypeSelect.options[0].textContent : 'Selecciona categoría Rindegastos';
+          expenseTypeSelect.innerHTML = '';
+          var placeholderOption = document.createElement('option');
+          placeholderOption.value = '';
+          placeholderOption.textContent = placeholder;
+          expenseTypeSelect.appendChild(placeholderOption);
+
+          var seenValues = {};
+          (categories || []).forEach(function (item) {
+            if (!item.value || seenValues[item.value]) return;
+            seenValues[item.value] = true;
+            var option = document.createElement('option');
+            option.value = item.value;
+            option.textContent = item.label || item.value;
+            expenseTypeSelect.appendChild(option);
           });
-          if (currentValue && !currentVisible) {
-            expenseTypeSelect.value = '';
+
+          if (currentValue && !seenValues[currentValue]) {
+            var preservedOption = document.createElement('option');
+            preservedOption.value = currentValue;
+            preservedOption.textContent = currentValue + ' (valor actual)';
+            expenseTypeSelect.appendChild(preservedOption);
           }
+          expenseTypeSelect.value = currentValue || '';
+          expenseTypeSelect.setAttribute('data-current-value', expenseTypeSelect.value);
+          refreshSearchableSelect(expenseTypeSelect);
         }
 
-        function populateRindegastosFieldSelect(
-          select,
-          selectedPolicyId,
-          selectedPolicyExternalId,
-          selectedPolicyKey
-        ) {
+        function populateRindegastosFieldSelect(select, fieldOptions) {
           var fieldName = select.getAttribute('data-rindegastos-field') || '';
           var placeholder = select.options[0] ? select.options[0].textContent : 'Selecciona una opción';
           var currentValue = select.value || select.getAttribute('data-current-value') || '';
@@ -1702,14 +1709,8 @@
           placeholderOption.textContent = placeholder;
           select.appendChild(placeholderOption);
 
-          var options = rindegastosFieldOptions.filter(function (item) {
-            var samePolicyName = selectedPolicyKey &&
-              normalizePolicyKey(item.policy_name) === selectedPolicyKey;
-            var sameExternalId = selectedPolicyExternalId &&
-              String(item.policy_external_id || '') === String(selectedPolicyExternalId);
-            var samePolicyId =
-              String(item.policy_id || '') === String(selectedPolicyId || '');
-            return (sameExternalId || samePolicyName || samePolicyId) && item.field_name === fieldName;
+          var options = (fieldOptions || []).filter(function (item) {
+            return item.field_name === fieldName;
           });
           var seenValues = {};
           options.forEach(function (item) {
@@ -1739,15 +1740,54 @@
           refreshSearchableSelect(select);
         }
 
+        function applyPolicyOptions(data, externalId) {
+          var preserveExpenseType = !activePolicyExternalId || activePolicyExternalId === externalId;
+          populateExpenseTypes(data.categories || [], preserveExpenseType);
+          rindegastosFieldSelects.forEach(function (select) {
+            populateRindegastosFieldSelect(select, data.field_options || []);
+          });
+          activePolicyExternalId = externalId || '';
+        }
+
         function updatePolicyDependentFields() {
           var meta = selectedPolicyMeta();
+          var requestId = ++policyOptionsRequest;
           if (policyIdInput) policyIdInput.value = meta.id;
           updateCurrencySelect(meta.currency);
-          filterExpenseTypesByPolicy(meta.id, meta.externalId, meta.key);
-          rindegastosFieldSelects.forEach(function (select) {
-            populateRindegastosFieldSelect(select, meta.id, meta.externalId, meta.key);
-          });
           toggleVehicleSection();
+
+          if (!meta.externalId || !meta.optionsUrl) {
+            applyPolicyOptions({ categories: [], field_options: [] }, '');
+            return;
+          }
+
+          if (policyOptionsCache[meta.externalId]) {
+            applyPolicyOptions(policyOptionsCache[meta.externalId], meta.externalId);
+            return;
+          }
+
+          fetch(meta.optionsUrl, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' },
+          })
+            .then(function (response) {
+              if (!response.ok) {
+                throw new Error('No se pudieron cargar las opciones de la política.');
+              }
+              return response.json();
+            })
+            .then(function (data) {
+              policyOptionsCache[meta.externalId] = data;
+              if (requestId !== policyOptionsRequest) return;
+              var currentMeta = selectedPolicyMeta();
+              if (currentMeta.externalId !== meta.externalId) return;
+              applyPolicyOptions(data, meta.externalId);
+            })
+            .catch(function () {
+              if (requestId !== policyOptionsRequest) return;
+              applyPolicyOptions({ categories: [], field_options: [] }, meta.externalId);
+            });
         }
 
         if (policySelect) {

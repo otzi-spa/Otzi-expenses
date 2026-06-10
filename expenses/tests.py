@@ -9,9 +9,12 @@ from expenses.models import (
     CategoryCatalog,
     Expense,
     ExpenseAuditLog,
+    ExpenseTypeCatalog,
     RindegastosExpenseFieldCatalog,
+    RindegastosTaxCatalog,
     SupplierCatalog,
 )
+from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.views import _expense_export_id, _missing_fields_for_parametrization
 
 
@@ -124,6 +127,10 @@ class RindegastosVehicleOptionsTests(TestCase):
             response,
             'class="form-select js-searchable-select" data-rindegastos-field="Vehiculo o Equipo"',
         )
+        self.assertContains(
+            response,
+            reverse("rindegastos_policy_options", kwargs={"external_id": policy.external_id}),
+        )
         self.assertIn(
             {
                 "policy_id": policy.id,
@@ -135,6 +142,144 @@ class RindegastosVehicleOptionsTests(TestCase):
             },
             response.context["rindegastos_field_options"],
         )
+
+    def test_policy_options_endpoint_uses_external_id_and_isolates_policies(self):
+        machinery, _ = CategoryCatalog.objects.update_or_create(
+            name="Departamento Maquinaria",
+            defaults={
+                "external_id": "41786",
+                "sync_status": "synced",
+                "is_active": True,
+            },
+        )
+        other_policy = CategoryCatalog.objects.create(
+            name="Autopista",
+            external_id="99999",
+            sync_status="synced",
+        )
+        RindegastosExpenseFieldCatalog.objects.create(
+            policy=machinery,
+            name="Centro de Costo / Faena",
+            options=[{"Value": "Taller Central"}],
+        )
+        RindegastosExpenseFieldCatalog.objects.create(
+            policy=other_policy,
+            name="Centro de Costo / Faena",
+            options=[{"Value": "Costo Directo"}],
+        )
+        ExpenseTypeCatalog.objects.create(
+            policy=machinery,
+            name="Mantención",
+            group_name="Maquinaria",
+            sync_status="synced",
+        )
+
+        response = self.client.get(
+            reverse("rindegastos_policy_options", kwargs={"external_id": "41786"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["policy"]["external_id"], "41786")
+        self.assertIn(
+            {
+                "field_name": "Centro de Costo / Faena",
+                "value": "Taller Central",
+                "code": "",
+            },
+            payload["field_options"],
+        )
+        self.assertNotIn(
+            {
+                "field_name": "Centro de Costo / Faena",
+                "value": "Costo Directo",
+                "code": "",
+            },
+            payload["field_options"],
+        )
+        self.assertEqual(
+            payload["categories"],
+            [{"value": "Mantención", "label": "Mantención / Maquinaria"}],
+        )
+
+    def test_policy_options_endpoint_rejects_unknown_external_id(self):
+        response = self.client.get(
+            reverse("rindegastos_policy_options", kwargs={"external_id": "missing"})
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+
+class RindegastosCatalogRebuildTests(TestCase):
+    def test_rebuild_recreates_synced_relations_and_preserves_manual_catalogs(self):
+        class FakeClient:
+            def get_expense_policies(self, active_only=True):
+                return [{"Id": "41786", "Name": "Departamento Maquinaria", "IsActive": True}]
+
+            def get_expense_policy_categories(self, policy_id):
+                return [{"Id": "cat-1", "Name": "Mantención", "GroupName": "Maquinaria"}]
+
+            def get_expense_policy_taxes(self, policy_id):
+                return []
+
+            def get_expense_policy_expense_fields(self, policy_id):
+                return [
+                    {
+                        "Name": "Centro de Costo / Faena",
+                        "Type": "list",
+                        "Options": [{"Value": "Taller Central"}],
+                    }
+                ]
+
+            def get_users(self):
+                return []
+
+        policy, _ = CategoryCatalog.objects.update_or_create(
+            name="Departamento Maquinaria",
+            defaults={
+                "external_id": "41786",
+                "sync_status": "synced",
+                "is_active": True,
+            },
+        )
+        ExpenseTypeCatalog.objects.create(
+            policy=policy,
+            name="Sincronizada",
+            sync_status="synced",
+        )
+        manual_category = ExpenseTypeCatalog.objects.create(
+            name="Manual",
+            sync_status="manual",
+        )
+        RindegastosExpenseFieldCatalog.objects.create(
+            policy=policy,
+            name="Centro de Costo / Faena",
+            sync_status="synced",
+        )
+        RindegastosTaxCatalog.objects.create(
+            policy=policy,
+            name="IVA",
+            sync_status="synced",
+        )
+
+        stats = RindegastosCatalogSync(client=FakeClient()).sync_all(rebuild=True)
+
+        self.assertTrue(CategoryCatalog.objects.filter(pk=policy.pk).exists())
+        self.assertTrue(ExpenseTypeCatalog.objects.filter(pk=manual_category.pk).exists())
+        self.assertTrue(
+            ExpenseTypeCatalog.objects.filter(
+                policy=policy,
+                name="Mantención",
+                sync_status="synced",
+            ).exists()
+        )
+        field = RindegastosExpenseFieldCatalog.objects.get(
+            policy=policy,
+            name="Centro de Costo / Faena",
+        )
+        self.assertEqual(field.options, [{"Value": "Taller Central"}])
+        self.assertFalse(RindegastosTaxCatalog.objects.filter(policy=policy).exists())
+        self.assertEqual(stats["verified_policy_links"], 2)
 
 
 class SupplierCatalogFlowTests(TestCase):

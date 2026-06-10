@@ -57,7 +57,7 @@ class RindegastosCatalogSync:
         self.now = timezone.now()
 
     @transaction.atomic
-    def sync_all(self):
+    def sync_all(self, rebuild=False):
         stats = {
             "policies": 0,
             "categories": 0,
@@ -66,6 +66,9 @@ class RindegastosCatalogSync:
             "users": 0,
             "verified_policy_links": 0,
         }
+
+        if rebuild:
+            self.rebuild_synced_catalogs()
 
         policies = self.client.get_expense_policies(active_only=True)
         active_policy_ids = set()
@@ -89,6 +92,12 @@ class RindegastosCatalogSync:
 
         stats["users"] = self.sync_users()
         return stats
+
+    def rebuild_synced_catalogs(self):
+        ExpenseTypeCatalog.objects.filter(sync_status="synced").delete()
+        RindegastosTaxCatalog.objects.filter(sync_status="synced").delete()
+        RindegastosExpenseFieldCatalog.objects.filter(sync_status="synced").delete()
+        RindegastosUserCatalog.objects.filter(sync_status="synced").delete()
 
     def policy_linked_payload(self, policy, payload):
         return {
