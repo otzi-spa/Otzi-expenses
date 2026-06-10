@@ -208,6 +208,18 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, 'class="expense-form-pane"')
         self.assertContains(response, 'class="expense-receipt-pane"')
 
+    def test_expense_table_displays_internal_id(self):
+        expense = Expense.objects.create(
+            status="pending",
+            category=self.policy.name,
+            supplier="Proveedor",
+        )
+
+        response = self.client.get(reverse("expense_list"))
+
+        self.assertContains(response, "<th data-sortable=\"true\">ID</th>", html=True)
+        self.assertContains(response, f"#{expense.pk}")
+
 
 class IncompleteExpenseStatusTests(TestCase):
     def setUp(self):

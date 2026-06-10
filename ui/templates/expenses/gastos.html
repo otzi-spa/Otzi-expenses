@@ -321,6 +321,7 @@
     <table id="expensesTable" class="table table-striped align-middle table-row-dashed fs-6 gy-5">
       <thead>
         <tr class="text-start text-muted fw-bold fs-7 text-uppercase gs-0">
+          <th data-sortable="true">ID</th>
           <th data-sortable="true">Fecha Reporte</th>
           <th data-sortable="true">Fecha Gasto</th>
           <th data-sortable="true">Usuario que reporta</th>
@@ -338,6 +339,7 @@
       <tbody class="text-gray-600 fw-semibold">
         {% for gasto in gastos %}
         <tr data-status="{{ gasto.status }}" data-has-attachment="{% if gasto.attachments.all %}1{% else %}0{% endif %}">
+          <td data-order="{{ gasto.pk }}">#{{ gasto.pk }}</td>
           <td data-order="{{ gasto.created_at|date:'Y-m-d H:i:s' }}">{{ gasto.created_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
           <td data-order="{{ gasto.paid_at|date:'Y-m-d' }}">{{ gasto.paid_at|date:"d/m/Y"|default:"-" }}</td>
           <td>
@@ -483,7 +485,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="12" class="text-center py-10 text-muted">No hay gastos registrados aún.</td>
+          <td colspan="13" class="text-center py-10 text-muted">No hay gastos registrados aún.</td>
         </tr>
         {% endfor %}
       </tbody>
