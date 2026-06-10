@@ -194,6 +194,20 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertNotContains(response, "Categoría Rindegastos (detalle)")
         self.assertContains(response, 'name="supplier_rut"')
 
+    def test_edit_modal_uses_side_receipt_viewer(self):
+        expense = Expense.objects.create(
+            status="pending",
+            category=self.policy.name,
+            supplier="Proveedor",
+        )
+
+        response = self.client.get(reverse("expense_list"))
+
+        self.assertContains(response, f'id="expenseModal{expense.pk}"')
+        self.assertContains(response, 'class="modal-body expense-workspace"')
+        self.assertContains(response, 'class="expense-form-pane"')
+        self.assertContains(response, 'class="expense-receipt-pane"')
+
 
 class IncompleteExpenseStatusTests(TestCase):
     def setUp(self):

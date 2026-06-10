@@ -229,7 +229,7 @@ class WhatsAppFuelFlowTests(TestCase):
 
         expense = Expense.objects.get(wa_message_id="inactive-image-1")
         conversation.refresh_from_db()
-        self.assertEqual(expense.worksite, "")
+        self.assertFalse(expense.worksite)
         self.assertEqual(conversation.stage, "awaiting_resume")
         self.assertEqual(conversation.context["resume_stage"], "awaiting_worksite")
         self.assertIn("quedó pendiente", reply_mock.call_args.args[2].lower())

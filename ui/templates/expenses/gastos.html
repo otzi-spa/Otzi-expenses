@@ -515,7 +515,7 @@
 
     {% for gasto in gastos %}
     <div class="modal fade expense-edit-modal" id="expenseModal{{ gasto.pk }}" tabindex="-1" aria-labelledby="expenseModalLabel{{ gasto.pk }}" aria-hidden="true">
-      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="expenseModalLabel{{ gasto.pk }}">Editar gasto #{{ gasto.pk }}</h5>
@@ -523,8 +523,9 @@
           </div>
           <form method="post" action="{% url 'expense_detail' gasto.pk %}" enctype="multipart/form-data">
             {% csrf_token %}
-            <div class="modal-body">
-              <div class="row g-3">
+            <div class="modal-body expense-workspace">
+              <div class="expense-form-pane">
+              <div class="row g-2">
                 {% if not can_manage_expenses %}
                 <div class="col-12">
                   <div class="alert alert-light-info mb-0">
@@ -659,37 +660,6 @@
                   <label class="form-label">Comentario (opcional)</label>
                   <textarea name="notes" class="form-control" rows="3">{{ gasto.notes|default:'' }}</textarea>
                 </div>
-                {% with attachments=gasto.attachments.all %}
-                <div class="col-12">
-                  <label class="form-label">Comprobantes</label>
-                  <div class="receipt-dropzone border border-dashed rounded p-4 text-center bg-light-primary" data-existing-count="{{ attachments|length }}">
-                    <input
-                      type="file"
-                      name="receipt_files"
-                      class="d-none receipt-file-input"
-                      id="receiptFiles{{ gasto.pk }}"
-                      accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-                      multiple
-                    >
-                    {% if attachments %}
-                      <div class="small text-muted mb-3">Tienes {{ attachments|length }} comprobante(s). Arrastra más archivos aquí o haz click para agregar.</div>
-                    {% else %}
-                      <div class="small text-muted mb-3">Sin comprobante. Arrastra un archivo aquí o haz click para adjuntar.</div>
-                    {% endif %}
-                    <div class="small fw-semibold text-primary receipt-files-feedback">Ningún archivo nuevo seleccionado</div>
-                  </div>
-
-                  {% if attachments %}
-                  <div class="d-flex flex-wrap gap-3 mt-3">
-                    {% for attachment in attachments %}
-                      <a class="btn p-0" href="{% url 'attachment_serve' attachment.pk %}" target="_blank" rel="noopener">
-                        <img src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante #{{ forloop.counter }}" class="rounded border" style="width: 96px; height: 96px; object-fit: cover;">
-                      </a>
-                    {% endfor %}
-                  </div>
-                  {% endif %}
-                </div>
-                {% endwith %}
                 </fieldset>
 
                 <div class="col-12">
@@ -737,6 +707,81 @@
                   </div>
                 </div>
               </div>
+              </div>
+
+              {% with attachments=gasto.attachments.all %}
+              <aside class="expense-receipt-pane" aria-label="Comprobantes del gasto">
+                <div class="expense-receipt-header">
+                  <div>
+                    <div class="fw-bold text-gray-900">Comprobante</div>
+                    <div class="text-muted fs-8">
+                      {% if attachments %}{{ attachments|length }} archivo(s){% else %}Sin archivos adjuntos{% endif %}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="expense-receipt-viewer">
+                  {% if attachments %}
+                    {% for attachment in attachments %}
+                    <div class="expense-receipt-panel {% if forloop.first %}is-active{% endif %}" data-receipt-panel="{{ attachment.pk }}">
+                      <div class="expense-receipt-actions">
+                        <span class="badge badge-light">{{ forloop.counter }} de {{ attachments|length }}</span>
+                        <div class="d-flex gap-2">
+                          <a class="btn btn-sm btn-light" href="{% url 'attachment_serve' attachment.pk %}?download=1" target="_blank" rel="noopener">Descargar</a>
+                          <a class="btn btn-sm btn-light-primary" href="{% url 'attachment_serve' attachment.pk %}" target="_blank" rel="noopener">Abrir</a>
+                        </div>
+                      </div>
+                      <div class="expense-receipt-canvas">
+                        {% if "pdf" in attachment.content_type|lower %}
+                          <iframe src="{% url 'attachment_serve' attachment.pk %}" title="Comprobante PDF #{{ forloop.counter }}"></iframe>
+                        {% else %}
+                          <img src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante #{{ forloop.counter }}">
+                        {% endif %}
+                      </div>
+                    </div>
+                    {% endfor %}
+                  {% else %}
+                    <div class="expense-receipt-empty">
+                      <div class="fw-semibold text-gray-700">Sin comprobante</div>
+                      <div class="text-muted fs-8">Puedes adjuntar imágenes o archivos PDF.</div>
+                    </div>
+                  {% endif %}
+                </div>
+
+                {% if attachments|length > 1 %}
+                <div class="expense-receipt-thumbnails" role="tablist" aria-label="Seleccionar comprobante">
+                  {% for attachment in attachments %}
+                  <button
+                    type="button"
+                    class="expense-receipt-thumbnail {% if forloop.first %}is-active{% endif %}"
+                    data-receipt-target="{{ attachment.pk }}"
+                    aria-label="Ver comprobante {{ forloop.counter }}"
+                  >
+                    {% if "pdf" in attachment.content_type|lower %}
+                      <span>PDF</span>
+                    {% else %}
+                      <img src="{% url 'attachment_serve' attachment.pk %}" alt="">
+                    {% endif %}
+                  </button>
+                  {% endfor %}
+                </div>
+                {% endif %}
+
+                <div class="receipt-dropzone expense-receipt-dropzone border border-dashed rounded text-center bg-light-primary" data-existing-count="{{ attachments|length }}">
+                  <input
+                    type="file"
+                    name="receipt_files"
+                    class="d-none receipt-file-input"
+                    id="receiptFiles{{ gasto.pk }}"
+                    accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                    multiple
+                    {% if not can_manage_expenses %}disabled{% endif %}
+                  >
+                  <div class="small text-muted">Arrastra archivos aquí o haz click para agregar.</div>
+                  <div class="small fw-semibold text-primary receipt-files-feedback">Ningún archivo nuevo seleccionado</div>
+                </div>
+              </aside>
+              {% endwith %}
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
@@ -800,7 +845,7 @@
     }
 
     .expense-edit-modal .modal-dialog {
-      max-width: min(1140px, calc(100vw - 1.5rem));
+      max-width: min(1680px, calc(100vw - 1.5rem));
       height: calc(100vh - 1rem);
       min-height: calc(100% - 1rem);
       margin-top: 0.5rem;
@@ -831,6 +876,147 @@
     .expense-edit-modal .modal-body {
       flex: 1 1 auto;
       min-height: 0;
+    }
+
+    .expense-edit-modal .expense-workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr);
+      gap: 0;
+      padding: 0;
+      overflow: hidden !important;
+    }
+
+    .expense-edit-modal .expense-form-pane {
+      min-width: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 1rem 1.25rem 1.25rem;
+    }
+
+    .expense-edit-modal .expense-receipt-pane {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+      border-left: 1px solid #e5e7eb;
+      background: #f8fafc;
+    }
+
+    .expense-edit-modal .expense-receipt-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 42px;
+      margin-bottom: 0.75rem;
+    }
+
+    .expense-edit-modal .expense-receipt-viewer {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 320px;
+      overflow: hidden;
+      border: 1px solid #dfe3ea;
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    .expense-edit-modal .expense-receipt-panel {
+      display: none;
+      height: 100%;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .expense-edit-modal .expense-receipt-panel.is-active {
+      display: flex;
+    }
+
+    .expense-edit-modal .expense-receipt-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid #e5e7eb;
+      background: #fff;
+    }
+
+    .expense-edit-modal .expense-receipt-canvas {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      background: #eef1f5;
+    }
+
+    .expense-edit-modal .expense-receipt-canvas img {
+      display: block;
+      width: 100%;
+      height: auto;
+      object-fit: contain;
+      object-position: top center;
+      background: #fff;
+    }
+
+    .expense-edit-modal .expense-receipt-canvas iframe {
+      width: 100%;
+      height: 100%;
+      min-height: 520px;
+      border: 0;
+      background: #fff;
+    }
+
+    .expense-edit-modal .expense-receipt-empty {
+      height: 100%;
+      min-height: 320px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    .expense-edit-modal .expense-receipt-thumbnails {
+      display: flex;
+      gap: 0.5rem;
+      overflow-x: auto;
+      padding: 0.75rem 0 0.25rem;
+    }
+
+    .expense-edit-modal .expense-receipt-thumbnail {
+      width: 54px;
+      height: 54px;
+      flex: 0 0 54px;
+      padding: 2px;
+      overflow: hidden;
+      border: 2px solid transparent;
+      border-radius: 6px;
+      background: #fff;
+      color: #4b5563;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .expense-edit-modal .expense-receipt-thumbnail.is-active {
+      border-color: var(--bs-primary);
+    }
+
+    .expense-edit-modal .expense-receipt-thumbnail img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 3px;
+    }
+
+    .expense-edit-modal .expense-receipt-dropzone {
+      flex: 0 0 auto;
+      margin-top: 0.75rem;
+      padding: 0.75rem;
     }
 
     .expense-history-modal .modal-dialog {
@@ -976,6 +1162,25 @@
 
       .card-body {
         overflow-x: hidden;
+      }
+
+      .expense-edit-modal .expense-workspace {
+        display: block;
+        overflow-y: auto !important;
+      }
+
+      .expense-edit-modal .expense-form-pane {
+        overflow: visible;
+      }
+
+      .expense-edit-modal .expense-receipt-pane {
+        min-height: 620px;
+        border-top: 1px solid #e5e7eb;
+        border-left: 0;
+      }
+
+      .expense-edit-modal .expense-receipt-viewer {
+        min-height: 480px;
       }
     }
   </style>
@@ -1130,6 +1335,26 @@
           editModalEl.addEventListener('hidden.bs.modal', openHistory, { once: true });
           var editInstance = bootstrap.Modal.getOrCreateInstance(editModalEl);
           editInstance.hide();
+        });
+      });
+
+      document.querySelectorAll('.expense-receipt-pane').forEach(function (pane) {
+        var thumbnailButtons = pane.querySelectorAll('[data-receipt-target]');
+        var panels = pane.querySelectorAll('[data-receipt-panel]');
+
+        thumbnailButtons.forEach(function (button) {
+          button.addEventListener('click', function () {
+            var targetId = button.getAttribute('data-receipt-target');
+            thumbnailButtons.forEach(function (item) {
+              item.classList.toggle('is-active', item === button);
+            });
+            panels.forEach(function (panel) {
+              panel.classList.toggle(
+                'is-active',
+                panel.getAttribute('data-receipt-panel') === targetId
+              );
+            });
+          });
         });
       });
 
