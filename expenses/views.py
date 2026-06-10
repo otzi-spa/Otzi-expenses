@@ -235,6 +235,7 @@ def _rindegastos_field_options_payload():
             payload.append(
                 {
                     "policy_id": field.policy_id,
+                    "policy_name": field.policy.name,
                     "field_name": field.name,
                     "value": value,
                     "code": code,

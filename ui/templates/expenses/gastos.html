@@ -169,7 +169,7 @@
               <select name="category_select" class="form-select js-searchable-select" data-required-param="true">
                 <option value="">Selecciona política</option>
                 {% for c in categories_catalog %}
-                <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-currency="{{ c.currency|default:'' }}">{{ c.name }}</option>
+                <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}">{{ c.name }}</option>
                 {% endfor %}
               </select>
               <input type="hidden" name="category_policy_id" value="">
@@ -263,7 +263,7 @@
                   <select name="expense_type_select" class="form-select js-searchable-select">
                     <option value="">Selecciona categoría Rindegastos</option>
                     {% for t in expense_types_catalog %}
-                    <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}">{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
+                    <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" data-policy-name="{{ t.policy.name|default:'' }}">{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                     {% endfor %}
                   </select>
                 </div>
@@ -597,7 +597,7 @@
                   <select name="category_select" class="form-select js-searchable-select" data-required-param="true">
                     <option value="">Selecciona política</option>
                     {% for c in categories_catalog %}
-                    <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-currency="{{ c.currency|default:'' }}" {% if gasto.category == c.name %}selected{% endif %}>{{ c.name }}</option>
+                    <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}" {% if gasto.category == c.name %}selected{% endif %}>{{ c.name }}</option>
                     {% endfor %}
                   </select>
                   <input type="hidden" name="category_policy_id" value="{{ gasto.policy_catalog_id|default:'' }}">
@@ -691,7 +691,7 @@
                       <select name="expense_type_select" class="form-select js-searchable-select">
                         <option value="">Selecciona categoría Rindegastos</option>
                         {% for t in expense_types_catalog %}
-                        <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" {% if gasto.expense_type == t.name and gasto.policy_catalog_id == t.policy_id %}selected{% endif %}>{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
+                        <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" data-policy-name="{{ t.policy.name|default:'' }}" {% if gasto.expense_type == t.name and gasto.policy_catalog_id == t.policy_id %}selected{% endif %}>{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                         {% endfor %}
                       </select>
                     </div>
@@ -1557,6 +1557,14 @@
           return policySelect ? (policySelect.value || '').trim().toLowerCase() : '';
         }
 
+        function normalizePolicyKey(value) {
+          return String(value || '')
+            .replace(/\u00a0/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+        }
+
         function isFuelPolicy() {
           return normalizedPolicyName() === 'combustibles';
         }
@@ -1615,11 +1623,26 @@
 
         function selectedPolicyMeta() {
           if (!policySelect) return { id: '', currency: '' };
-          var selectedOption = policySelect.options[policySelect.selectedIndex];
+          var selectedValue = policySelect.value || '';
+          if (
+            typeof window.jQuery !== 'undefined' &&
+            window.jQuery(policySelect).hasClass('select2-hidden-accessible')
+          ) {
+            var select2Data = window.jQuery(policySelect).select2('data') || [];
+            if (select2Data.length && select2Data[0].id) {
+              selectedValue = String(select2Data[0].id);
+            }
+          }
+          var selectedOption = Array.from(policySelect.options).find(function (option) {
+            return option.value === selectedValue;
+          }) || policySelect.options[policySelect.selectedIndex];
           return {
             id: selectedOption ? (selectedOption.getAttribute('data-policy-id') || '').trim() : '',
             currency: selectedOption ? (selectedOption.getAttribute('data-currency') || '').trim() : '',
             name: selectedOption ? (selectedOption.value || '').trim() : '',
+            key: normalizePolicyKey(
+              selectedOption ? (selectedOption.getAttribute('data-policy-name') || selectedOption.value) : ''
+            ),
           };
         }
 
@@ -1632,7 +1655,7 @@
           currencySelect.setAttribute('data-current-value', currentValue);
         }
 
-        function filterExpenseTypesByPolicy(selectedPolicyId) {
+        function filterExpenseTypesByPolicy(selectedPolicyId, selectedPolicyKey) {
           if (!expenseTypeSelect) return;
           var currentValue = expenseTypeSelect.value;
           var currentVisible = false;
@@ -1642,7 +1665,10 @@
               return;
             }
             var policyId = (option.getAttribute('data-policy-id') || '').trim();
-            var visible = !policyId || !selectedPolicyId || policyId === selectedPolicyId;
+            var policyKey = normalizePolicyKey(option.getAttribute('data-policy-name') || '');
+            var visible = !policyId || !selectedPolicyId ||
+              (selectedPolicyKey && policyKey === selectedPolicyKey) ||
+              policyId === selectedPolicyId;
             option.hidden = !visible;
             if (visible && option.value === currentValue) {
               currentVisible = true;
@@ -1653,7 +1679,7 @@
           }
         }
 
-        function populateRindegastosFieldSelect(select, selectedPolicyId) {
+        function populateRindegastosFieldSelect(select, selectedPolicyId, selectedPolicyKey) {
           var fieldName = select.getAttribute('data-rindegastos-field') || '';
           var placeholder = select.options[0] ? select.options[0].textContent : 'Selecciona una opción';
           var currentValue = select.value || select.getAttribute('data-current-value') || '';
@@ -1668,7 +1694,11 @@
           select.appendChild(placeholderOption);
 
           var options = rindegastosFieldOptions.filter(function (item) {
-            return String(item.policy_id || '') === String(selectedPolicyId || '') && item.field_name === fieldName;
+            var samePolicyName = selectedPolicyKey &&
+              normalizePolicyKey(item.policy_name) === selectedPolicyKey;
+            var samePolicyId =
+              String(item.policy_id || '') === String(selectedPolicyId || '');
+            return (samePolicyName || samePolicyId) && item.field_name === fieldName;
           });
           var seenValues = {};
           options.forEach(function (item) {
@@ -1702,9 +1732,9 @@
           var meta = selectedPolicyMeta();
           if (policyIdInput) policyIdInput.value = meta.id;
           updateCurrencySelect(meta.currency);
-          filterExpenseTypesByPolicy(meta.id);
+          filterExpenseTypesByPolicy(meta.id, meta.key);
           rindegastosFieldSelects.forEach(function (select) {
-            populateRindegastosFieldSelect(select, meta.id);
+            populateRindegastosFieldSelect(select, meta.id, meta.key);
           });
           toggleVehicleSection();
         }
@@ -1717,6 +1747,15 @@
         }
 
         Array.from(form.querySelectorAll('.js-searchable-select')).forEach(initSearchableSelect);
+        if (
+          policySelect &&
+          typeof window.jQuery !== 'undefined' &&
+          window.jQuery(policySelect).hasClass('select2-hidden-accessible')
+        ) {
+          window.jQuery(policySelect).on('select2:select select2:clear', function () {
+            window.setTimeout(updatePolicyDependentFields, 0);
+          });
+        }
 
         function syncSupplierRut() {
           if (!supplierSelect || !supplierRutInput) return;
