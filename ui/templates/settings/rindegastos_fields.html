@@ -1,0 +1,141 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Campos Rindegastos{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Campos Rindegastos</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h3 class="card-title">Campos extra por política</h3>
+      <div class="text-muted">Centro de costo, tipo de documento, nombre, vehículos y otros campos sincronizados.</div>
+    </div>
+    <div class="card-toolbar d-flex gap-3">
+      <input type="text" class="form-control w-300px" id="rindegastosFieldsSearch" placeholder="Buscar política o campo">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_rindegastos">
+        <button class="btn btn-light-primary" type="submit">Sincronizar</button>
+      </form>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table align-middle" id="rindegastosFieldsTable">
+        <thead>
+          <tr>
+            <th>Política</th>
+            <th>Campo</th>
+            <th>Tipo</th>
+            <th>Opciones</th>
+            <th>Estado</th>
+            <th>Última sincronización</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for field in fields %}
+          <tr>
+            <td>{{ field.policy.name }}</td>
+            <td>{{ field.name }}</td>
+            <td>{{ field.field_type|default:"-" }}</td>
+            <td>
+              {% if field.display_options %}
+              <button class="btn btn-sm btn-light-primary" type="button" data-bs-toggle="modal" data-bs-target="#fieldOptionsModal{{ field.id }}">
+                Ver {{ field.display_options|length }}
+              </button>
+              {% else %}
+              <span class="text-muted">Sin opciones</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if field.is_active %}
+              <span class="badge badge-light-success">Activo</span>
+              {% else %}
+              <span class="badge badge-light">Inactivo</span>
+              {% endif %}
+            </td>
+            <td class="text-muted">{{ field.last_synced_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
+            <td class="text-end">
+              <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="toggle_field">
+                <input type="hidden" name="field_id" value="{{ field.id }}">
+                <button class="btn btn-sm {% if field.is_active %}btn-light-danger{% else %}btn-light-success{% endif %}" type="submit">
+                  {% if field.is_active %}Desactivar{% else %}Activar{% endif %}
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="text-muted">Sin campos sincronizados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% for field in fields %}
+{% if field.display_options %}
+<div class="modal fade" id="fieldOptionsModal{{ field.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title">{{ field.name }}</h5>
+          <div class="text-muted">{{ field.policy.name }}</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+          <table class="table table-row-dashed align-middle">
+            <thead><tr><th>Valor</th><th>Código</th></tr></thead>
+            <tbody>
+              {% for option in field.display_options %}
+              <tr>
+                <td>{{ option.value }}</td>
+                <td>{{ option.code|default:"-" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var table = $("#rindegastosFieldsTable").DataTable({
+      info: false,
+      pageLength: 20,
+      lengthChange: false,
+      order: [],
+    });
+    var search = document.getElementById("rindegastosFieldsSearch");
+    if (search) {
+      search.addEventListener("keyup", function () {
+        table.search(search.value).draw();
+      });
+    }
+  });
+</script>
+{% endblock %}

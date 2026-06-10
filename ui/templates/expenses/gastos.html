@@ -489,6 +489,7 @@
               </form>
               {% endif %}
 
+              {% if request.user.is_superuser %}
               <form method="post" action="{% url 'expense_action' gasto.pk 'delete' %}" class="d-inline" onsubmit="return confirm('¿Eliminar gasto #{{ gasto.pk }}?')">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-light-secondary btn-icon btn-sm" {% if gasto.is_locked %}disabled{% endif %} data-kt-tooltip="true" title="{% if gasto.is_locked %}Primero debes revertir la decisión{% else %}Eliminar gasto{% endif %}">
@@ -503,6 +504,7 @@
                   </span>
                 </button>
               </form>
+              {% endif %}
               {% endif %}
             </div>
           </td>
@@ -547,7 +549,7 @@
             <h5 class="modal-title" id="expenseModalLabel{{ gasto.pk }}">Editar gasto #{{ gasto.pk }}</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
           </div>
-          <form method="post" action="{% url 'expense_detail' gasto.pk %}" enctype="multipart/form-data">
+          <form method="post" action="{% url 'expense_detail' gasto.pk %}" enctype="multipart/form-data" data-form-locked="{% if not can_manage_expenses or gasto.is_locked %}true{% else %}false{% endif %}">
             {% csrf_token %}
             <div class="modal-body expense-workspace">
               <div class="expense-form-pane">
@@ -816,7 +818,7 @@
                     id="receiptFiles{{ gasto.pk }}"
                     accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
                     multiple
-                    {% if not can_manage_expenses %}disabled{% endif %}
+                    {% if not can_manage_expenses or gasto.is_locked %}disabled{% endif %}
                   >
                   <div class="small text-muted">Arrastra archivos aquí o haz click para agregar.</div>
                   <div class="small fw-semibold text-primary receipt-files-feedback">Ningún archivo nuevo seleccionado</div>
@@ -1550,6 +1552,7 @@
 
       var forms = document.querySelectorAll('form[action*="/expenses/"]');
       forms.forEach(function (form) {
+        var formLocked = form.getAttribute('data-form-locked') === 'true';
         var vehicleToggle = form.querySelector('.vehicle-toggle');
         var vehicleSection = form.querySelector('.vehicle-section');
         var fuelKmInput = form.querySelector('input[name="fuel_km"]');
@@ -1609,7 +1612,7 @@
             vehicleToggle.checked = true;
             vehicleToggle.disabled = true;
           } else {
-            vehicleToggle.disabled = false;
+            vehicleToggle.disabled = formLocked;
           }
           if (vehicleToggle.checked || hasReportedFuelData) {
             vehicleSection.classList.remove('d-none');
@@ -1632,7 +1635,7 @@
 
           [fuelKmInput, fuelLitersInput].forEach(function (field) {
             if (!field) return;
-            field.disabled = !fuelPolicy;
+            field.disabled = formLocked || !fuelPolicy;
           });
           if (fuelFieldsHelp) {
             if (fuelPolicy) {
@@ -1824,6 +1827,19 @@
         }
 
         Array.from(form.querySelectorAll('.js-searchable-select')).forEach(initSearchableSelect);
+        if (formLocked) {
+          form.querySelectorAll('fieldset input, fieldset select, fieldset textarea, fieldset button').forEach(function (control) {
+            control.disabled = true;
+          });
+          form.querySelectorAll('fieldset select').forEach(function (select) {
+            if (
+              typeof window.jQuery !== 'undefined' &&
+              window.jQuery(select).hasClass('select2-hidden-accessible')
+            ) {
+              window.jQuery(select).prop('disabled', true).trigger('change.select2');
+            }
+          });
+        }
         if (
           policySelect &&
           typeof window.jQuery !== 'undefined' &&
@@ -1856,6 +1872,7 @@
 
         if (supplierModalBtn) {
           supplierModalBtn.addEventListener('click', function () {
+            if (formLocked) return;
             activeSupplierForm = form;
             if (supplierQuickName) supplierQuickName.value = '';
             if (supplierQuickRut) supplierQuickRut.value = '';

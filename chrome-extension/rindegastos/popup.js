@@ -37,6 +37,13 @@
     "nota",
   ];
 
+  const VEHICLE_POLICIES = new Set([
+    "departamento maquinaria",
+    "departamento de maquinaria",
+    "departamento transporte",
+    "departamento de transporte",
+  ]);
+
   const state = {
     rows: [],
     summary: new Map(),
@@ -60,6 +67,15 @@
 
   function normalizeHeader(value) {
     return String(value || "").trim().replace(/^\uFEFF/, "").toLowerCase();
+  }
+
+  function normalizeText(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function parseCsv(text) {
@@ -109,7 +125,9 @@
   function findDataHeaderIndex(csvRows) {
     return csvRows.findIndex((row) => {
       const normalized = row.map(normalizeHeader);
-      return DATA_HEADER.every((header, index) => normalized[index] === header);
+      return ["politica", "expenses_id", "proveedor", "total"].every(
+        (header) => normalized.includes(header),
+      );
     });
   }
 
@@ -234,7 +252,7 @@
     if (!rows.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 4;
+      td.colSpan = 5;
       td.textContent = "Sin datos.";
       tr.append(td);
       els.previewBody.append(tr);
@@ -243,7 +261,12 @@
 
     rows.slice(0, 50).forEach((row) => {
       const tr = document.createElement("tr");
-      [row.expenses_id, row.proveedor, row.total, row.fecha].forEach((value) => {
+      const special = [
+        row.vehiculo_equipo,
+        row.km_carguio ? `Km ${row.km_carguio}` : "",
+        row.litros_combustible ? `${row.litros_combustible} L` : "",
+      ].filter(Boolean).join(" · ");
+      [row.expenses_id, row.proveedor, row.total, row.fecha, special || "-"].forEach((value) => {
         const td = document.createElement("td");
         td.textContent = value || "-";
         tr.append(td);
@@ -256,10 +279,13 @@
     const warnings = [];
     rows.forEach((row, index) => {
       const missing = REQUIRED_FIELDS.filter((field) => !row[field]);
-      if ((row.politica || "").trim().toLowerCase() === "combustibles") {
+      const policy = normalizeText(row.politica);
+      if (policy === "combustibles") {
         ["vehiculo_equipo", "km_carguio", "litros_combustible"].forEach((field) => {
           if (!row[field] && !missing.includes(field)) missing.push(field);
         });
+      } else if (VEHICLE_POLICIES.has(policy) && !row.vehiculo_equipo) {
+        missing.push("vehiculo_equipo");
       }
       if (missing.length) {
         warnings.push(`Fila ${index + 1}: faltan ${missing.join(", ")}`);

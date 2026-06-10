@@ -3,6 +3,7 @@ import base64
 import csv
 import hashlib
 import hmac
+import re
 import secrets
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -80,10 +81,10 @@ def _settings_menu_urls():
         "settings",
         "settings_system_users",
         "settings_users",
-        "settings_worksites",
         "settings_suppliers",
         "settings_categories",
         "settings_expense_types",
+        "settings_rindegastos_fields",
     }
 
 
@@ -862,7 +863,7 @@ def _expense_export_id(expense_id):
 
 
 def _rindegastos_note(note, export_id):
-    clean_note = (note or "").strip()
+    clean_note = re.sub(r"\s*\r?\n+\s*", " | ", (note or "").strip())
     suffix = f"Gasto id {export_id}"
     if not clean_note:
         return suffix
@@ -1073,6 +1074,9 @@ def expense_action(request, pk: int, action: str):
         return redirect("expense_list")
 
     if action == "delete":
+        if not request.user.is_superuser:
+            messages.error(request, "Solo un superadmin puede eliminar gastos.")
+            return redirect("expense_list")
         snapshot_id = expense.id
         split_group_id = expense.split_group_id
         if split_group_id:
@@ -1652,6 +1656,55 @@ def settings_expense_types(request):
         "settings_menu_urls": _settings_menu_urls(),
     }
     return render(request, "settings/expense_types.html", context)
+
+
+@login_required
+@admin_required
+def settings_rindegastos_fields(request):
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "sync_rindegastos":
+            try:
+                stats = RindegastosCatalogSync().sync_all()
+                messages.success(
+                    request,
+                    "Sincronización Rindegastos completada: "
+                    f"{stats['expense_fields']} campos extra y "
+                    f"{stats['verified_policy_links']} relaciones verificadas.",
+                )
+            except (RindegastosAPIError, ValueError) as exc:
+                messages.error(request, f"No se pudo sincronizar Rindegastos: {exc}")
+        elif action == "toggle_field":
+            field = get_object_or_404(RindegastosExpenseFieldCatalog, pk=request.POST.get("field_id"))
+            field.is_active = not field.is_active
+            field.save(update_fields=["is_active"])
+            messages.info(
+                request,
+                f"Campo '{field.name}' {'activado' if field.is_active else 'desactivado'}.",
+            )
+        return redirect("settings_rindegastos_fields")
+
+    fields = list(
+        RindegastosExpenseFieldCatalog.objects.select_related("policy")
+        .order_by("policy__name", "name")
+    )
+    for field in fields:
+        field.display_options = []
+        for option in field.options or []:
+            if isinstance(option, dict):
+                value = option.get("Value") or option.get("Name") or option.get("value") or ""
+                code = option.get("Code") or option.get("code") or ""
+            else:
+                value = str(option)
+                code = ""
+            if str(value).strip():
+                field.display_options.append({"value": str(value).strip(), "code": str(code).strip()})
+
+    context = {
+        "fields": fields,
+        "settings_menu_urls": _settings_menu_urls(),
+    }
+    return render(request, "settings/rindegastos_fields.html", context)
 
 
 @login_required

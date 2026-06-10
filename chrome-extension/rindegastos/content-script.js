@@ -21,8 +21,11 @@
     "tipo_documento",
     "numero_documento",
     "vehiculo_equipo",
+    "km_carguio",
+    "litros_combustible",
     "categoria_rindegastos",
     "nota",
+    "archivo",
   ];
 
   const HEADER_FIELD_MAP = new Map([
@@ -43,8 +46,12 @@
     ["vehiculo o equipo", "vehiculo_equipo"],
     ["vehículo o equipo", "vehiculo_equipo"],
     ["km.carguío", "km_carguio"],
+    ["km. carguío", "km_carguio"],
     ["km carguío", "km_carguio"],
+    ["km de carguío", "km_carguio"],
+    ["kilometraje carguío", "km_carguio"],
     ["litros combustible", "litros_combustible"],
+    ["litros de combustible", "litros_combustible"],
     ["categoria", "categoria_rindegastos"],
     ["categoría", "categoria_rindegastos"],
     ["nota", "nota"],
@@ -144,8 +151,9 @@
   function getHeaderFieldOrder() {
     const header = document.querySelector(".headerSheet");
     const headerFields = collectVisualFields(header);
-    const order = headerFields.map(headerKeyForField).filter(Boolean);
-    return order.length >= 8 ? order : FALLBACK_FIELD_ORDER;
+    const order = headerFields.map(headerKeyForField);
+    const recognizedCount = order.filter(Boolean).length;
+    return recognizedCount >= 8 ? order : FALLBACK_FIELD_ORDER;
   }
 
   function closestField(element) {
@@ -195,6 +203,16 @@
         'textarea[formcontrolname="note"]',
         'input[placeholder*="nota" i]',
         'input[placeholder*="comentario" i]',
+      ],
+      km_carguio: [
+        'input[placeholder*="carguío" i]',
+        'input[placeholder*="carguio" i]',
+        'input[aria-label*="carguío" i]',
+        'input[aria-label*="carguio" i]',
+      ],
+      litros_combustible: [
+        'input[placeholder*="litros" i]',
+        'input[aria-label*="litros" i]',
       ],
     };
     Object.entries(semanticFields).forEach(([key, selectors]) => {
@@ -264,6 +282,14 @@
     return String(value || "").replace(/[^\d]/g, "");
   }
 
+  function parseDecimal(value) {
+    return String(value || "")
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(",", ".")
+      .replace(/[^\d.]/g, "");
+  }
+
   function valueForField(rowData, fieldName) {
     const map = {
       proveedor: rowData.proveedor,
@@ -279,8 +305,8 @@
       tipo_documento: rowData.tipo_documento,
       numero_documento: rowData.numero_documento,
       vehiculo_equipo: rowData.vehiculo_equipo,
-      km_carguio: rowData.km_carguio,
-      litros_combustible: rowData.litros_combustible,
+      km_carguio: parseDecimal(rowData.km_carguio),
+      litros_combustible: parseDecimal(rowData.litros_combustible),
       categoria_rindegastos: rowData.categoria_rindegastos,
       nota: rowData.nota,
     };
@@ -372,6 +398,7 @@
   async function setField(rowFields, fieldName, value) {
     const fieldEl = rowFields[fieldName];
     if (!fieldEl) {
+      if (!value) return { ok: true, skipped: true };
       return { ok: false, error: "campo no encontrado" };
     }
 

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Otzi a Rindegastos",
   "description": "Carga exportaciones CSV de Expenses y rellena gastos multiples en Rindegastos.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "action": {
     "default_popup": "popup.html"
   },

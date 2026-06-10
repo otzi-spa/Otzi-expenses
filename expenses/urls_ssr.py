@@ -11,6 +11,7 @@ from .views import (
     settings_view,
     settings_categories,
     settings_expense_types,
+    settings_rindegastos_fields,
     settings_system_users,
     settings_suppliers,
     settings_users,
@@ -36,4 +37,9 @@ urlpatterns = [
     path("configuracion/proveedores/", settings_suppliers, name="settings_suppliers"),
     path("configuracion/categorias/", settings_categories, name="settings_categories"),
     path("configuracion/tipos-gasto/", settings_expense_types, name="settings_expense_types"),
+    path(
+        "configuracion/campos-rindegastos/",
+        settings_rindegastos_fields,
+        name="settings_rindegastos_fields",
+    ),
 ]

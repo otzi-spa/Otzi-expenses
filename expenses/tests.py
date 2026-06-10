@@ -15,7 +15,7 @@ from expenses.models import (
     SupplierCatalog,
 )
 from expenses.rindegastos_sync import RindegastosCatalogSync
-from expenses.views import _expense_export_id, _missing_fields_for_parametrization
+from expenses.views import _expense_export_id, _missing_fields_for_parametrization, _rindegastos_note
 
 
 class FuelExpenseValidationTests(TestCase):
@@ -91,6 +91,35 @@ class FuelExpenseExportTests(TestCase):
         self.assertContains(page, 'name="fuel_km"')
         self.assertContains(page, 'name="fuel_liters"')
         self.assertContains(page, 'value="154320.00"')
+
+    def test_export_includes_vehicle_for_machinery_policy(self):
+        Expense.objects.create(
+            status="completed",
+            amount=Decimal("125000"),
+            currency="CLP",
+            category="Departamento Maquinaria",
+            supplier="Proveedor Maquinaria",
+            rindegastos_cost_center="Taller Central",
+            paid_at="2026-06-10",
+            rindegastos_document_type="Factura afecta",
+            is_vehicle=True,
+            vehicle="Camión Mack LXXR28",
+        )
+
+        response = self.client.get(reverse("expense_rindegastos_export"))
+        content = response.content.decode("utf-8-sig")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("vehiculo_equipo,km_carguio,litros_combustible", content)
+        self.assertIn("Camión Mack LXXR28,,,", content)
+
+    def test_export_note_flattens_whatsapp_line_breaks(self):
+        note = _rindegastos_note("[Francisco]\nCompra informada por WhatsApp", "OTZ-TEST")
+
+        self.assertEqual(
+            note,
+            "[Francisco] | Compra informada por WhatsApp. Gasto id OTZ-TEST",
+        )
 
 
 class RindegastosVehicleOptionsTests(TestCase):
@@ -492,6 +521,34 @@ class ExpenseApprovalFlowTests(TestCase):
         self.assertEqual(self.expense.status, "rejected")
         self.assertEqual(self.expense.supplier, "Proveedor")
 
+    def test_reviewer_cannot_delete_non_final_expense_and_does_not_see_delete_button(self):
+        self.client.force_login(self.reviewer)
+
+        page = self.client.get(reverse("expense_list"))
+        delete_url = reverse("expense_action", args=[self.expense.pk, "delete"])
+        self.assertNotContains(page, delete_url)
+
+        self.client.post(delete_url)
+
+        self.assertTrue(Expense.objects.filter(pk=self.expense.pk).exists())
+
+    def test_superadmin_sees_delete_button_and_final_form_is_locked(self):
+        self.expense.status = "approved"
+        self.expense.decision_by = self.superadmin
+        self.expense.decision_at = timezone.now()
+        self.expense.save()
+        self.client.force_login(self.superadmin)
+
+        page = self.client.get(reverse("expense_list"))
+
+        self.assertContains(
+            page,
+            reverse("expense_action", args=[self.expense.pk, "delete"]),
+        )
+        self.assertContains(page, 'data-form-locked="true"')
+        self.assertContains(page, "window.jQuery(select).prop('disabled', true)")
+        self.assertContains(page, "No se puede dividir en este estado")
+
     def test_only_superadmin_can_revert_decision(self):
         self.expense.status = "approved"
         self.expense.decision_by = self.reviewer
@@ -516,3 +573,33 @@ class ExpenseApprovalFlowTests(TestCase):
                 actor=self.superadmin,
             ).exists()
         )
+
+
+class RindegastosFieldsSettingsTests(TestCase):
+    def setUp(self):
+        self.superadmin = get_user_model().objects.create_superuser(
+            username="fields-admin@example.com",
+            email="fields-admin@example.com",
+            password="test",
+        )
+        self.client.force_login(self.superadmin)
+
+    def test_fields_maintainer_lists_policy_fields_and_options(self):
+        policy, _ = CategoryCatalog.objects.update_or_create(
+            name="Departamento Maquinaria",
+            defaults={"external_id": "41786", "sync_status": "synced"},
+        )
+        RindegastosExpenseFieldCatalog.objects.create(
+            policy=policy,
+            name="Vehiculo o Equipo",
+            field_type="list",
+            options=[{"Value": "Camión 1", "Code": "EVT01"}],
+        )
+
+        response = self.client.get(reverse("settings_rindegastos_fields"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Campos Rindegastos")
+        self.assertContains(response, "Vehiculo o Equipo")
+        self.assertContains(response, "Camión 1")
+        self.assertNotContains(response, 'href="/configuracion/obras/"')
