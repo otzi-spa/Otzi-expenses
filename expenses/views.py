@@ -235,6 +235,7 @@ def _rindegastos_field_options_payload():
             payload.append(
                 {
                     "policy_id": field.policy_id,
+                    "policy_external_id": field.policy.external_id or "",
                     "policy_name": field.policy.name,
                     "field_name": field.name,
                     "value": value,
@@ -1504,9 +1505,10 @@ def settings_categories(request):
                     f"{stats['categories']} categorías, "
                     f"{stats['taxes']} impuestos, "
                     f"{stats['expense_fields']} campos extra, "
-                    f"{stats['users']} usuarios.",
+                    f"{stats['users']} usuarios, "
+                    f"{stats['verified_policy_links']} relaciones verificadas.",
                 )
-            except RindegastosAPIError as exc:
+            except (RindegastosAPIError, ValueError) as exc:
                 messages.error(request, f"No se pudo sincronizar Rindegastos: {exc}")
         elif action == "add_category":
             name = request.POST.get("name", "").strip()

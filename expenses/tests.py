@@ -127,6 +127,7 @@ class RindegastosVehicleOptionsTests(TestCase):
         self.assertIn(
             {
                 "policy_id": policy.id,
+                "policy_external_id": policy.external_id,
                 "policy_name": policy.name,
                 "field_name": "Vehiculo o Equipo",
                 "value": "Camión 01",

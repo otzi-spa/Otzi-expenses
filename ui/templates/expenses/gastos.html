@@ -169,7 +169,7 @@
               <select name="category_select" class="form-select js-searchable-select" data-required-param="true">
                 <option value="">Selecciona política</option>
                 {% for c in categories_catalog %}
-                <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}">{{ c.name }}</option>
+                <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-external-id="{{ c.external_id|default:'' }}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}">{{ c.name }}</option>
                 {% endfor %}
               </select>
               <input type="hidden" name="category_policy_id" value="">
@@ -263,7 +263,7 @@
                   <select name="expense_type_select" class="form-select js-searchable-select">
                     <option value="">Selecciona categoría Rindegastos</option>
                     {% for t in expense_types_catalog %}
-                    <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" data-policy-name="{{ t.policy.name|default:'' }}">{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
+                    <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" data-policy-external-id="{{ t.policy.external_id|default:'' }}" data-policy-name="{{ t.policy.name|default:'' }}">{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                     {% endfor %}
                   </select>
                 </div>
@@ -597,7 +597,7 @@
                   <select name="category_select" class="form-select js-searchable-select" data-required-param="true">
                     <option value="">Selecciona política</option>
                     {% for c in categories_catalog %}
-                    <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}" {% if gasto.category == c.name %}selected{% endif %}>{{ c.name }}</option>
+                    <option value="{{ c.name }}" data-policy-id="{{ c.id }}" data-policy-external-id="{{ c.external_id|default:'' }}" data-policy-name="{{ c.name }}" data-currency="{{ c.currency|default:'' }}" {% if gasto.category == c.name %}selected{% endif %}>{{ c.name }}</option>
                     {% endfor %}
                   </select>
                   <input type="hidden" name="category_policy_id" value="{{ gasto.policy_catalog_id|default:'' }}">
@@ -691,7 +691,7 @@
                       <select name="expense_type_select" class="form-select js-searchable-select">
                         <option value="">Selecciona categoría Rindegastos</option>
                         {% for t in expense_types_catalog %}
-                        <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" data-policy-name="{{ t.policy.name|default:'' }}" {% if gasto.expense_type == t.name and gasto.policy_catalog_id == t.policy_id %}selected{% endif %}>{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
+                        <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" data-policy-external-id="{{ t.policy.external_id|default:'' }}" data-policy-name="{{ t.policy.name|default:'' }}" {% if gasto.expense_type == t.name and gasto.policy_catalog_id == t.policy_id %}selected{% endif %}>{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                         {% endfor %}
                       </select>
                     </div>
@@ -1638,6 +1638,8 @@
           }) || policySelect.options[policySelect.selectedIndex];
           return {
             id: selectedOption ? (selectedOption.getAttribute('data-policy-id') || '').trim() : '',
+            externalId: selectedOption ?
+              (selectedOption.getAttribute('data-policy-external-id') || '').trim() : '',
             currency: selectedOption ? (selectedOption.getAttribute('data-currency') || '').trim() : '',
             name: selectedOption ? (selectedOption.value || '').trim() : '',
             key: normalizePolicyKey(
@@ -1655,7 +1657,7 @@
           currencySelect.setAttribute('data-current-value', currentValue);
         }
 
-        function filterExpenseTypesByPolicy(selectedPolicyId, selectedPolicyKey) {
+        function filterExpenseTypesByPolicy(selectedPolicyId, selectedPolicyExternalId, selectedPolicyKey) {
           if (!expenseTypeSelect) return;
           var currentValue = expenseTypeSelect.value;
           var currentVisible = false;
@@ -1665,8 +1667,10 @@
               return;
             }
             var policyId = (option.getAttribute('data-policy-id') || '').trim();
+            var policyExternalId = (option.getAttribute('data-policy-external-id') || '').trim();
             var policyKey = normalizePolicyKey(option.getAttribute('data-policy-name') || '');
             var visible = !policyId || !selectedPolicyId ||
+              (selectedPolicyExternalId && policyExternalId === selectedPolicyExternalId) ||
               (selectedPolicyKey && policyKey === selectedPolicyKey) ||
               policyId === selectedPolicyId;
             option.hidden = !visible;
@@ -1679,7 +1683,12 @@
           }
         }
 
-        function populateRindegastosFieldSelect(select, selectedPolicyId, selectedPolicyKey) {
+        function populateRindegastosFieldSelect(
+          select,
+          selectedPolicyId,
+          selectedPolicyExternalId,
+          selectedPolicyKey
+        ) {
           var fieldName = select.getAttribute('data-rindegastos-field') || '';
           var placeholder = select.options[0] ? select.options[0].textContent : 'Selecciona una opción';
           var currentValue = select.value || select.getAttribute('data-current-value') || '';
@@ -1696,9 +1705,11 @@
           var options = rindegastosFieldOptions.filter(function (item) {
             var samePolicyName = selectedPolicyKey &&
               normalizePolicyKey(item.policy_name) === selectedPolicyKey;
+            var sameExternalId = selectedPolicyExternalId &&
+              String(item.policy_external_id || '') === String(selectedPolicyExternalId);
             var samePolicyId =
               String(item.policy_id || '') === String(selectedPolicyId || '');
-            return (samePolicyName || samePolicyId) && item.field_name === fieldName;
+            return (sameExternalId || samePolicyName || samePolicyId) && item.field_name === fieldName;
           });
           var seenValues = {};
           options.forEach(function (item) {
@@ -1732,9 +1743,9 @@
           var meta = selectedPolicyMeta();
           if (policyIdInput) policyIdInput.value = meta.id;
           updateCurrencySelect(meta.currency);
-          filterExpenseTypesByPolicy(meta.id, meta.key);
+          filterExpenseTypesByPolicy(meta.id, meta.externalId, meta.key);
           rindegastosFieldSelects.forEach(function (select) {
-            populateRindegastosFieldSelect(select, meta.id, meta.key);
+            populateRindegastosFieldSelect(select, meta.id, meta.externalId, meta.key);
           });
           toggleVehicleSection();
         }

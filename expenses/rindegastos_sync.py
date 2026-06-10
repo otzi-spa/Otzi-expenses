@@ -64,6 +64,7 @@ class RindegastosCatalogSync:
             "taxes": 0,
             "expense_fields": 0,
             "users": 0,
+            "verified_policy_links": 0,
         }
 
         policies = self.client.get_expense_policies(active_only=True)
@@ -84,9 +85,33 @@ class RindegastosCatalogSync:
                 last_synced_at=self.now,
             )
         self.merge_manual_policy_duplicates()
+        stats["verified_policy_links"] = self.verify_policy_links()
 
         stats["users"] = self.sync_users()
         return stats
+
+    def policy_linked_payload(self, policy, payload):
+        return {
+            **payload,
+            "_OtziPolicyExternalId": policy.external_id,
+            "_OtziPolicyName": policy.name,
+        }
+
+    def verify_policy_links(self):
+        verified = 0
+        models = (ExpenseTypeCatalog, RindegastosTaxCatalog, RindegastosExpenseFieldCatalog)
+        for model in models:
+            for item in model.objects.filter(sync_status="synced").select_related("policy"):
+                source_external_id = as_text((item.raw_payload or {}).get("_OtziPolicyExternalId"))
+                if not source_external_id:
+                    continue
+                if source_external_id != as_text(item.policy.external_id):
+                    raise ValueError(
+                        f"{model.__name__} #{item.pk} está asociado a la política "
+                        f"{item.policy.external_id}, pero fue sincronizado desde {source_external_id}."
+                    )
+                verified += 1
+        return verified
 
     def merge_manual_policy_duplicates(self):
         synced_policies = list(CategoryCatalog.objects.filter(external_id__isnull=False))
@@ -156,7 +181,7 @@ class RindegastosCatalogSync:
                 "is_active": True,
                 "sync_status": "synced",
                 "last_synced_at": self.now,
-                "raw_payload": payload,
+                "raw_payload": self.policy_linked_payload(policy, payload),
             }
             ExpenseTypeCatalog.objects.update_or_create(
                 policy=policy,
@@ -188,7 +213,7 @@ class RindegastosCatalogSync:
                     "is_active": True,
                     "sync_status": "synced",
                     "last_synced_at": self.now,
-                    "raw_payload": payload,
+                    "raw_payload": self.policy_linked_payload(policy, payload),
                 },
             )
             count += 1
@@ -217,7 +242,7 @@ class RindegastosCatalogSync:
                     "is_active": True,
                     "sync_status": "synced",
                     "last_synced_at": self.now,
-                    "raw_payload": payload,
+                    "raw_payload": self.policy_linked_payload(policy, payload),
                 },
             )
             count += 1
