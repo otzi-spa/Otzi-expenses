@@ -342,6 +342,8 @@ class SupplierCatalogFlowTests(TestCase):
         response = self.client.get(reverse("expense_list"))
 
         self.assertContains(response, "Obra (ingresada por usuario)")
+        self.assertContains(response, 'class="modal fade supplier-quick-modal"')
+        self.assertContains(response, "supplier-quick-backdrop")
         self.assertNotContains(response, 'name="worksite_standard"')
         self.assertNotContains(response, 'name="new_category_name"')
         self.assertNotContains(response, 'name="expense_type_other"')

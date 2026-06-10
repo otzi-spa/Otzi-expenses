@@ -118,7 +118,7 @@
 </div>
 {% endif %}
 
-<div class="modal fade" id="supplierQuickModal" tabindex="-1" aria-labelledby="supplierQuickModalLabel" aria-hidden="true">
+<div class="modal fade supplier-quick-modal" id="supplierQuickModal" tabindex="-1" aria-labelledby="supplierQuickModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
@@ -885,6 +885,14 @@
       overflow-y: auto !important;
     }
 
+    .supplier-quick-modal {
+      z-index: 1070;
+    }
+
+    .supplier-quick-backdrop {
+      z-index: 1060;
+    }
+
     .expense-edit-modal .modal-dialog {
       max-width: min(1680px, calc(100vw - 1.5rem));
       height: calc(100vh - 1rem);
@@ -1253,6 +1261,24 @@
       var supplierQuickName = document.getElementById('supplierQuickName');
       var supplierQuickRut = document.getElementById('supplierQuickRut');
       var supplierQuickSaveBtn = document.getElementById('supplierQuickSaveBtn');
+      if (supplierQuickModalEl) {
+        supplierQuickModalEl.addEventListener('shown.bs.modal', function () {
+          var backdrops = document.querySelectorAll('.modal-backdrop');
+          var supplierBackdrop = backdrops[backdrops.length - 1];
+          if (supplierBackdrop) {
+            supplierBackdrop.classList.add('supplier-quick-backdrop');
+          }
+        });
+        supplierQuickModalEl.addEventListener('hidden.bs.modal', function () {
+          var hasOpenParentModal = Array.from(document.querySelectorAll('.modal.show')).some(function (modal) {
+            return modal !== supplierQuickModalEl;
+          });
+          if (hasOpenParentModal) {
+            document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
+          }
+        });
+      }
 
       function getCellSortValue(row, index) {
         var cell = row.cells[index];
