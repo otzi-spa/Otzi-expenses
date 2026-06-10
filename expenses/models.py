@@ -74,6 +74,14 @@ class Expense(models.Model):
     )
     split_index = models.PositiveSmallIntegerField(null=True, blank=True)
     split_total = models.PositiveSmallIntegerField(null=True, blank=True)
+    decision_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="decided_expenses",
+    )
+    decision_at = models.DateTimeField(null=True, blank=True)
 
 class Attachment(models.Model):
     expense = models.ForeignKey(Expense, related_name="attachments", on_delete=models.CASCADE)
@@ -284,6 +292,7 @@ class ExpenseAuditLog(models.Model):
         ("status_change_blocked", "Cambio de estado bloqueado"),
         ("approved", "Aprobado"),
         ("rejected", "Rechazado"),
+        ("decision_reverted", "Decisión revertida"),
         ("deleted", "Eliminado"),
         ("whatsapp_update", "Actualización WhatsApp"),
     ]

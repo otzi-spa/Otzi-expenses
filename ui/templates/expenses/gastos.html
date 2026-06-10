@@ -392,6 +392,16 @@
                 <span class="badge badge-light">{{ status_label }}</span>
               {% endif %}
             {% endwith %}
+            {% if gasto.is_locked %}
+              <div class="text-muted fs-8 mt-1">
+                por
+                {% if gasto.decision_by %}
+                  {{ gasto.decision_by.get_full_name|default:gasto.decision_by.email }}
+                {% else %}
+                  usuario no disponible
+                {% endif %}
+              </div>
+            {% endif %}
           </td>
           <td data-order="{{ gasto.message_sent_at|date:'Y-m-d H:i:s' }}">{{ gasto.message_sent_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
           <td>
@@ -465,9 +475,23 @@
                 </button>
               </form>
 
+              {% if gasto.can_revert_decision %}
+              <form method="post" action="{% url 'expense_action' gasto.pk 'revert_decision' %}" class="d-inline" onsubmit="return confirm('¿Revertir esta decisión y devolver el gasto a Parametrizado?')">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-light-primary btn-icon btn-sm" data-kt-tooltip="true" title="Revertir decisión">
+                  <span class="svg-icon svg-icon-3">
+                    <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+                      <path d="M5.5 4H2.5V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M2.75 4C3.9 2.65 5.62 1.8 7.55 1.8C11.05 1.8 13.9 4.65 13.9 8.15C13.9 11.65 11.05 14.5 7.55 14.5C5.15 14.5 3.05 13.17 1.98 11.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                </button>
+              </form>
+              {% endif %}
+
               <form method="post" action="{% url 'expense_action' gasto.pk 'delete' %}" class="d-inline" onsubmit="return confirm('¿Eliminar gasto #{{ gasto.pk }}?')">
                 {% csrf_token %}
-                <button type="submit" class="btn btn-light-secondary btn-icon btn-sm" data-kt-tooltip="true" title="Eliminar gasto">
+                <button type="submit" class="btn btn-light-secondary btn-icon btn-sm" {% if gasto.is_locked %}disabled{% endif %} data-kt-tooltip="true" title="{% if gasto.is_locked %}Primero debes revertir la decisión{% else %}Eliminar gasto{% endif %}">
                   <span class="svg-icon svg-icon-3">
                     <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
                       <path d="M6 2.5H10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
@@ -535,7 +559,22 @@
                   </div>
                 </div>
                 {% endif %}
-                <fieldset class="row g-3" {% if not can_manage_expenses %}disabled{% endif %}>
+                {% if gasto.is_locked %}
+                <div class="col-12">
+                  <div class="alert {% if gasto.status == 'approved' %}alert-light-success{% else %}alert-light-danger{% endif %} mb-0">
+                    <strong>{{ gasto.get_status_display }}</strong>
+                    por
+                    {% if gasto.decision_by %}
+                      {{ gasto.decision_by.get_full_name|default:gasto.decision_by.email }}
+                    {% else %}
+                      usuario no disponible
+                    {% endif %}
+                    {% if gasto.decision_at %}el {{ gasto.decision_at|localtime|date:'d/m/Y H:i' }}{% endif %}.
+                    El gasto está bloqueado y no puede volver a parametrizarse.
+                  </div>
+                </div>
+                {% endif %}
+                <fieldset class="row g-3" {% if not can_manage_expenses or gasto.is_locked %}disabled{% endif %}>
                 <div class="col-md-4">
                   <label class="form-label">Estado</label>
                   <select name="status" class="form-select" data-role="status-field" {% if gasto.status == "incomplete" or gasto.status == "not_completed" or gasto.status == "approved" or gasto.status == "rejected" %}disabled{% endif %}>
@@ -788,7 +827,7 @@
             <div class="modal-footer">
               <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
               <button type="button" class="btn btn-light-primary open-history-btn" data-expense-id="{{ gasto.pk }}">Historial</button>
-              {% if can_manage_expenses %}
+              {% if can_manage_expenses and not gasto.is_locked %}
               <button type="submit" class="btn btn-primary">Guardar cambios</button>
               {% endif %}
             </div>
@@ -1198,7 +1237,7 @@
       var allExpenseRows = expensesTbody ? Array.from(expensesTbody.querySelectorAll("tr")) : [];
       var activeQuickFilter = "all";
       var searchTerm = "";
-      var sortState = { columnIndex: 0, direction: "desc" };
+      var sortState = { columnIndex: 1, direction: "desc" };
       var rindegastosFieldOptionsEl = document.getElementById("rindegastos-field-options-data");
       var rindegastosFieldOptions = [];
       var activeSupplierForm = null;

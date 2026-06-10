@@ -3,8 +3,15 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
-from expenses.models import CategoryCatalog, Expense, RindegastosExpenseFieldCatalog, SupplierCatalog
+from expenses.models import (
+    CategoryCatalog,
+    Expense,
+    ExpenseAuditLog,
+    RindegastosExpenseFieldCatalog,
+    SupplierCatalog,
+)
 from expenses.views import _expense_export_id, _missing_fields_for_parametrization
 
 
@@ -219,6 +226,7 @@ class SupplierCatalogFlowTests(TestCase):
 
         self.assertContains(response, "ID Rindegastos")
         self.assertContains(response, _expense_export_id(expense.pk))
+        self.assertContains(response, 'var sortState = { columnIndex: 1, direction: "desc" };')
 
 
 class IncompleteExpenseStatusTests(TestCase):
@@ -280,3 +288,82 @@ class IncompleteExpenseStatusTests(TestCase):
 
         expense.refresh_from_db()
         self.assertEqual(expense.status, "not_completed")
+
+
+class ExpenseApprovalFlowTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.reviewer = User.objects.create_user(
+            username="parametrizador@example.com",
+            email="parametrizador@example.com",
+            password="test",
+            role="reviewer",
+        )
+        self.superadmin = User.objects.create_superuser(
+            username="superadmin@example.com",
+            email="superadmin@example.com",
+            password="test",
+        )
+        self.expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+        )
+
+    def test_reviewer_can_approve_only_parametrized_expense(self):
+        self.client.force_login(self.reviewer)
+
+        self.client.post(reverse("expense_action", args=[self.expense.pk, "approve"]))
+
+        self.expense.refresh_from_db()
+        self.assertEqual(self.expense.status, "approved")
+        self.assertEqual(self.expense.decision_by, self.reviewer)
+        self.assertIsNotNone(self.expense.decision_at)
+        self.assertTrue(
+            ExpenseAuditLog.objects.filter(
+                expense=self.expense,
+                action="approved",
+                actor=self.reviewer,
+            ).exists()
+        )
+
+    def test_final_expense_cannot_be_edited_or_deleted_by_reviewer(self):
+        self.expense.status = "rejected"
+        self.expense.decision_by = self.reviewer
+        self.expense.decision_at = timezone.now()
+        self.expense.save()
+        self.client.force_login(self.reviewer)
+
+        self.client.post(
+            reverse("expense_detail", args=[self.expense.pk]),
+            {"supplier_select": "Proveedor modificado", "status": "completed"},
+        )
+        self.client.post(reverse("expense_action", args=[self.expense.pk, "delete"]))
+
+        self.expense.refresh_from_db()
+        self.assertEqual(self.expense.status, "rejected")
+        self.assertEqual(self.expense.supplier, "Proveedor")
+
+    def test_only_superadmin_can_revert_decision(self):
+        self.expense.status = "approved"
+        self.expense.decision_by = self.reviewer
+        self.expense.decision_at = timezone.now()
+        self.expense.save()
+
+        self.client.force_login(self.reviewer)
+        self.client.post(reverse("expense_action", args=[self.expense.pk, "revert_decision"]))
+        self.expense.refresh_from_db()
+        self.assertEqual(self.expense.status, "approved")
+
+        self.client.force_login(self.superadmin)
+        self.client.post(reverse("expense_action", args=[self.expense.pk, "revert_decision"]))
+        self.expense.refresh_from_db()
+        self.assertEqual(self.expense.status, "completed")
+        self.assertIsNone(self.expense.decision_by)
+        self.assertIsNone(self.expense.decision_at)
+        self.assertTrue(
+            ExpenseAuditLog.objects.filter(
+                expense=self.expense,
+                action="decision_reverted",
+                actor=self.superadmin,
+            ).exists()
+        )

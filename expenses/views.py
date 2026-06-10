@@ -101,6 +101,14 @@ def _can_manage_expenses(user):
     )
 
 
+def _can_decide_expenses(user):
+    return _can_manage_expenses(user)
+
+
+def _is_final_expense(expense):
+    return expense.status in {"approved", "rejected"}
+
+
 def _log_user_event(actor, target_user, action, changes=None):
     UserAuditLog.objects.create(
         actor=actor if getattr(actor, "is_authenticated", False) else None,
@@ -379,6 +387,12 @@ def expense_detail(request, pk: int):
     if request.method == "POST":
         if not _can_manage_expenses(request.user):
             messages.error(request, "No tienes permisos para editar gastos.")
+            return redirect("expense_list")
+        if _is_final_expense(expense):
+            messages.error(
+                request,
+                "El gasto está aprobado o rechazado y no puede modificarse. Solo un superadmin puede revertir la decisión.",
+            )
             return redirect("expense_list")
 
         tracked_fields = [
@@ -713,7 +727,7 @@ def expense_create(request):
 def expense_list(request):
     can_manage_expenses = _can_manage_expenses(request.user)
     gastos = (
-        Expense.objects.select_related("created_by", "wa_sender")
+        Expense.objects.select_related("created_by", "wa_sender", "decision_by")
         .prefetch_related("attachments", "audit_logs")
         .order_by("-created_at")
     )
@@ -736,7 +750,9 @@ def expense_list(request):
         logs = list(gasto.audit_logs.all())
         gasto.audit_entries = logs[:5]
         gasto.audit_entries_all = logs
-        gasto.can_approve_or_reject = can_manage_expenses and gasto.status == "completed"
+        gasto.can_approve_or_reject = _can_decide_expenses(request.user) and gasto.status == "completed"
+        gasto.can_revert_decision = request.user.is_superuser and _is_final_expense(gasto)
+        gasto.is_locked = _is_final_expense(gasto)
         gasto.can_manage = can_manage_expenses
         gasto.split_label = ""
         if gasto.split_group_id and gasto.split_index and gasto.split_total:
@@ -914,37 +930,90 @@ def expense_action(request, pk: int, action: str):
     reason = request.POST.get("reason", "").strip()
 
     if action == "approve":
+        if not _can_decide_expenses(request.user):
+            messages.error(request, "No tienes permisos para aprobar gastos.")
+            return redirect("expense_list")
         if expense.status != "completed":
             messages.error(request, "Solo se puede aprobar un gasto parametrizado.")
             return redirect("expense_list")
         old_status = expense.status
         expense.status = "approved"
-        expense.save(update_fields=["status"])
+        expense.decision_by = request.user
+        expense.decision_at = timezone.now()
+        expense.save(update_fields=["status", "decision_by", "decision_at"])
         _log_expense_event(
             expense,
             action="approved",
             actor=request.user,
             reason=reason,
-            changes={"status": {"before": old_status, "after": expense.status}},
+            changes={
+                "status": {"before": old_status, "after": expense.status},
+                "decision_by": {"before": None, "after": request.user.email},
+                "decision_at": {"before": None, "after": expense.decision_at.isoformat()},
+            },
         )
         messages.success(request, "Gasto aprobado.")
         return redirect("expense_list")
 
     if action == "reject":
+        if not _can_decide_expenses(request.user):
+            messages.error(request, "No tienes permisos para rechazar gastos.")
+            return redirect("expense_list")
         if expense.status != "completed":
             messages.error(request, "Solo se puede rechazar un gasto parametrizado.")
             return redirect("expense_list")
         old_status = expense.status
         expense.status = "rejected"
-        expense.save(update_fields=["status"])
+        expense.decision_by = request.user
+        expense.decision_at = timezone.now()
+        expense.save(update_fields=["status", "decision_by", "decision_at"])
         _log_expense_event(
             expense,
             action="rejected",
             actor=request.user,
             reason=reason,
-            changes={"status": {"before": old_status, "after": expense.status}},
+            changes={
+                "status": {"before": old_status, "after": expense.status},
+                "decision_by": {"before": None, "after": request.user.email},
+                "decision_at": {"before": None, "after": expense.decision_at.isoformat()},
+            },
         )
         messages.warning(request, "Gasto rechazado.")
+        return redirect("expense_list")
+
+    if action == "revert_decision":
+        if not request.user.is_superuser:
+            messages.error(request, "Solo un superadmin puede revertir una aprobación o rechazo.")
+            return redirect("expense_list")
+        if not _is_final_expense(expense):
+            messages.error(request, "El gasto no tiene una decisión que pueda revertirse.")
+            return redirect("expense_list")
+        old_status = expense.status
+        old_decision_by = expense.decision_by.email if expense.decision_by else ""
+        old_decision_at = expense.decision_at.isoformat() if expense.decision_at else None
+        expense.status = "completed"
+        expense.decision_by = None
+        expense.decision_at = None
+        expense.save(update_fields=["status", "decision_by", "decision_at"])
+        _log_expense_event(
+            expense,
+            action="decision_reverted",
+            actor=request.user,
+            reason=reason,
+            changes={
+                "status": {"before": old_status, "after": expense.status},
+                "decision_by": {"before": old_decision_by, "after": None},
+                "decision_at": {"before": old_decision_at, "after": None},
+            },
+        )
+        messages.success(request, "La decisión fue revertida. El gasto volvió a Parametrizado.")
+        return redirect("expense_list")
+
+    if _is_final_expense(expense):
+        messages.error(
+            request,
+            "El gasto está aprobado o rechazado y no admite más acciones. Solo un superadmin puede revertir la decisión.",
+        )
         return redirect("expense_list")
 
     if action == "delete":
