@@ -722,6 +722,7 @@ def expense_list(request):
         for s in AllowedSender.objects.filter(is_deleted=False)
     }
     for gasto in gastos:
+        gasto.export_id = _expense_export_id(gasto.id)
         gasto.policy_catalog_id = None
         if gasto.category:
             policy_catalog = CategoryCatalog.objects.filter(name=gasto.category).only("id").first()

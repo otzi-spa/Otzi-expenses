@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from expenses.models import CategoryCatalog, Expense, RindegastosExpenseFieldCatalog, SupplierCatalog
-from expenses.views import _missing_fields_for_parametrization
+from expenses.views import _expense_export_id, _missing_fields_for_parametrization
 
 
 class FuelExpenseValidationTests(TestCase):
@@ -208,7 +208,7 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, 'class="expense-form-pane"')
         self.assertContains(response, 'class="expense-receipt-pane"')
 
-    def test_expense_table_displays_internal_id(self):
+    def test_expense_table_displays_rindegastos_trace_id(self):
         expense = Expense.objects.create(
             status="pending",
             category=self.policy.name,
@@ -217,8 +217,8 @@ class SupplierCatalogFlowTests(TestCase):
 
         response = self.client.get(reverse("expense_list"))
 
-        self.assertContains(response, "<th data-sortable=\"true\">ID</th>", html=True)
-        self.assertContains(response, f"#{expense.pk}")
+        self.assertContains(response, "ID Rindegastos")
+        self.assertContains(response, _expense_export_id(expense.pk))
 
 
 class IncompleteExpenseStatusTests(TestCase):
