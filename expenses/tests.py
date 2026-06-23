@@ -693,3 +693,67 @@ class RindegastosFieldsSettingsTests(TestCase):
 
         self.assertFalse(CategoryCatalog.objects.filter(name="Manual no permitida").exists())
         self.assertFalse(ExpenseTypeCatalog.objects.filter(name="Manual no permitida").exists())
+
+
+class SystemUsersSettingsTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.superadmin = User.objects.create_superuser(
+            username="superadmin-users@example.com",
+            email="superadmin-users@example.com",
+            password="test",
+        )
+        self.admin = User.objects.create_user(
+            username="admin-users@example.com",
+            email="admin-users@example.com",
+            password="test",
+            role="admin",
+        )
+        self.target = User.objects.create_user(
+            username="target-users@example.com",
+            email="target-users@example.com",
+            password="test",
+            role="reviewer",
+        )
+
+    def test_superadmin_can_promote_user_to_superadmin(self):
+        self.client.force_login(self.superadmin)
+
+        self.client.post(
+            reverse("settings_system_users"),
+            {
+                "action": "update_system_user",
+                "user_id": self.target.pk,
+                "email": self.target.email,
+                "first_name": self.target.first_name,
+                "last_name": self.target.last_name,
+                "role": "admin",
+                "is_active": "on",
+                "is_superuser": "on",
+            },
+        )
+
+        self.target.refresh_from_db()
+        self.assertTrue(self.target.is_superuser)
+        self.assertTrue(self.target.is_staff)
+
+    def test_admin_cannot_promote_user_to_superadmin(self):
+        self.client.force_login(self.admin)
+
+        self.client.post(
+            reverse("settings_system_users"),
+            {
+                "action": "update_system_user",
+                "user_id": self.target.pk,
+                "email": self.target.email,
+                "first_name": self.target.first_name,
+                "last_name": self.target.last_name,
+                "role": "admin",
+                "is_active": "on",
+                "is_superuser": "on",
+            },
+        )
+
+        self.target.refresh_from_db()
+        self.assertFalse(self.target.is_superuser)
+        self.assertFalse(self.target.is_staff)

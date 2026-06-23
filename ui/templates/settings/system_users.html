@@ -50,6 +50,15 @@
               <label class="form-check-label" for="systemUserActive">Activo</label>
             </div>
           </div>
+          {% if request.user.is_superuser %}
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="is_superuser" id="systemUserSuperadmin">
+              <label class="form-check-label" for="systemUserSuperadmin">Superadmin</label>
+            </div>
+            <div class="form-text">Entrega permisos completos, incluida la reversión de aprobaciones y rechazos.</div>
+          </div>
+          {% endif %}
           <div class="col-12">
             <button class="btn btn-primary w-100" type="submit">Agregar</button>
           </div>
@@ -98,15 +107,15 @@
                 <td class="fw-semibold">{{ system_user.email|default:"-" }}</td>
                 <td>
                   <span class="badge badge-light-primary text-uppercase">{{ system_user.role }}</span>
+                  {% if system_user.is_superuser %}
+                    <span class="badge badge-light-warning">Superadmin</span>
+                  {% endif %}
                 </td>
                 <td>
                   {% if system_user.is_active %}
                     <span class="badge badge-light-success">Activo</span>
                   {% else %}
                     <span class="badge badge-light-danger">Inactivo</span>
-                  {% endif %}
-                  {% if system_user.is_superuser %}
-                    <span class="badge badge-light-warning">Superuser</span>
                   {% endif %}
                 </td>
                 <td class="text-end">
@@ -222,6 +231,15 @@
                 <label class="form-check-label" for="systemUserActive{{ system_user.id }}">Activo</label>
               </div>
             </div>
+            {% if request.user.is_superuser %}
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="is_superuser" id="systemUserSuperadmin{{ system_user.id }}" {% if system_user.is_superuser %}checked{% endif %}>
+                <label class="form-check-label" for="systemUserSuperadmin{{ system_user.id }}">Superadmin</label>
+              </div>
+              <div class="form-text">Solo otro superadmin puede modificar este permiso.</div>
+            </div>
+            {% endif %}
           </div>
         </div>
         <div class="modal-footer">

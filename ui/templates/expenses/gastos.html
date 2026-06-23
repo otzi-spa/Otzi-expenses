@@ -919,6 +919,27 @@
       z-index: 1060;
     }
 
+    .select2-container.select2-locked .select2-selection,
+    .select2-container--default.select2-container--disabled .select2-selection--single,
+    .select2-container--default.select2-container--disabled .select2-selection--multiple {
+      background-color: #f5f8fa !important;
+      border-color: #e4e6ef !important;
+      cursor: not-allowed !important;
+      opacity: 0.72;
+    }
+
+    .select2-container.select2-locked .select2-selection__rendered,
+    .select2-container--default.select2-container--disabled .select2-selection__rendered {
+      color: #a1a5b7 !important;
+    }
+
+    .select2-container.select2-locked .select2-selection__arrow,
+    .select2-container.select2-locked .select2-selection__clear,
+    .select2-container--default.select2-container--disabled .select2-selection__arrow,
+    .select2-container--default.select2-container--disabled .select2-selection__clear {
+      opacity: 0.45;
+    }
+
     .expense-edit-modal .modal-dialog {
       max-width: min(1680px, calc(100vw - 1.5rem));
       height: calc(100vh - 1rem);
@@ -1534,6 +1555,15 @@
           return;
         }
         window.jQuery(select).trigger('change.select2');
+        syncSearchableSelectDisabledState(select);
+      }
+
+      function syncSearchableSelectDisabledState(select) {
+        if (!select || typeof window.jQuery === 'undefined') return;
+        var container = window.jQuery(select).next('.select2-container');
+        if (!container.length) return;
+        container.toggleClass('select2-locked', select.disabled);
+        container.attr('aria-disabled', select.disabled ? 'true' : 'false');
       }
 
       function initSearchableSelect(select) {
@@ -1572,6 +1602,7 @@
         }
 
         window.jQuery(select).select2(options);
+        syncSearchableSelectDisabledState(select);
       }
 
       var forms = document.querySelectorAll('form[action*="/expenses/"]');
@@ -1861,6 +1892,7 @@
               window.jQuery(select).hasClass('select2-hidden-accessible')
             ) {
               window.jQuery(select).prop('disabled', true).trigger('change.select2');
+              syncSearchableSelectDisabledState(select);
             }
           });
         }

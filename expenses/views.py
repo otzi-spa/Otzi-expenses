@@ -1255,6 +1255,7 @@ def settings_system_users(request):
             password = request.POST.get("password", "")
             role = request.POST.get("role", "reviewer").strip() or "reviewer"
             is_active = request.POST.get("is_active") == "on"
+            is_superuser = request.user.is_superuser and request.POST.get("is_superuser") == "on"
 
             if role not in {"admin", "reviewer", "viewer"}:
                 role = "reviewer"
@@ -1272,8 +1273,8 @@ def settings_system_users(request):
                     last_name=last_name,
                     role=role,
                     is_active=is_active,
-                    is_staff=False,
-                    is_superuser=False,
+                    is_staff=is_superuser,
+                    is_superuser=is_superuser,
                 )
                 user.set_password(password)
                 user.save()
@@ -1285,6 +1286,7 @@ def settings_system_users(request):
                         "email": {"before": None, "after": user.email},
                         "role": {"before": None, "after": user.role},
                         "is_active": {"before": None, "after": user.is_active},
+                        "is_superuser": {"before": None, "after": user.is_superuser},
                     },
                 )
                 messages.success(request, "Usuario del sistema creado.")
@@ -1297,6 +1299,7 @@ def settings_system_users(request):
                 "last_name": user.last_name,
                 "role": user.role,
                 "is_active": user.is_active,
+                "is_superuser": user.is_superuser,
             }
             email = request.POST.get("email", "").strip().lower()
             if not email:
@@ -1314,6 +1317,13 @@ def settings_system_users(request):
                 role = "reviewer"
             user.role = role
             user.is_active = request.POST.get("is_active") == "on"
+            if request.user.is_superuser:
+                requested_superuser = request.POST.get("is_superuser") == "on"
+                if user == request.user and not requested_superuser:
+                    messages.error(request, "No puedes quitarte a ti mismo el permiso de superadmin.")
+                    return redirect("settings_system_users")
+                user.is_superuser = requested_superuser
+                user.is_staff = requested_superuser
 
             new_password = request.POST.get("password", "")
             if new_password:
@@ -1322,7 +1332,10 @@ def settings_system_users(request):
             if new_password:
                 user.save()
             else:
-                user.save(update_fields=["email", "first_name", "last_name", "role", "is_active"])
+                update_fields = ["email", "first_name", "last_name", "role", "is_active"]
+                if request.user.is_superuser:
+                    update_fields.extend(["is_superuser", "is_staff"])
+                user.save(update_fields=update_fields)
 
             after = {
                 "email": user.email,
@@ -1330,6 +1343,7 @@ def settings_system_users(request):
                 "last_name": user.last_name,
                 "role": user.role,
                 "is_active": user.is_active,
+                "is_superuser": user.is_superuser,
             }
             changes = _collect_changes(before, after)
             _log_user_event(
