@@ -11,18 +11,19 @@
 {% endblock %}
 
 {% block content %}
+{% include "settings/_rindegastos_sync_status.html" with sync_controls=True %}
 <div class="row g-6">
   <div class="col-12 col-xl-4">
-    <div class="card mb-6">
+    <div class="card h-100">
       <div class="card-header">
-        <h3 class="card-title">Sincronizar Rindegastos</h3>
+        <h3 class="card-title">Sincronización central</h3>
       </div>
       <div class="card-body">
         <form method="post" class="row g-3">
           {% csrf_token %}
           <input type="hidden" name="action" value="sync_rindegastos">
           <div class="col-12 text-muted">
-            Trae políticas, categorías, impuestos, campos extra y usuarios desde la API de Rindegastos.
+            Esta acción actualiza políticas, categorías, impuestos, campos extra y usuarios desde la API de Rindegastos.
           </div>
           <div class="col-12">
             <button class="btn btn-light-primary w-100" type="submit">Sincronizar catálogos</button>
@@ -32,24 +33,6 @@
           {% csrf_token %}
           <input type="hidden" name="action" value="rebuild_rindegastos">
           <button class="btn btn-light-warning w-100" type="submit">Reconstruir catálogos sincronizados</button>
-        </form>
-      </div>
-    </div>
-    <div class="card h-100">
-      <div class="card-header">
-        <h3 class="card-title">Agregar política</h3>
-      </div>
-      <div class="card-body">
-        <form method="post" class="row g-3">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="add_category">
-          <div class="col-12">
-            <label class="form-label">Nombre</label>
-            <input type="text" name="name" class="form-control" placeholder="Ej: Materiales" required>
-          </div>
-          <div class="col-12">
-            <button class="btn btn-primary w-100" type="submit">Guardar</button>
-          </div>
         </form>
       </div>
     </div>

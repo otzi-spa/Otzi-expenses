@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 from django.conf import settings
+from django.db.models import Max
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth import get_user_model
@@ -85,6 +86,16 @@ def _settings_menu_urls():
         "settings_categories",
         "settings_expense_types",
         "settings_rindegastos_fields",
+        "settings_rindegastos_submitters",
+    }
+
+
+def _catalog_sync_status(model):
+    synced = model.objects.filter(sync_status="synced")
+    return {
+        "last_sync": synced.aggregate(value=Max("last_synced_at"))["value"],
+        "synced_count": synced.count(),
+        "active_count": synced.filter(is_active=True).count(),
     }
 
 
@@ -201,6 +212,8 @@ def _missing_fields_for_parametrization(expense, has_receipt=None):
         missing.append("Proveedor")
     if not _normalize_empty(expense.rindegastos_cost_center):
         missing.append("Centro de Costo / Faena")
+    if not _normalize_empty(expense.rindegastos_submitter):
+        missing.append("Nombre quien rinde")
     if not expense.paid_at:
         missing.append("Fecha del gasto")
     if not _normalize_empty(expense.rindegastos_document_type):
@@ -216,7 +229,7 @@ def _missing_fields_for_parametrization(expense, has_receipt=None):
 
 
 def _rindegastos_field_options_payload():
-    target_names = {"Centro de Costo / Faena", "Tipo de Documento", "Vehiculo o Equipo"}
+    target_names = {"Centro de Costo / Faena", "Nombre quien rinde", "Tipo de Documento", "Vehiculo o Equipo"}
     payload = []
     fields = (
         RindegastosExpenseFieldCatalog.objects.filter(is_active=True, name__in=target_names)
@@ -247,7 +260,7 @@ def _rindegastos_field_options_payload():
 
 
 def _serialize_rindegastos_options(policy):
-    target_names = {"Centro de Costo / Faena", "Tipo de Documento", "Vehiculo o Equipo"}
+    target_names = {"Centro de Costo / Faena", "Nombre quien rinde", "Tipo de Documento", "Vehiculo o Equipo"}
     fields = RindegastosExpenseFieldCatalog.objects.filter(
         policy=policy,
         is_active=True,
@@ -462,6 +475,7 @@ def expense_detail(request, pk: int):
             "worksite",
             "worksite_standard",
             "rindegastos_cost_center",
+            "rindegastos_submitter",
             "notes",
             "paid_at",
             "document_type",
@@ -516,6 +530,7 @@ def expense_detail(request, pk: int):
         document_type = request.POST.get("document_type", "").strip()
         expense.document_type = document_type or None
         expense.rindegastos_cost_center = request.POST.get("rindegastos_cost_center", "").strip() or None
+        expense.rindegastos_submitter = request.POST.get("rindegastos_submitter", "").strip() or None
         expense.rindegastos_document_type = (
             request.POST.get("rindegastos_document_type", "").strip() or document_type or None
         )
@@ -685,6 +700,7 @@ def expense_create(request):
 
     expense.document_type = request.POST.get("document_type", "").strip() or None
     expense.rindegastos_cost_center = request.POST.get("rindegastos_cost_center", "").strip() or None
+    expense.rindegastos_submitter = request.POST.get("rindegastos_submitter", "").strip() or None
     expense.rindegastos_document_type = (
         request.POST.get("rindegastos_document_type", "").strip() or expense.document_type or None
     )
@@ -804,6 +820,7 @@ def expense_list(request):
             if sender:
                 name = f"{sender.first_name} {sender.last_name}".strip()
                 gasto.wa_sender_name = name or sender.phone
+        gasto.reporter_label = _reporter_label(gasto)
         logs = list(gasto.audit_logs.all())
         gasto.audit_entries = logs[:5]
         gasto.audit_entries_all = logs
@@ -948,7 +965,7 @@ def expense_rindegastos_export(request):
                 "",
                 f"{expense.paid_at.day}/{expense.paid_at.month}/{expense.paid_at.year}" if expense.paid_at else "",
                 expense.rindegastos_cost_center or "",
-                _reporter_label(expense),
+                expense.rindegastos_submitter or _reporter_label(expense),
                 expense.document_number or "",
                 expense.supplier_rut or "",
                 expense.rindegastos_document_type or "",
@@ -1145,6 +1162,7 @@ def expense_action(request, pk: int, action: str):
                 worksite=expense.worksite,
                 worksite_standard=expense.worksite_standard,
                 rindegastos_cost_center=expense.rindegastos_cost_center,
+                rindegastos_submitter=expense.rindegastos_submitter,
                 supplier=expense.supplier,
                 supplier_rut=expense.supplier_rut,
                 paid_at=expense.paid_at,
@@ -1569,16 +1587,6 @@ def settings_categories(request):
                 )
             except (RindegastosAPIError, ValueError) as exc:
                 messages.error(request, f"No se pudo sincronizar Rindegastos: {exc}")
-        elif action == "add_category":
-            name = request.POST.get("name", "").strip()
-            if not name:
-                messages.error(request, "El nombre de la política es obligatorio.")
-            else:
-                obj, created = CategoryCatalog.objects.get_or_create(name=name, defaults={"is_active": True})
-                if not created and not obj.is_active:
-                    obj.is_active = True
-                    obj.save(update_fields=["is_active"])
-                messages.success(request, f"Política '{obj.name}' guardada.")
         elif action == "toggle_category":
             category = get_object_or_404(CategoryCatalog, pk=request.POST.get("category_id"))
             category.is_active = not category.is_active
@@ -1602,6 +1610,7 @@ def settings_categories(request):
     context = {
         "categories": CategoryCatalog.objects.order_by("name"),
         "settings_menu_urls": _settings_menu_urls(),
+        **_catalog_sync_status(CategoryCatalog),
     }
     return render(request, "settings/categories.html", context)
 
@@ -1611,21 +1620,7 @@ def settings_categories(request):
 def settings_expense_types(request):
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "add_expense_type":
-            name = request.POST.get("name", "").strip()
-            if not name:
-                messages.error(request, "El nombre de la categoría Rindegastos es obligatorio.")
-            else:
-                obj, created = ExpenseTypeCatalog.objects.get_or_create(
-                    policy=None,
-                    name=name,
-                    defaults={"is_active": True},
-                )
-                if not created and not obj.is_active:
-                    obj.is_active = True
-                    obj.save(update_fields=["is_active"])
-                messages.success(request, f"Categoría Rindegastos '{obj.name}' guardada.")
-        elif action == "toggle_expense_type":
+        if action == "toggle_expense_type":
             expense_type = get_object_or_404(ExpenseTypeCatalog, pk=request.POST.get("expense_type_id"))
             expense_type.is_active = not expense_type.is_active
             expense_type.save(update_fields=["is_active"])
@@ -1654,6 +1649,7 @@ def settings_expense_types(request):
     context = {
         "expense_types": ExpenseTypeCatalog.objects.select_related("policy").order_by("policy__name", "name"),
         "settings_menu_urls": _settings_menu_urls(),
+        **_catalog_sync_status(ExpenseTypeCatalog),
     }
     return render(request, "settings/expense_types.html", context)
 
@@ -1663,18 +1659,7 @@ def settings_expense_types(request):
 def settings_rindegastos_fields(request):
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "sync_rindegastos":
-            try:
-                stats = RindegastosCatalogSync().sync_all()
-                messages.success(
-                    request,
-                    "Sincronización Rindegastos completada: "
-                    f"{stats['expense_fields']} campos extra y "
-                    f"{stats['verified_policy_links']} relaciones verificadas.",
-                )
-            except (RindegastosAPIError, ValueError) as exc:
-                messages.error(request, f"No se pudo sincronizar Rindegastos: {exc}")
-        elif action == "toggle_field":
+        if action == "toggle_field":
             field = get_object_or_404(RindegastosExpenseFieldCatalog, pk=request.POST.get("field_id"))
             field.is_active = not field.is_active
             field.save(update_fields=["is_active"])
@@ -1703,8 +1688,37 @@ def settings_rindegastos_fields(request):
     context = {
         "fields": fields,
         "settings_menu_urls": _settings_menu_urls(),
+        **_catalog_sync_status(RindegastosExpenseFieldCatalog),
     }
     return render(request, "settings/rindegastos_fields.html", context)
+
+
+@login_required
+@admin_required
+def settings_rindegastos_submitters(request):
+    fields = list(
+        RindegastosExpenseFieldCatalog.objects.filter(name="Nombre quien rinde")
+        .select_related("policy")
+        .order_by("policy__name")
+    )
+    for field in fields:
+        field.display_options = []
+        for option in field.options or []:
+            if isinstance(option, dict):
+                value = option.get("Value") or option.get("Name") or option.get("value") or ""
+                code = option.get("Code") or option.get("code") or ""
+            else:
+                value = str(option)
+                code = ""
+            if str(value).strip():
+                field.display_options.append({"value": str(value).strip(), "code": str(code).strip()})
+
+    context = {
+        "fields": fields,
+        "settings_menu_urls": _settings_menu_urls(),
+        **_catalog_sync_status(RindegastosExpenseFieldCatalog),
+    }
+    return render(request, "settings/rindegastos_submitters.html", context)
 
 
 @login_required

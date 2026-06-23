@@ -32,6 +32,7 @@ class Expense(models.Model):
     # Obra estandarizada elegida por administrador (catálogo)
     worksite_standard = models.CharField(max_length=255, blank=True, null=True)
     rindegastos_cost_center = models.CharField(max_length=255, blank=True, null=True)
+    rindegastos_submitter = models.CharField(max_length=255, blank=True, null=True)
     supplier = models.CharField(max_length=128, blank=True)
     supplier_rut = models.CharField(max_length=32, blank=True, null=True)
     paid_at = models.DateField(null=True, blank=True)

@@ -1,0 +1,88 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Usuarios Rindegastos{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Usuarios Rindegastos</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% include "settings/_rindegastos_sync_status.html" %}
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h3 class="card-title">Nombre quien rinde por política</h3>
+      <div class="text-muted">Opciones sincronizadas desde el campo extra de Rindegastos.</div>
+    </div>
+    <div class="card-toolbar">
+      <input type="text" class="form-control w-300px" id="submittersSearch" placeholder="Buscar usuario o política">
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table align-middle" id="submittersTable">
+        <thead>
+          <tr>
+            <th>Política</th>
+            <th>Usuarios disponibles</th>
+            <th>Estado</th>
+            <th>Última sincronización</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for field in fields %}
+          <tr>
+            <td>{{ field.policy.name }}</td>
+            <td>
+              {% if field.display_options %}
+                <div class="d-flex flex-wrap gap-2">
+                  {% for option in field.display_options %}
+                  <span class="badge badge-light-primary">{{ option.value }}{% if option.code %} · {{ option.code }}{% endif %}</span>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <span class="text-muted">Sin usuarios</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if field.is_active %}
+              <span class="badge badge-light-success">Activo</span>
+              {% else %}
+              <span class="badge badge-light">Inactivo</span>
+              {% endif %}
+            </td>
+            <td class="text-muted">{{ field.last_synced_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="text-muted">Sin usuarios sincronizados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var table = $("#submittersTable").DataTable({
+      info: false,
+      pageLength: 20,
+      lengthChange: false,
+      order: [],
+    });
+    var search = document.getElementById("submittersSearch");
+    if (search) {
+      search.addEventListener("keyup", function () {
+        table.search(search.value).draw();
+      });
+    }
+  });
+</script>
+{% endblock %}

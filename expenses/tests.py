@@ -26,6 +26,7 @@ class FuelExpenseValidationTests(TestCase):
             category="Combustibles",
             supplier="Proveedor",
             rindegastos_cost_center="Faena",
+            rindegastos_submitter="Francisco Santibañez",
             paid_at="2026-06-09",
             rindegastos_document_type="Boleta",
             is_vehicle=True,
@@ -44,6 +45,7 @@ class FuelExpenseValidationTests(TestCase):
             category="Combustibles",
             supplier="Proveedor",
             rindegastos_cost_center="Faena",
+            rindegastos_submitter="Francisco Santibañez",
             paid_at="2026-06-09",
             rindegastos_document_type="Boleta",
             is_vehicle=True,
@@ -72,6 +74,7 @@ class FuelExpenseExportTests(TestCase):
             category="Combustibles",
             supplier="Proveedor",
             rindegastos_cost_center="Faena",
+            rindegastos_submitter="Francisco Santibañez",
             paid_at="2026-06-09",
             rindegastos_document_type="Boleta",
             is_vehicle=True,
@@ -100,6 +103,7 @@ class FuelExpenseExportTests(TestCase):
             category="Departamento Maquinaria",
             supplier="Proveedor Maquinaria",
             rindegastos_cost_center="Taller Central",
+            rindegastos_submitter="Francisco Santibañez",
             paid_at="2026-06-10",
             rindegastos_document_type="Factura afecta",
             is_vehicle=True,
@@ -148,6 +152,12 @@ class RindegastosVehicleOptionsTests(TestCase):
                 {"Code": "RET-02", "Value": "Retroexcavadora 02"},
             ],
         )
+        RindegastosExpenseFieldCatalog.objects.create(
+            policy=policy,
+            name="Nombre quien rinde",
+            field_type="Select",
+            options=[{"Code": "FS", "Value": "Francisco Santibañez"}],
+        )
 
         response = self.client.get(reverse("expense_list"))
 
@@ -160,6 +170,7 @@ class RindegastosVehicleOptionsTests(TestCase):
             response,
             reverse("rindegastos_policy_options", kwargs={"external_id": policy.external_id}),
         )
+        self.assertContains(response, 'data-rindegastos-field="Nombre quien rinde"')
         self.assertIn(
             {
                 "policy_id": policy.id,
@@ -192,6 +203,11 @@ class RindegastosVehicleOptionsTests(TestCase):
             options=[{"Value": "Taller Central"}],
         )
         RindegastosExpenseFieldCatalog.objects.create(
+            policy=machinery,
+            name="Nombre quien rinde",
+            options=[{"Value": "Francisco Santibañez"}],
+        )
+        RindegastosExpenseFieldCatalog.objects.create(
             policy=other_policy,
             name="Centro de Costo / Faena",
             options=[{"Value": "Costo Directo"}],
@@ -214,6 +230,14 @@ class RindegastosVehicleOptionsTests(TestCase):
             {
                 "field_name": "Centro de Costo / Faena",
                 "value": "Taller Central",
+                "code": "",
+            },
+            payload["field_options"],
+        )
+        self.assertIn(
+            {
+                "field_name": "Nombre quien rinde",
+                "value": "Francisco Santibañez",
                 "code": "",
             },
             payload["field_options"],
@@ -257,7 +281,12 @@ class RindegastosCatalogRebuildTests(TestCase):
                         "Name": "Centro de Costo / Faena",
                         "Type": "list",
                         "Options": [{"Value": "Taller Central"}],
-                    }
+                    },
+                    {
+                        "Name": "Nombre quien rinde",
+                        "Type": "list",
+                        "Options": [{"Value": "Francisco Santibañez"}],
+                    },
                 ]
 
             def get_users(self):
@@ -308,7 +337,7 @@ class RindegastosCatalogRebuildTests(TestCase):
         )
         self.assertEqual(field.options, [{"Value": "Taller Central"}])
         self.assertFalse(RindegastosTaxCatalog.objects.filter(policy=policy).exists())
-        self.assertEqual(stats["verified_policy_links"], 2)
+        self.assertEqual(stats["verified_policy_links"], 3)
 
 
 class SupplierCatalogFlowTests(TestCase):
@@ -603,3 +632,64 @@ class RindegastosFieldsSettingsTests(TestCase):
         self.assertContains(response, "Vehiculo o Equipo")
         self.assertContains(response, "Camión 1")
         self.assertNotContains(response, 'href="/configuracion/obras/"')
+
+    def test_submitters_maintainer_lists_names_by_policy(self):
+        policy, _ = CategoryCatalog.objects.update_or_create(
+            name="Oficina Central",
+            defaults={"external_id": "office-1", "sync_status": "synced"},
+        )
+        RindegastosExpenseFieldCatalog.objects.create(
+            policy=policy,
+            name="Nombre quien rinde",
+            field_type="list",
+            options=[{"Value": "Francisco Santibañez", "Code": "FS"}],
+        )
+
+        response = self.client.get(reverse("settings_rindegastos_submitters"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Usuarios Rindegastos")
+        self.assertContains(response, "Oficina Central")
+        self.assertContains(response, "Francisco Santibañez")
+        self.assertContains(response, "FS")
+
+    def test_sync_is_centralized_and_manual_creation_is_disabled(self):
+        policy, _ = CategoryCatalog.objects.update_or_create(
+            name="Oficina Central",
+            defaults={
+                "external_id": "office-1",
+                "sync_status": "synced",
+                "last_synced_at": timezone.now(),
+            },
+        )
+        ExpenseTypeCatalog.objects.create(
+            policy=policy,
+            name="Gastos de oficina",
+            sync_status="synced",
+            last_synced_at=timezone.now(),
+        )
+
+        policies_page = self.client.get(reverse("settings_categories"))
+        categories_page = self.client.get(reverse("settings_expense_types"))
+        fields_page = self.client.get(reverse("settings_rindegastos_fields"))
+
+        self.assertContains(policies_page, "Sincronización central")
+        self.assertContains(policies_page, 'value="sync_rindegastos"')
+        self.assertContains(policies_page, 'value="rebuild_rindegastos"')
+        self.assertNotContains(policies_page, 'value="add_category"')
+        self.assertNotContains(categories_page, 'value="add_expense_type"')
+        self.assertNotContains(categories_page, 'value="sync_rindegastos"')
+        self.assertNotContains(fields_page, 'value="sync_rindegastos"')
+        self.assertContains(categories_page, "Última sincronización:")
+        self.assertContains(fields_page, "Última sincronización:")
+        self.assertContains(categories_page, reverse("settings_categories"))
+        self.assertContains(fields_page, reverse("settings_categories"))
+
+        self.client.post(reverse("settings_categories"), {"action": "add_category", "name": "Manual no permitida"})
+        self.client.post(
+            reverse("settings_expense_types"),
+            {"action": "add_expense_type", "name": "Manual no permitida"},
+        )
+
+        self.assertFalse(CategoryCatalog.objects.filter(name="Manual no permitida").exists())
+        self.assertFalse(ExpenseTypeCatalog.objects.filter(name="Manual no permitida").exists())

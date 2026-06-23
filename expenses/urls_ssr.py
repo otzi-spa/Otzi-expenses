@@ -12,6 +12,7 @@ from .views import (
     settings_categories,
     settings_expense_types,
     settings_rindegastos_fields,
+    settings_rindegastos_submitters,
     settings_system_users,
     settings_suppliers,
     settings_users,
@@ -41,5 +42,10 @@ urlpatterns = [
         "configuracion/campos-rindegastos/",
         settings_rindegastos_fields,
         name="settings_rindegastos_fields",
+    ),
+    path(
+        "configuracion/usuarios-rindegastos/",
+        settings_rindegastos_submitters,
+        name="settings_rindegastos_submitters",
     ),
 ]

@@ -11,19 +11,15 @@
 {% endblock %}
 
 {% block content %}
+{% include "settings/_rindegastos_sync_status.html" %}
 <div class="card">
   <div class="card-header">
     <div>
       <h3 class="card-title">Campos extra por política</h3>
       <div class="text-muted">Centro de costo, tipo de documento, nombre, vehículos y otros campos sincronizados.</div>
     </div>
-    <div class="card-toolbar d-flex gap-3">
+    <div class="card-toolbar">
       <input type="text" class="form-control w-300px" id="rindegastosFieldsSearch" placeholder="Buscar política o campo">
-      <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="sync_rindegastos">
-        <button class="btn btn-light-primary" type="submit">Sincronizar</button>
-      </form>
     </div>
   </div>
   <div class="card-body">

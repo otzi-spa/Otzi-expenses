@@ -1,0 +1,15 @@
+{% load tz %}
+<div class="alert alert-light-primary d-flex flex-wrap align-items-center justify-content-between gap-4 mb-6">
+  <div>
+    <div class="fw-bold text-gray-900">Estado de sincronización Rindegastos</div>
+    <div class="text-muted">
+      Última sincronización:
+      <strong>{% if last_sync %}{{ last_sync|localtime|date:"d/m/Y H:i" }}{% else %}Sin sincronizar{% endif %}</strong>
+      · {{ synced_count }} registros sincronizados
+      · {{ active_count }} activos
+    </div>
+  </div>
+  {% if not sync_controls %}
+  <a class="btn btn-sm btn-light-primary" href="{% url 'settings_categories' %}">Ir a sincronización</a>
+  {% endif %}
+</div>
