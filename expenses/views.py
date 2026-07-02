@@ -25,6 +25,7 @@ from .models import (
     SupplierCatalog,
     WorksiteCatalog,
     SYNC_STATUS,
+    normalize_rut,
 )
 from django.contrib.auth.decorators import login_required
 from django.utils.dateparse import parse_date
@@ -342,7 +343,7 @@ def _apply_supplier(expense, request):
                 supplier.is_active = True
                 supplier.save(update_fields=["is_active", "updated_at"])
         else:
-            new_supplier_rut = request.POST.get("supplier_rut", "").strip()
+            new_supplier_rut = normalize_rut(request.POST.get("supplier_rut"))
             if not new_supplier_rut:
                 messages.error(request, "El RUT es obligatorio para crear un proveedor.")
                 return False
@@ -362,7 +363,7 @@ def _apply_supplier(expense, request):
         return True
 
     expense.supplier = supplier.name
-    expense.supplier_rut = supplier.rut or None
+    expense.supplier_rut = normalize_rut(supplier.rut) if supplier.rut else None
     return True
 
 
@@ -967,7 +968,7 @@ def expense_rindegastos_export(request):
                 expense.rindegastos_cost_center or "",
                 expense.rindegastos_submitter or _reporter_label(expense),
                 expense.document_number or "",
-                expense.supplier_rut or "",
+                normalize_rut(expense.supplier_rut) if expense.supplier_rut else "",
                 expense.rindegastos_document_type or "",
                 expense.vehicle or "",
                 _export_amount(expense.fuel_km),
@@ -1539,7 +1540,7 @@ def settings_suppliers(request):
 
         if action == "add_supplier":
             name = request.POST.get("name", "").strip()
-            rut = request.POST.get("rut", "").strip()
+            rut = normalize_rut(request.POST.get("rut"))
             if not name or not rut:
                 messages.error(request, "Nombre y RUT son obligatorios.")
             elif SupplierCatalog.objects.filter(name__iexact=name).exists():
@@ -1551,7 +1552,7 @@ def settings_suppliers(request):
         elif action == "update_supplier":
             supplier = get_object_or_404(SupplierCatalog, pk=request.POST.get("supplier_id"))
             name = request.POST.get("name", "").strip()
-            rut = request.POST.get("rut", "").strip()
+            rut = normalize_rut(request.POST.get("rut"))
             if not name or not rut:
                 messages.error(request, "Nombre y RUT son obligatorios.")
             elif SupplierCatalog.objects.filter(name__iexact=name).exclude(pk=supplier.pk).exists():

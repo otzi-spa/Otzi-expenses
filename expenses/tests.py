@@ -4,8 +4,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from expenses.models import (
+    AllowedSender,
     CategoryCatalog,
     Expense,
     ExpenseAuditLog,
@@ -13,6 +15,7 @@ from expenses.models import (
     RindegastosExpenseFieldCatalog,
     RindegastosTaxCatalog,
     SupplierCatalog,
+    normalize_rut,
 )
 from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.views import _expense_export_id, _missing_fields_for_parametrization, _rindegastos_note
@@ -372,10 +375,32 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertRedirects(response, reverse("expense_list"))
         supplier = SupplierCatalog.objects.get(name="Proveedor Nuevo")
         expense = Expense.objects.get(supplier="Proveedor Nuevo")
-        self.assertEqual(supplier.rut, "76.123.456-7")
+        self.assertEqual(supplier.rut, "76123456-7")
         self.assertEqual(expense.supplier_rut, supplier.rut)
         self.assertEqual(expense.worksite, "Obra reportada")
         self.assertIsNone(expense.worksite_standard)
+
+    def test_new_supplier_rut_is_saved_with_verifier_hyphen(self):
+        self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "new_supplier_name": "Proveedor Rut Sin Guion",
+                "supplier_select": "Proveedor Rut Sin Guion",
+                "supplier_rut": "166082188",
+            },
+        )
+
+        supplier = SupplierCatalog.objects.get(name="Proveedor Rut Sin Guion")
+        expense = Expense.objects.get(supplier="Proveedor Rut Sin Guion")
+        self.assertEqual(supplier.rut, "16608218-8")
+        self.assertEqual(expense.supplier_rut, "16608218-8")
+
+    def test_rut_normalizer_accepts_dots_spaces_and_k(self):
+        self.assertEqual(normalize_rut("76.123.456-7"), "76123456-7")
+        self.assertEqual(normalize_rut("16 608 2188"), "16608218-8")
+        self.assertEqual(normalize_rut("12345678k"), "12345678-K")
 
     def test_existing_supplier_uses_catalog_rut(self):
         SupplierCatalog.objects.create(
@@ -394,7 +419,7 @@ class SupplierCatalogFlowTests(TestCase):
         )
 
         expense = Expense.objects.get(supplier="Proveedor Existente")
-        self.assertEqual(expense.supplier_rut, "77.777.777-7")
+        self.assertEqual(expense.supplier_rut, "77777777-7")
 
     def test_modal_uses_synced_policies_and_has_no_standard_worksite(self):
         response = self.client.get(reverse("expense_list"))
@@ -757,3 +782,56 @@ class SystemUsersSettingsTests(TestCase):
         self.target.refresh_from_db()
         self.assertFalse(self.target.is_superuser)
         self.assertFalse(self.target.is_staff)
+
+
+class ExpenseAPICreationTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.api_user = User.objects.create_user(
+            username="api-user@example.com",
+            email="api-user@example.com",
+            password="test",
+        )
+        self.sender = AllowedSender.objects.create(
+            phone="56911111111",
+            first_name="Juan",
+            last_name="Pérez",
+            active=True,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.api_user)
+
+    def test_whatsapp_expense_uses_allowed_sender_not_api_user_as_creator(self):
+        response = self.client.post(
+            "/api/v1/expenses/",
+            {
+                "source": "whatsapp",
+                "wa_sender_phone": self.sender.phone,
+                "wa_message_id": "api-whatsapp-message-1",
+                "status": "pending",
+                "supplier": "Proveedor",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        expense = Expense.objects.get(wa_message_id="api-whatsapp-message-1")
+        self.assertEqual(expense.wa_sender, self.sender)
+        self.assertIsNone(expense.created_by)
+        self.assertEqual(expense.source, "whatsapp")
+
+    def test_web_expense_created_by_api_user_when_not_whatsapp(self):
+        response = self.client.post(
+            "/api/v1/expenses/",
+            {
+                "source": "web",
+                "status": "pending",
+                "supplier": "Proveedor web",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        expense = Expense.objects.get(supplier="Proveedor web")
+        self.assertEqual(expense.created_by, self.api_user)
+        self.assertIsNone(expense.wa_sender)

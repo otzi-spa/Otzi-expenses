@@ -48,6 +48,29 @@ services:
       redis:
         condition: service_healthy
 
+  beat:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: waexp-beat
+    env_file:
+      - ../env/.env.prod
+    environment:
+      DJANGO_ENV: prod
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      RUN_MIGRATIONS: 0
+      COLLECTSTATIC: 0
+    command: celery -A waexp beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     container_name: waexp-postgres

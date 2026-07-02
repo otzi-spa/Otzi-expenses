@@ -256,7 +256,7 @@ def whatsapp_webhook(request):
                 wa_media_id=image_id,
                 message_sent_at=msg_dt,
                 status="incomplete",
-                created_by_id=1,  # 👈 por ahora fijo
+                source="whatsapp",
             )
             log_whatsapp_event(
                 exp,

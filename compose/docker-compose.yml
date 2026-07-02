@@ -29,6 +29,56 @@ services:
       azurite:
         condition: service_started
 
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: waexp-worker
+    env_file:
+      - ../env/.env.dev
+    environment:
+      DJANGO_ENV: dev
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      RUN_MIGRATIONS: 0
+      COLLECTSTATIC: 0
+    command: celery -A waexp worker --loglevel=info
+    volumes:
+      - ..:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+
+  beat:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: waexp-beat
+    env_file:
+      - ../env/.env.dev
+    environment:
+      DJANGO_ENV: dev
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      RUN_MIGRATIONS: 0
+      COLLECTSTATIC: 0
+    command: celery -A waexp beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    volumes:
+      - ..:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     container_name: waexp-postgres

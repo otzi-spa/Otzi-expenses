@@ -9,7 +9,7 @@ from rest_framework import filters, permissions, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..models import Attachment, Expense
+from ..models import AllowedSender, Attachment, Expense
 from .serializers import AttachmentSerializer, ExpenseSerializer
 
 
@@ -19,6 +19,44 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter]
     search_fields = ["worksite", "worksite_standard", "supplier", "notes"]
+
+    def _sender_for_phone(self, phone):
+        normalized_phone = (phone or "").strip()
+        if not normalized_phone:
+            return None
+        return AllowedSender.objects.filter(
+            phone=normalized_phone,
+            active=True,
+            is_deleted=False,
+        ).first()
+
+    def _whatsapp_save_kwargs(self, serializer):
+        phone = serializer.validated_data.get("wa_sender_phone")
+        source = serializer.validated_data.get("source")
+        if serializer.instance:
+            phone = phone if phone is not None else serializer.instance.wa_sender_phone
+            source = source if source is not None else serializer.instance.source
+
+        is_whatsapp_expense = source == "whatsapp" or bool(phone)
+        if not is_whatsapp_expense:
+            if serializer.instance:
+                return {}
+            return {"created_by": self.request.user}
+
+        kwargs = {
+            "source": "whatsapp",
+            "created_by": None,
+        }
+        sender = self._sender_for_phone(phone)
+        if sender:
+            kwargs["wa_sender"] = sender
+        return kwargs
+
+    def perform_create(self, serializer):
+        serializer.save(**self._whatsapp_save_kwargs(serializer))
+
+    def perform_update(self, serializer):
+        serializer.save(**self._whatsapp_save_kwargs(serializer))
 
 
 class AttachmentViewSet(viewsets.ModelViewSet):

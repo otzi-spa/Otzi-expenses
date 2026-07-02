@@ -133,7 +133,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">RUT proveedor</label>
-            <input type="text" class="form-control" id="supplierQuickRut" placeholder="Ej: 76.123.456-7">
+            <input type="text" class="form-control" id="supplierQuickRut" placeholder="Ej: 76123456-7">
           </div>
         </div>
       </div>
@@ -1308,6 +1308,13 @@
       var supplierQuickName = document.getElementById('supplierQuickName');
       var supplierQuickRut = document.getElementById('supplierQuickRut');
       var supplierQuickSaveBtn = document.getElementById('supplierQuickSaveBtn');
+
+      function normalizeRut(value) {
+        var compact = String(value || '').replace(/[.\-\s]/g, '').replace(/[^0-9kK]/g, '');
+        if (compact.length < 2) return String(value || '').trim().toUpperCase();
+        return compact.slice(0, -1) + '-' + compact.slice(-1).toUpperCase();
+      }
+
       if (supplierQuickModalEl) {
         supplierQuickModalEl.addEventListener('shown.bs.modal', function () {
           var backdrops = document.querySelectorAll('.modal-backdrop');
@@ -2140,7 +2147,8 @@
         supplierQuickSaveBtn.addEventListener('click', function () {
           if (!activeSupplierForm || !supplierQuickName) return;
           var name = (supplierQuickName.value || '').trim();
-          var rut = supplierQuickRut ? (supplierQuickRut.value || '').trim() : '';
+          var rut = supplierQuickRut ? normalizeRut(supplierQuickRut.value) : '';
+          if (supplierQuickRut) supplierQuickRut.value = rut;
           if (!name || !rut) {
             if (!name) supplierQuickName.focus();
             else supplierQuickRut.focus();

@@ -1,6 +1,15 @@
 from django.db import models
 from django.conf import settings
 
+
+def normalize_rut(value):
+    raw_value = (value or "").strip()
+    compact = "".join(char for char in raw_value.replace(".", "").replace("-", "") if char.isalnum())
+    if len(compact) < 2:
+        return raw_value.upper()
+    return f"{compact[:-1]}-{compact[-1].upper()}"
+
+
 class Expense(models.Model):
     STATUS = (
         ("incomplete", "Incompleto"),
@@ -173,6 +182,10 @@ class SupplierCatalog(models.Model):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        self.rut = normalize_rut(self.rut)
+        super().save(*args, **kwargs)
 
 
 class CategoryCatalog(models.Model):

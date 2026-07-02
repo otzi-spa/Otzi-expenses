@@ -79,6 +79,8 @@ class WhatsAppFuelFlowTests(TestCase):
         self.assertEqual(self.post_message(image).status_code, 200)
         expense = Expense.objects.get(wa_message_id="image-message-1")
         self.assertEqual(expense.status, "incomplete")
+        self.assertIsNone(expense.created_by)
+        self.assertEqual(expense.wa_sender.phone, self.phone)
         conversation = WhatsAppExpenseConversation.objects.get(expense=expense)
         self.assertTrue(conversation.is_active)
         self.assertEqual(conversation.stage, "awaiting_doc_type")

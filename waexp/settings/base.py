@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+from celery.schedules import crontab
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -106,6 +108,13 @@ REST_FRAMEWORK = {
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "")
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "sync-rindegastos-catalogs-daily": {
+        "task": "expenses.sync_rindegastos_catalogs",
+        "schedule": crontab(hour=2, minute=0),
+    },
+}
 
 RINDEGASTOS_API_BASE_URL = os.environ.get("RINDEGASTOS_API_BASE_URL", "https://api.rindegastos.com/v1").rstrip("/")
 RINDEGASTOS_API_TOKEN = os.environ.get("RINDEGASTOS_API_TOKEN", "").strip()
