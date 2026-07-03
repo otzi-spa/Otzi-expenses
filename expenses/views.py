@@ -12,6 +12,7 @@ from django.conf import settings
 from django.db.models import Max
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
 from django.contrib.auth import get_user_model
 from accounts.models import UserAuditLog
 from .models import (
@@ -38,6 +39,7 @@ from .rindegastos_sync import RindegastosCatalogSync
 ALLOWED_RECEIPT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 ALLOWED_RECEIPT_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 MAX_RECEIPT_SIZE_BYTES = 10 * 1024 * 1024
+ATTACHMENT_EXPORT_TOKEN_TTL_SECONDS = 60 * 60
 
 RINDEGASTOS_POLICIES = [
     "Departamento Maquinaria",
@@ -892,6 +894,31 @@ def _rindegastos_note(note, export_id):
     return f"{clean_note}. {suffix}"
 
 
+def _attachment_export_signature(attachment_id, expires_at):
+    key = str(settings.SECRET_KEY).encode("utf-8")
+    payload = f"attachment:{attachment_id}:{expires_at}".encode("utf-8")
+    return hmac.new(key, payload, hashlib.sha256).hexdigest()
+
+
+def _signed_attachment_export_url(request, attachment):
+    expires_at = int(timezone.now().timestamp()) + ATTACHMENT_EXPORT_TOKEN_TTL_SECONDS
+    signature = _attachment_export_signature(attachment.id, expires_at)
+    path = reverse("attachment_export_serve", args=[attachment.id])
+    return request.build_absolute_uri(f"{path}?expires={expires_at}&sig={signature}")
+
+
+def _attachment_file_response(attachment, disposition="inline", allow_cross_origin=False):
+    file_handle = attachment.file.open("rb")
+    content_type = attachment.content_type or "application/octet-stream"
+    response = FileResponse(file_handle, content_type=content_type)
+    filename = attachment.file.name.rsplit("/", 1)[-1]
+    response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+    if allow_cross_origin:
+        response["Access-Control-Allow-Origin"] = "*"
+        response["Access-Control-Expose-Headers"] = "Content-Disposition, Content-Type"
+    return response
+
+
 @login_required
 def expense_rindegastos_export(request):
     status_scope = request.GET.get("status_scope", "completed")
@@ -955,6 +982,8 @@ def expense_rindegastos_export(request):
             "km_carguio",
             "litros_combustible",
             "categoria_rindegastos",
+            "archivo_urls",
+            "archivo_nombres",
             "nota",
         ]
     )
@@ -962,6 +991,7 @@ def expense_rindegastos_export(request):
     for expense in expenses:
         export_id = _expense_export_id(expense.id)
         policy = policy_by_name.get(expense.category)
+        attachments = list(expense.attachments.all())
         writer.writerow(
             [
                 expense.category or "",
@@ -982,6 +1012,8 @@ def expense_rindegastos_export(request):
                 _export_amount(expense.fuel_km),
                 _export_amount(expense.fuel_liters),
                 expense.expense_type or "",
+                "|".join(_signed_attachment_export_url(request, attachment) for attachment in attachments),
+                "|".join(attachment.file.name.rsplit("/", 1)[-1] for attachment in attachments),
                 _rindegastos_note(expense.notes, export_id),
             ]
         )
@@ -992,13 +1024,27 @@ def expense_rindegastos_export(request):
 @login_required
 def attachment_serve(request, pk: int):
     attachment = get_object_or_404(Attachment.objects.select_related("expense"), pk=pk)
-    file_handle = attachment.file.open("rb")
-    content_type = attachment.content_type or "application/octet-stream"
-    response = FileResponse(file_handle, content_type=content_type)
-    filename = attachment.file.name.rsplit("/", 1)[-1]
     disposition = "attachment" if request.GET.get("download") == "1" else "inline"
-    response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
-    return response
+    return _attachment_file_response(attachment, disposition=disposition)
+
+
+def attachment_export_serve(request, pk: int):
+    expires_raw = request.GET.get("expires", "")
+    signature = request.GET.get("sig", "")
+    try:
+        expires_at = int(expires_raw)
+    except (TypeError, ValueError):
+        return HttpResponse("Token invalido.", status=403)
+
+    if expires_at < int(timezone.now().timestamp()):
+        return HttpResponse("Token expirado.", status=403)
+
+    expected_signature = _attachment_export_signature(pk, expires_at)
+    if not signature or not hmac.compare_digest(signature, expected_signature):
+        return HttpResponse("Token invalido.", status=403)
+
+    attachment = get_object_or_404(Attachment.objects.select_related("expense"), pk=pk)
+    return _attachment_file_response(attachment, disposition="attachment", allow_cross_origin=True)
 
 
 @login_required

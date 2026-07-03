@@ -1,13 +1,18 @@
+import csv
+import io
 from decimal import Decimal
+from urllib.parse import urlparse
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.files.base import ContentFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from expenses.models import (
     AllowedSender,
+    Attachment,
     CategoryCatalog,
     Expense,
     ExpenseAuditLog,
@@ -19,6 +24,15 @@ from expenses.models import (
 )
 from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.views import _expense_export_id, _missing_fields_for_parametrization, _rindegastos_note
+
+LOCAL_TEST_STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 
 class FuelExpenseValidationTests(TestCase):
@@ -165,6 +179,77 @@ class FuelExpenseExportTests(TestCase):
 
         self.assertIn("9/6/2026", content)
         self.assertNotIn("1/7/2026", content)
+
+    @override_settings(STORAGES=LOCAL_TEST_STORAGES, MEDIA_ROOT="/tmp/otzi-expenses-test-media")
+    def test_export_includes_signed_attachment_urls(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Archivo",
+            category="Oficina Central",
+            paid_at="2026-06-09",
+        )
+        Attachment.objects.create(
+            expense=expense,
+            file=ContentFile(b"receipt-bytes", name="receipt.jpg"),
+            content_type="image/jpeg",
+        )
+
+        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed"})
+        content = response.content.decode("utf-8-sig")
+        rows = list(csv.reader(io.StringIO(content)))
+        header_index = rows.index(
+            [
+                "politica",
+                "expenses_id",
+                "proveedor",
+                "total",
+                "moneda",
+                "impuesto",
+                "valor_impuesto",
+                "otros_impuestos",
+                "fecha",
+                "centro_costo_faena",
+                "nombre_quien_rinde",
+                "numero_documento",
+                "rut_proveedor",
+                "tipo_documento",
+                "vehiculo_equipo",
+                "km_carguio",
+                "litros_combustible",
+                "categoria_rindegastos",
+                "archivo_urls",
+                "archivo_nombres",
+                "nota",
+            ]
+        )
+        header = rows[header_index]
+        row = dict(zip(header, rows[header_index + 1]))
+
+        self.assertIn("receipt", row["archivo_nombres"])
+        self.assertTrue(row["archivo_nombres"].endswith(".jpg"))
+        self.assertIn(reverse("attachment_export_serve", args=[expense.attachments.first().pk]), row["archivo_urls"])
+        signed_url = urlparse(row["archivo_urls"])
+        public_response = self.client.get(f"{signed_url.path}?{signed_url.query}")
+
+        self.assertEqual(public_response.status_code, 200)
+        self.assertEqual(public_response["Content-Type"], "image/jpeg")
+        self.assertEqual(public_response["Access-Control-Allow-Origin"], "*")
+
+    @override_settings(STORAGES=LOCAL_TEST_STORAGES, MEDIA_ROOT="/tmp/otzi-expenses-test-media")
+    def test_signed_attachment_url_rejects_invalid_signature(self):
+        expense = Expense.objects.create(status="completed", supplier="Proveedor Archivo", category="Oficina Central")
+        attachment = Attachment.objects.create(
+            expense=expense,
+            file=ContentFile(b"receipt-bytes", name="receipt.jpg"),
+            content_type="image/jpeg",
+        )
+
+        response = self.client.get(
+            reverse("attachment_export_serve", args=[attachment.pk]),
+            {"expires": int(timezone.now().timestamp()) + 3600, "sig": "bad"},
+        )
+
+        self.assertEqual(response.status_code, 403)
 
 
 class RindegastosVehicleOptionsTests(TestCase):

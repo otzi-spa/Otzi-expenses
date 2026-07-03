@@ -21,6 +21,8 @@
     "km_carguio",
     "litros_combustible",
     "categoria_rindegastos",
+    "archivo_urls",
+    "archivo_nombres",
     "nota",
   ];
 

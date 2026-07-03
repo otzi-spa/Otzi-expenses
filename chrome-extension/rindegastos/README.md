@@ -19,7 +19,7 @@ Extension Chrome unpacked para cargar el CSV exportado desde Expenses y rellenar
 - Soporta tandas de 50 filas.
 - Soporta `Vehiculo o Equipo` para Departamento Maquinaria y Departamento de Transporte.
 - Soporta `Vehiculo o Equipo`, `Km carguío` y `Litros combustible` para Combustibles.
-- No adjunta comprobantes.
+- Adjunta comprobantes cuando el CSV incluye `archivo_urls` firmadas desde Expenses.
 - No presiona `Guardar cambios`.
 - Intenta rellenar `ng-select` buscando por texto.
 
@@ -28,3 +28,4 @@ Extension Chrome unpacked para cargar el CSV exportado desde Expenses y rellenar
 - Algunos `ng-select` pueden requerir match exacto con el texto del catalogo de Rindegastos.
 - La fecha es readonly; la extension remueve `readonly` y dispara eventos Angular. Si Rindegastos no acepta ese cambio, habra que implementar seleccion por datepicker en Sprint 3.
 - La extensión detecta las columnas visibles por encabezado. Si Rindegastos cambia el nombre de un campo, hay que agregar su alias en `HEADER_FIELD_MAP`.
+- Las URLs de comprobantes son temporales. Si vencen, hay que descargar nuevamente el CSV desde Expenses.

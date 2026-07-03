@@ -346,9 +346,80 @@
       km_carguio: parseDecimal(rowData.km_carguio),
       litros_combustible: parseDecimal(rowData.litros_combustible),
       categoria_rindegastos: rowData.categoria_rindegastos,
+      archivo: rowData.archivo_urls || rowData.archivo_url,
       nota: rowData.nota,
     };
     return map[fieldName] || "";
+  }
+
+  function splitMultiValue(value) {
+    return String(value || "")
+      .split("|")
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+
+  function filenameFromUrl(url, fallback) {
+    try {
+      const parsed = new URL(url);
+      const lastSegment = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "");
+      return lastSegment || fallback;
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  function extensionFromMimeType(contentType) {
+    const normalized = normalizeText(contentType);
+    if (normalized.includes("jpeg")) return ".jpg";
+    if (normalized.includes("png")) return ".png";
+    if (normalized.includes("pdf")) return ".pdf";
+    return "";
+  }
+
+  async function downloadAttachment(url, preferredName, index) {
+    const response = await fetch(url, { credentials: "omit" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const fallbackName = `comprobante-${index + 1}${extensionFromMimeType(blob.type)}`;
+    const filename = preferredName || filenameFromUrl(url, fallbackName) || fallbackName;
+    return new File([blob], filename, {
+      type: blob.type || "application/octet-stream",
+      lastModified: Date.now(),
+    });
+  }
+
+  function findFileInput(fieldEl) {
+    if (!fieldEl) return null;
+    return fieldEl.querySelector('input[type="file"]');
+  }
+
+  async function attachFiles(fieldEl, rowData) {
+    const urls = splitMultiValue(rowData.archivo_urls || rowData.archivo_url);
+    if (!urls.length) return { ok: true, skipped: true };
+
+    const input = findFileInput(fieldEl);
+    if (!input) {
+      return { ok: false, error: "campo sin input file" };
+    }
+
+    const names = splitMultiValue(rowData.archivo_nombres || rowData.archivo_nombre);
+    let files;
+    try {
+      files = await Promise.all(urls.map((url, index) => downloadAttachment(url, names[index], index)));
+    } catch (error) {
+      return { ok: false, error: `no pude descargar comprobante: ${error.message}` };
+    }
+
+    const transfer = new DataTransfer();
+    files.forEach((file) => transfer.items.add(file));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await sleep(500);
+    return { ok: true };
   }
 
   function shouldSkipEmptyNgSelect(fieldName, value) {
@@ -439,11 +510,15 @@
     return { ok: true };
   }
 
-  async function setField(rowFields, fieldName, value) {
+  async function setField(rowFields, fieldName, value, rowData) {
     const fieldEl = rowFields[fieldName];
     if (!fieldEl) {
       if (!value) return { ok: true, skipped: true };
       return { ok: false, error: "campo no encontrado" };
+    }
+
+    if (fieldName === "archivo") {
+      return attachFiles(fieldEl, rowData);
     }
 
     if (NG_SELECT_FIELDS.has(fieldName)) {
@@ -486,11 +561,12 @@
       "litros_combustible",
       "categoria_rindegastos",
       "nota",
+      "archivo",
     ];
 
     for (const fieldName of orderedFields) {
       const value = valueForField(rowData, fieldName);
-      const fieldResult = await setField(fields, fieldName, value);
+      const fieldResult = await setField(fields, fieldName, value, rowData);
       if (!fieldResult.ok) {
         result.errors.push(`${fieldName}: ${fieldResult.error}`);
       }
