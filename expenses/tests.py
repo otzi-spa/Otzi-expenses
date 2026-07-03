@@ -149,6 +149,23 @@ class FuelExpenseExportTests(TestCase):
         self.assertNotIn("Aprobado", completed)
         self.assertIn("Pendiente", all_rows)
 
+    def test_export_uses_expense_date_not_creation_date(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Fecha",
+            category="Oficina Central",
+            paid_at="2026-06-09",
+        )
+        Expense.objects.filter(pk=expense.pk).update(created_at=timezone.datetime(2026, 7, 1, 10, 30, tzinfo=timezone.get_current_timezone()))
+
+        content = self.client.get(
+            reverse("expense_rindegastos_export"),
+            {"status_scope": "completed"},
+        ).content.decode("utf-8-sig")
+
+        self.assertIn("9/6/2026", content)
+        self.assertNotIn("1/7/2026", content)
+
 
 class RindegastosVehicleOptionsTests(TestCase):
     def setUp(self):

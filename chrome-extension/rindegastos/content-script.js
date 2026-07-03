@@ -120,14 +120,24 @@
   function setNativeValue(element, value) {
     element.focus();
     element.click();
-    const prototype = Object.getPrototypeOf(element);
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    const descriptor =
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value") ||
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value") ||
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value");
     if (descriptor && descriptor.set) {
       descriptor.set.call(element, value);
     } else {
       element.value = value;
     }
+    element.setAttribute("value", value);
     dispatchInputEvents(element);
+  }
+
+  function clearAndTypeValue(element, value) {
+    element.focus();
+    element.click();
+    setNativeValue(element, "");
+    setNativeValue(element, value);
   }
 
   function findSheet() {
@@ -290,6 +300,34 @@
       .replace(/[^\d.]/g, "");
   }
 
+  function normalizeDateValue(value) {
+    const parts = String(value || "").trim().match(/\d+/g) || [];
+    if (parts.length < 3) return String(value || "").trim();
+    const day = String(Number(parts[0]));
+    const month = String(Number(parts[1]));
+    const year = parts[2];
+    return `${day}/${month}/${year}`;
+  }
+
+  function fieldValueMatches(fieldName, actual, expected) {
+    if (!expected && !actual) return true;
+    if (fieldName === "total" || fieldName === "valor_impuesto" || fieldName === "otros_impuestos") {
+      return parseMoney(actual) === parseMoney(expected);
+    }
+    if (fieldName === "km_carguio" || fieldName === "litros_combustible") {
+      const actualNumber = Number.parseFloat(parseDecimal(actual));
+      const expectedNumber = Number.parseFloat(parseDecimal(expected));
+      if (Number.isNaN(actualNumber) || Number.isNaN(expectedNumber)) {
+        return parseDecimal(actual) === parseDecimal(expected);
+      }
+      return Math.abs(actualNumber - expectedNumber) < 0.0001;
+    }
+    if (fieldName === "fecha") {
+      return normalizeDateValue(actual) === normalizeDateValue(expected);
+    }
+    return normalizeText(actual) === normalizeText(expected);
+  }
+
   function valueForField(rowData, fieldName) {
     const map = {
       proveedor: rowData.proveedor,
@@ -371,7 +409,7 @@
     return { ok: true };
   }
 
-  function setInputField(fieldEl, fieldName, value) {
+  async function setInputField(fieldEl, fieldName, value) {
     if (!value && fieldName !== "valor_impuesto" && fieldName !== "otros_impuestos") {
       return { ok: true, skipped: true };
     }
@@ -387,10 +425,16 @@
 
     if (fieldName === "fecha") {
       input.removeAttribute("readonly");
+      input.readOnly = false;
     }
     setNativeValue(input, value);
-    if (value && fieldName === "proveedor" && normalizeText(input.value) !== normalizeText(value)) {
-      return { ok: false, error: `no se pudo escribir proveedor "${value}"` };
+    await sleep(80);
+    if (value && !fieldValueMatches(fieldName, input.value, value)) {
+      clearAndTypeValue(input, value);
+      await sleep(120);
+    }
+    if (value && !fieldValueMatches(fieldName, input.value, value)) {
+      return { ok: false, error: `no se pudo escribir "${value}". Valor actual: "${input.value || ""}"` };
     }
     return { ok: true };
   }
