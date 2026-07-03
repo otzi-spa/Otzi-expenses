@@ -27,7 +27,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">RUT</label>
-            <input type="text" name="rut" class="form-control" placeholder="Ej: 76123456-7" required>
+            <input type="text" name="rut" class="form-control js-rut-input" placeholder="Ej: 76123456-7" required>
           </div>
           <div class="col-12">
             <button class="btn btn-primary w-100" type="submit">Guardar</button>
@@ -112,7 +112,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">RUT</label>
-            <input type="text" name="rut" class="form-control" value="{{ supplier.rut }}" required>
+            <input type="text" name="rut" class="form-control js-rut-input" value="{{ supplier.rut }}" required>
           </div>
         </div>
         <div class="modal-footer">
@@ -142,6 +142,21 @@
           table.search(search.value).draw();
         });
       }
+
+      function normalizeRut(value) {
+        var compact = String(value || "").replace(/[.\-\s]/g, "").replace(/[^0-9kK]/g, "");
+        if (compact.length < 2) return String(value || "").trim().toUpperCase();
+        return compact.slice(0, -1) + "-" + compact.slice(-1).toUpperCase();
+      }
+
+      document.querySelectorAll(".js-rut-input").forEach(function (input) {
+        var format = function () {
+          input.value = normalizeRut(input.value);
+          input.setSelectionRange(input.value.length, input.value.length);
+        };
+        input.addEventListener("input", format);
+        input.addEventListener("blur", format);
+      });
     });
   </script>
 {% endblock %}

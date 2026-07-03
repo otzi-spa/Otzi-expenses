@@ -528,12 +528,13 @@ def expense_detail(request, pk: int):
         worksite_raw = request.POST.get("worksite", "")
         expense.worksite = worksite_raw.strip()
 
-        document_type = request.POST.get("document_type", "").strip()
-        expense.document_type = document_type or None
+        document_type = request.POST.get("document_type")
+        if document_type is not None:
+            expense.document_type = document_type.strip() or None
         expense.rindegastos_cost_center = request.POST.get("rindegastos_cost_center", "").strip() or None
         expense.rindegastos_submitter = request.POST.get("rindegastos_submitter", "").strip() or None
         expense.rindegastos_document_type = (
-            request.POST.get("rindegastos_document_type", "").strip() or document_type or None
+            request.POST.get("rindegastos_document_type", "").strip() or None
         )
         expense.document_number = request.POST.get("document_number", "").strip() or None
 
@@ -703,7 +704,7 @@ def expense_create(request):
     expense.rindegastos_cost_center = request.POST.get("rindegastos_cost_center", "").strip() or None
     expense.rindegastos_submitter = request.POST.get("rindegastos_submitter", "").strip() or None
     expense.rindegastos_document_type = (
-        request.POST.get("rindegastos_document_type", "").strip() or expense.document_type or None
+        request.POST.get("rindegastos_document_type", "").strip() or None
     )
     expense.document_number = request.POST.get("document_number", "").strip() or None
 

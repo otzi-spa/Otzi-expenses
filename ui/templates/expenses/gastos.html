@@ -209,17 +209,21 @@
               <label class="form-label">RUT proveedor</label>
               <input type="text" name="supplier_rut" class="form-control" placeholder="Selecciona o agrega un proveedor" disabled>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Fecha del gasto</label>
               <input type="date" name="paid_at" class="form-control" data-required-param="true">
             </div>
-            <div class="col-md-4">
-              <label class="form-label">Tipo de documento</label>
-              <select name="rindegastos_document_type" class="form-select js-searchable-select" data-rindegastos-field="Tipo de Documento" data-required-param="true">
+            <div class="col-md-3">
+              <label class="form-label">Tipo de documento reportado</label>
+              <input type="text" class="form-control" value="" placeholder="Sin dato WhatsApp" disabled>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Tipo de documento Rindegastos</label>
+              <select name="rindegastos_document_type" class="form-select js-searchable-select" data-rindegastos-field="Tipo de Documento" data-reported-value="" data-required-param="true">
                 <option value="">Selecciona tipo de documento</option>
               </select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Número de documento</label>
               <input type="text" name="document_number" class="form-control" placeholder="Número de documento">
             </div>
@@ -651,17 +655,21 @@
                   <label class="form-label">RUT proveedor</label>
                   <input type="text" name="supplier_rut" class="form-control" value="{{ gasto.supplier_rut|default:'' }}" placeholder="Selecciona o agrega un proveedor" disabled>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                   <label class="form-label">Fecha del gasto</label>
                   <input type="date" name="paid_at" class="form-control" value="{{ gasto.paid_at|date:'Y-m-d' }}" data-required-param="true">
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label">Tipo de documento</label>
-                  <select name="rindegastos_document_type" class="form-select js-searchable-select" data-rindegastos-field="Tipo de Documento" data-current-value="{{ gasto.rindegastos_document_type|default:'' }}" data-required-param="true">
+                <div class="col-md-3">
+                  <label class="form-label">Tipo de documento reportado</label>
+                  <input type="text" class="form-control" value="{{ gasto.document_type|default:'' }}" placeholder="Sin dato WhatsApp" disabled>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">Tipo de documento Rindegastos</label>
+                  <select name="rindegastos_document_type" class="form-select js-searchable-select" data-rindegastos-field="Tipo de Documento" data-current-value="{{ gasto.rindegastos_document_type|default:'' }}" data-reported-value="{{ gasto.document_type|default:'' }}" data-required-param="true">
                     <option value="">Selecciona tipo de documento</option>
                   </select>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                   <label class="form-label">Número de documento</label>
                   <input type="text" name="document_number" class="form-control" value="{{ gasto.document_number|default:'' }}" placeholder="Número de documento">
                 </div>
@@ -1315,6 +1323,21 @@
         return compact.slice(0, -1) + '-' + compact.slice(-1).toUpperCase();
       }
 
+      function formatRutInput(input) {
+        if (!input) return;
+        input.value = normalizeRut(input.value);
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+
+      if (supplierQuickRut) {
+        supplierQuickRut.addEventListener('input', function () {
+          formatRutInput(supplierQuickRut);
+        });
+        supplierQuickRut.addEventListener('blur', function () {
+          formatRutInput(supplierQuickRut);
+        });
+      }
+
       if (supplierQuickModalEl) {
         supplierQuickModalEl.addEventListener('shown.bs.modal', function () {
           var backdrops = document.querySelectorAll('.modal-backdrop');
@@ -1786,6 +1809,34 @@
           refreshSearchableSelect(expenseTypeSelect);
         }
 
+        function normalizeDocumentTypeText(value) {
+          return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-zA-Z0-9]+/g, ' ')
+            .trim()
+            .toLowerCase();
+        }
+
+        function findReportedDocumentTypeMatch(reportedValue, options) {
+          var reported = normalizeDocumentTypeText(reportedValue);
+          if (!reported) return '';
+          var reportedTokens = reported.split(/\s+/).filter(Boolean);
+          for (var index = 0; index < options.length; index += 1) {
+            var optionValue = options[index].value || '';
+            var normalizedOption = normalizeDocumentTypeText(optionValue);
+            if (!normalizedOption) continue;
+            if (normalizedOption === reported || normalizedOption.indexOf(reported) !== -1) {
+              return optionValue;
+            }
+            var optionTokens = normalizedOption.split(/\s+/).filter(Boolean);
+            if (reportedTokens.some(function (token) { return optionTokens.indexOf(token) !== -1; })) {
+              return optionValue;
+            }
+          }
+          return '';
+        }
+
         function populateRindegastosFieldSelect(select, fieldOptions) {
           var fieldName = select.getAttribute('data-rindegastos-field') || '';
           var placeholder = select.options[0] ? select.options[0].textContent : 'Selecciona una opción';
@@ -1803,6 +1854,9 @@
           var options = (fieldOptions || []).filter(function (item) {
             return item.field_name === fieldName;
           });
+          if (!currentValue && fieldName === 'Tipo de Documento') {
+            currentValue = findReportedDocumentTypeMatch(select.getAttribute('data-reported-value'), options);
+          }
           var seenValues = {};
           options.forEach(function (item) {
             if (!item.value || seenValues[item.value]) return;

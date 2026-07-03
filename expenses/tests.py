@@ -425,6 +425,9 @@ class SupplierCatalogFlowTests(TestCase):
         response = self.client.get(reverse("expense_list"))
 
         self.assertContains(response, "Obra (ingresada por usuario)")
+        self.assertContains(response, "Tipo de documento reportado")
+        self.assertContains(response, "Tipo de documento Rindegastos")
+        self.assertContains(response, "findReportedDocumentTypeMatch")
         self.assertContains(response, 'class="modal fade supplier-quick-modal"')
         self.assertContains(response, "supplier-quick-backdrop")
         self.assertNotContains(response, 'name="worksite_standard"')
@@ -446,6 +449,36 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, 'class="modal-body expense-workspace"')
         self.assertContains(response, 'class="expense-form-pane"')
         self.assertContains(response, 'class="expense-receipt-pane"')
+
+    def test_edit_preserves_reported_document_type_without_rindegastos_fallback(self):
+        supplier = SupplierCatalog.objects.create(
+            name="Proveedor Documento",
+            rut="76.000.000-0",
+        )
+        expense = Expense.objects.create(
+            status="pending",
+            source="whatsapp",
+            category=self.policy.name,
+            supplier=supplier.name,
+            supplier_rut=supplier.rut,
+            document_type="boleta",
+        )
+
+        response = self.client.post(
+            reverse("expense_detail", args=[expense.pk]),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "supplier_select": supplier.name,
+                "supplier_rut": supplier.rut,
+                "rindegastos_document_type": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("expense_list"))
+        expense.refresh_from_db()
+        self.assertEqual(expense.document_type, "boleta")
+        self.assertIsNone(expense.rindegastos_document_type)
 
     def test_expense_table_displays_rindegastos_trace_id(self):
         expense = Expense.objects.create(
