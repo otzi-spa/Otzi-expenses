@@ -62,8 +62,10 @@
             <div class="col-12">
               <label class="form-label">Gastos a exportar</label>
               <select name="status_scope" class="form-select">
-                <option value="completed" selected>Solo parametrizados</option>
-                <option value="all">Todos los estados</option>
+                <option value="approved" selected>Solo aprobados</option>
+                <option value="completed_and_approved">Parametrizados y aprobados</option>
+                <option value="completed">Solo parametrizados</option>
+                <option value="all">Todos</option>
               </select>
             </div>
             <div class="col-md-6">
@@ -275,7 +277,7 @@
             <div class="col-12">
               <div class="row g-2 expense-type-row">
                 <div class="col-12">
-                  <label class="form-label">Categoría Rindegastos</label>
+                  <label class="form-label" data-role="expense-type-label">Categoría Rindegastos</label>
                   <select name="expense_type_select" class="form-select js-searchable-select">
                     <option value="">Selecciona categoría Rindegastos</option>
                     {% for t in expense_types_catalog %}
@@ -356,9 +358,9 @@
         {% for gasto in gastos %}
         <tr data-status="{{ gasto.status }}" data-has-attachment="{% if gasto.attachments.all %}1{% else %}0{% endif %}">
           <td data-order="{{ gasto.export_id }}">{{ gasto.export_id }}</td>
-          <td data-order="{{ gasto.created_at|date:'Y-m-d H:i:s' }}">{{ gasto.created_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
-          <td data-order="{{ gasto.paid_at|date:'Y-m-d' }}">{{ gasto.paid_at|date:"d/m/Y"|default:"-" }}</td>
-          <td>
+          <td data-order="{{ gasto.created_at|date:'Y-m-d H:i:s' }}" data-filter-date="{{ gasto.created_at|date:'Y-m-d' }}">{{ gasto.created_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
+          <td data-order="{{ gasto.paid_at|date:'Y-m-d' }}" data-filter-date="{{ gasto.paid_at|date:'Y-m-d' }}">{{ gasto.paid_at|date:"d/m/Y"|default:"-" }}</td>
+          <td data-filter-value="{{ gasto.reporter_label|default:'-' }}">
             {% if gasto.split_label %}
               <div class="badge badge-light-info mb-1">{{ gasto.split_label }}</div>
               <div class="text-muted fs-8">Grupo {{ gasto.split_group_id|slice:":8" }}</div>
@@ -379,7 +381,7 @@
               -
             {% endif %}
           </td>
-          <td>{{ gasto.supplier|default:"-" }}</td>
+          <td data-filter-value="{{ gasto.supplier|default:'-' }}">{{ gasto.supplier|default:"-" }}</td>
           <td data-order="{{ gasto.amount|default:0 }}">
             {% if gasto.amount is not none %}
               ${{ gasto.amount|cl_currency }} {{ gasto.currency }}
@@ -387,10 +389,10 @@
               -
             {% endif %}
           </td>
-          <td>{{ gasto.category|default:"-" }}</td>
-          <td>{{ gasto.worksite|default:"-" }}</td>
-          <td>{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</td>
-          <td>
+          <td data-filter-value="{{ gasto.category|default:'-' }}">{{ gasto.category|default:"-" }}</td>
+          <td data-filter-value="{{ gasto.worksite|default:'-' }}">{{ gasto.worksite|default:"-" }}</td>
+          <td data-filter-value="{% if gasto.is_vehicle %}Sí{% else %}No{% endif %}{% if gasto.vehicle %} {{ gasto.vehicle }}{% endif %}">{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</td>
+          <td data-filter-value="{{ gasto.get_status_display|default:gasto.status }}" data-status-code="{{ gasto.status }}">
             {% with gasto.get_status_display|default:gasto.status as status_label %}
               {% if gasto.status == "incomplete" %}
                 <span class="badge badge-light-danger">{{ status_label }}</span>
@@ -419,8 +421,8 @@
               </div>
             {% endif %}
           </td>
-          <td data-order="{{ gasto.message_sent_at|date:'Y-m-d H:i:s' }}">{{ gasto.message_sent_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
-          <td>
+          <td data-order="{{ gasto.message_sent_at|date:'Y-m-d H:i:s' }}" data-filter-date="{{ gasto.message_sent_at|date:'Y-m-d' }}">{{ gasto.message_sent_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
+          <td data-filter-value="{% if gasto.attachments.all %}Sí{% else %}No{% endif %}">
             {% with attachments=gasto.attachments.all %}
               {% if attachments %}
                 {% with attachment=attachments.0 %}
@@ -433,7 +435,7 @@
               {% endif %}
             {% endwith %}
           </td>
-          <td>
+          <td data-filter-value="{% if gasto.can_approve_or_reject %}aprobar rechazar {% endif %}{% if gasto.can_revert_decision %}revertir {% endif %}{% if can_manage_expenses %}ver editar dividir{% else %}ver{% endif %}">
             <div class="d-flex flex-wrap gap-1">
               <button type="button" class="btn btn-light btn-icon btn-sm" data-bs-toggle="modal" data-bs-target="#expenseModal{{ gasto.pk }}" data-kt-tooltip="true" title="Ver detalle" aria-label="Ver detalle">
                 <span class="svg-icon svg-icon-3">
@@ -719,9 +721,9 @@
                   </div>
                 </div>
                 <div class="col-12">
-                  <div class="row g-2 expense-type-row {% if gasto.is_vehicle %}d-none{% endif %}">
+                  <div class="row g-2 expense-type-row">
                     <div class="col-12">
-                      <label class="form-label">Categoría Rindegastos</label>
+                      <label class="form-label" data-role="expense-type-label">Categoría Rindegastos</label>
                       <select name="expense_type_select" class="form-select js-searchable-select">
                         <option value="">Selecciona categoría Rindegastos</option>
                         {% for t in expense_types_catalog %}
@@ -1231,6 +1233,47 @@
       margin-bottom: 0;
     }
 
+    #expensesTable thead th {
+      vertical-align: top;
+      white-space: nowrap;
+    }
+
+    .expenses-column-filters th {
+      background: #f8fafc;
+      padding-top: 0.55rem;
+      padding-bottom: 0.55rem;
+      text-transform: none;
+    }
+
+    .expenses-column-filter {
+      min-width: 118px;
+      font-size: 0.78rem;
+      padding: 0.35rem 0.5rem;
+    }
+
+    .expenses-column-filter.compact {
+      min-width: 92px;
+    }
+
+    .expenses-filter-stack {
+      display: grid;
+      gap: 0.35rem;
+      min-width: 118px;
+    }
+
+    .expenses-filter-stack.two-cols {
+      grid-template-columns: minmax(82px, 1fr) minmax(82px, 1fr);
+      min-width: 170px;
+    }
+
+    .expenses-sort-indicator {
+      display: inline-flex;
+      width: 1rem;
+      justify-content: center;
+      color: #6b7280;
+      font-size: 0.7rem;
+    }
+
     .expense-edit-modal .receipt-dropzone {
       cursor: pointer;
       transition: border-color 0.15s ease, background-color 0.15s ease;
@@ -1301,6 +1344,7 @@
       var activeQuickFilter = "all";
       var searchTerm = "";
       var sortState = { columnIndex: 1, direction: "desc" };
+      var columnFilters = {};
       var rindegastosFieldOptionsEl = document.getElementById("rindegastos-field-options-data");
       var rindegastosFieldOptions = [];
       var activeSupplierForm = null;
@@ -1365,6 +1409,170 @@
         return (cell.textContent || "").trim().toLowerCase();
       }
 
+      function normalizeFilterText(value) {
+        return String(value || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      function getCellFilterValue(row, index) {
+        var cell = row.cells[index];
+        if (!cell) return "";
+        var value = cell.getAttribute("data-filter-value");
+        if (value !== null && value !== "") return value;
+        return (cell.textContent || "").trim();
+      }
+
+      function getCellDateValue(row, index) {
+        var cell = row.cells[index];
+        if (!cell) return "";
+        return cell.getAttribute("data-filter-date") || String(getCellSortValue(row, index)).slice(0, 10);
+      }
+
+      function getCellNumericValue(row, index) {
+        var value = getCellSortValue(row, index);
+        var number = parseFloat(String(value || "").replace(",", "."));
+        return Number.isNaN(number) ? null : number;
+      }
+
+      function uniqueColumnOptions(index) {
+        var seen = {};
+        var values = [];
+        allExpenseRows.forEach(function (row) {
+          var value = getCellFilterValue(row, index);
+          var normalized = normalizeFilterText(value);
+          if (!normalized || seen[normalized]) return;
+          seen[normalized] = true;
+          values.push(value);
+        });
+        return values.sort(function (a, b) {
+          return String(a).localeCompare(String(b), "es", { sensitivity: "base" });
+        });
+      }
+
+      function setColumnFilter(index, key, value) {
+        if (!columnFilters[index]) columnFilters[index] = {};
+        columnFilters[index][key] = value;
+        Object.keys(columnFilters[index]).forEach(function (filterKey) {
+          if (!columnFilters[index][filterKey]) delete columnFilters[index][filterKey];
+        });
+        if (!Object.keys(columnFilters[index]).length) delete columnFilters[index];
+        renderExpenseRows();
+      }
+
+      function createFilterControl(config) {
+        if (config.type === "select") {
+          var select = document.createElement("select");
+          select.className = "form-select expenses-column-filter";
+          select.appendChild(new Option(config.placeholder || "Todos", ""));
+          (config.options || uniqueColumnOptions(config.index)).forEach(function (value) {
+            select.appendChild(new Option(value, value));
+          });
+          select.addEventListener("change", function () {
+            setColumnFilter(config.index, "exact", select.value);
+          });
+          return select;
+        }
+
+        if (config.type === "range") {
+          var rangeWrap = document.createElement("div");
+          rangeWrap.className = "expenses-filter-stack two-cols";
+          var min = document.createElement("input");
+          min.type = "number";
+          min.className = "form-control expenses-column-filter compact";
+          min.placeholder = "Min";
+          var max = document.createElement("input");
+          max.type = "number";
+          max.className = "form-control expenses-column-filter compact";
+          max.placeholder = "Max";
+          min.addEventListener("input", function () {
+            setColumnFilter(config.index, "min", min.value);
+          });
+          max.addEventListener("input", function () {
+            setColumnFilter(config.index, "max", max.value);
+          });
+          rangeWrap.append(min, max);
+          return rangeWrap;
+        }
+
+        if (config.type === "date-range") {
+          var dateWrap = document.createElement("div");
+          dateWrap.className = "expenses-filter-stack two-cols";
+          var from = document.createElement("input");
+          from.type = "date";
+          from.className = "form-control expenses-column-filter compact";
+          from.title = "Desde";
+          var to = document.createElement("input");
+          to.type = "date";
+          to.className = "form-control expenses-column-filter compact";
+          to.title = "Hasta";
+          from.addEventListener("input", function () {
+            setColumnFilter(config.index, "from", from.value);
+          });
+          to.addEventListener("input", function () {
+            setColumnFilter(config.index, "to", to.value);
+          });
+          dateWrap.append(from, to);
+          return dateWrap;
+        }
+
+        var input = document.createElement("input");
+        input.type = "text";
+        input.className = "form-control expenses-column-filter";
+        input.placeholder = config.placeholder || "Filtrar";
+        input.addEventListener("input", function () {
+          setColumnFilter(config.index, "value", input.value);
+        });
+        return input;
+      }
+
+      function buildColumnFilters() {
+        if (!expensesTable) return;
+        var thead = expensesTable.querySelector("thead");
+        var headerRow = thead ? thead.querySelector("tr") : null;
+        if (!thead || !headerRow || thead.querySelector(".expenses-column-filters")) return;
+
+        var filterConfigs = [
+          { index: 0, type: "text", placeholder: "ID" },
+          { index: 1, type: "date-range" },
+          { index: 2, type: "date-range" },
+          { index: 3, type: "select", placeholder: "Todos" },
+          { index: 4, type: "text", placeholder: "Proveedor" },
+          { index: 5, type: "range" },
+          { index: 6, type: "select", placeholder: "Todas" },
+          { index: 7, type: "text", placeholder: "Obra" },
+          { index: 8, type: "text", placeholder: "Vehículo" },
+          { index: 9, type: "select", placeholder: "Todos" },
+          { index: 10, type: "date-range" },
+          { index: 11, type: "select", placeholder: "Todos", options: ["Sí", "No"] },
+        ];
+        var configsByIndex = {};
+        filterConfigs.forEach(function (config) {
+          configsByIndex[config.index] = config;
+        });
+
+        var filterRow = document.createElement("tr");
+        filterRow.className = "expenses-column-filters";
+        Array.from(headerRow.children).forEach(function (_th, index) {
+          var cell = document.createElement("th");
+          if (configsByIndex[index]) {
+            var control = createFilterControl(configsByIndex[index]);
+            control.addEventListener("click", function (event) {
+              event.stopPropagation();
+            });
+            control.addEventListener("keydown", function (event) {
+              event.stopPropagation();
+            });
+            cell.appendChild(control);
+          }
+          filterRow.appendChild(cell);
+        });
+        thead.appendChild(filterRow);
+      }
+
       function sortRows(rows) {
         var index = sortState.columnIndex;
         var direction = sortState.direction === "asc" ? 1 : -1;
@@ -1398,6 +1606,34 @@
         if (activeQuickFilter === "approved" && status !== "approved") return false;
         if (activeQuickFilter === "without_receipt" && hasAttachment) return false;
         if (searchTerm && text.indexOf(searchTerm) === -1) return false;
+
+        for (var indexKey in columnFilters) {
+          if (!Object.prototype.hasOwnProperty.call(columnFilters, indexKey)) continue;
+          var index = parseInt(indexKey, 10);
+          var filter = columnFilters[indexKey] || {};
+          if (filter.value) {
+            var target = normalizeFilterText(getCellFilterValue(row, index));
+            var expected = normalizeFilterText(filter.value);
+            if (target.indexOf(expected) === -1) return false;
+          }
+          if (filter.exact) {
+            var exactTarget = normalizeFilterText(getCellFilterValue(row, index));
+            var exactExpected = normalizeFilterText(filter.exact);
+            if (exactTarget !== exactExpected) return false;
+          }
+          if (filter.min || filter.max) {
+            var numericValue = getCellNumericValue(row, index);
+            if (numericValue === null) return false;
+            if (filter.min && numericValue < parseFloat(filter.min)) return false;
+            if (filter.max && numericValue > parseFloat(filter.max)) return false;
+          }
+          if (filter.from || filter.to) {
+            var dateValue = getCellDateValue(row, index);
+            if (!dateValue) return false;
+            if (filter.from && dateValue < filter.from) return false;
+            if (filter.to && dateValue > filter.to) return false;
+          }
+        }
         return true;
       }
 
@@ -1411,6 +1647,18 @@
         filtered.forEach(function (row) {
           row.style.display = "";
           expensesTbody.appendChild(row);
+        });
+        updateSortIndicators();
+      }
+
+      function updateSortIndicators() {
+        if (!expensesTable) return;
+        expensesTable.querySelectorAll("thead tr:first-child th").forEach(function (th, index) {
+          var indicator = th.querySelector(".expenses-sort-indicator");
+          if (!indicator) return;
+          indicator.textContent = sortState.columnIndex === index ?
+            (sortState.direction === "asc" ? "▲" : "▼") :
+            "";
         });
       }
 
@@ -1434,9 +1682,12 @@
       });
 
       if (expensesTable) {
-        var headerCells = expensesTable.querySelectorAll("thead th");
+        buildColumnFilters();
+        var headerCells = expensesTable.querySelectorAll("thead tr:first-child th");
         headerCells.forEach(function (th, index) {
           if (th.getAttribute("data-sortable") === "false") return;
+          var label = th.textContent.trim();
+          th.innerHTML = '<span>' + label + '</span> <span class="expenses-sort-indicator" aria-hidden="true"></span>';
           th.style.cursor = "pointer";
           th.addEventListener("click", function () {
             if (sortState.columnIndex === index) {
@@ -1644,6 +1895,7 @@
         var fuelLitersInput = form.querySelector('input[name="fuel_liters"]');
         var fuelFieldsHelp = form.querySelector('.fuel-fields-help');
         var expenseTypeRow = form.querySelector('.expense-type-row');
+        var expenseTypeLabel = form.querySelector('[data-role="expense-type-label"]');
         var policySelect = form.querySelector('select[name="category_select"]');
         var policyIdInput = form.querySelector('input[name="category_policy_id"]');
         var currencySelect = form.querySelector('select[name="currency"]');
@@ -1701,11 +1953,6 @@
           }
           if (vehicleToggle.checked || hasReportedFuelData) {
             vehicleSection.classList.remove('d-none');
-            if (expenseTypeRow) {
-              expenseTypeRow.classList.add('d-none');
-              var expenseTypeFieldOn = expenseTypeRow.querySelector('select[name="expense_type_select"]');
-              if (expenseTypeFieldOn) expenseTypeFieldOn.value = '';
-            }
           } else {
             vehicleSection.classList.add('d-none');
             var vehicleSelect = vehicleSection.querySelector('select[name="vehicle"]');
@@ -1713,9 +1960,14 @@
               vehicleSelect.value = '';
               vehicleSelect.setAttribute('data-current-value', '');
             }
-            if (expenseTypeRow) {
-              expenseTypeRow.classList.remove('d-none');
-            }
+          }
+          if (expenseTypeRow) {
+            expenseTypeRow.classList.remove('d-none');
+          }
+          if (expenseTypeLabel) {
+            expenseTypeLabel.textContent = fuelPolicy ?
+              'Categoría Rindegastos (tipo de combustible)' :
+              'Categoría Rindegastos';
           }
 
           [fuelKmInput, fuelLitersInput].forEach(function (field) {

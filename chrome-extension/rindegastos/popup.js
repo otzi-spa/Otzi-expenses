@@ -265,6 +265,7 @@
         row.vehiculo_equipo,
         row.km_carguio ? `Km ${row.km_carguio}` : "",
         row.litros_combustible ? `${row.litros_combustible} L` : "",
+        row.categoria_rindegastos,
       ].filter(Boolean).join(" · ");
       [row.expenses_id, row.proveedor, row.total, row.fecha, special || "-"].forEach((value) => {
         const td = document.createElement("td");
@@ -281,7 +282,7 @@
       const missing = REQUIRED_FIELDS.filter((field) => !row[field]);
       const policy = normalizeText(row.politica);
       if (policy === "combustibles") {
-        ["vehiculo_equipo", "km_carguio", "litros_combustible"].forEach((field) => {
+        ["vehiculo_equipo", "km_carguio", "litros_combustible", "categoria_rindegastos"].forEach((field) => {
           if (!row[field] && !missing.includes(field)) missing.push(field);
         });
       } else if (VEHICLE_POLICIES.has(policy) && !row.vehiculo_equipo) {

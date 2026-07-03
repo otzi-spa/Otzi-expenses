@@ -84,18 +84,20 @@ class FuelExpenseExportTests(TestCase):
             vehicle="Camion 12",
             fuel_km=Decimal("154320"),
             fuel_liters=Decimal("45.5"),
+            expense_type="Diesel",
         )
 
-        response = self.client.get(reverse("expense_rindegastos_export"))
+        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed"})
         content = response.content.decode("utf-8-sig")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("vehiculo_equipo,km_carguio,litros_combustible", content)
-        self.assertIn("Camion 12,154320,45.5", content)
+        self.assertIn("vehiculo_equipo,km_carguio,litros_combustible,categoria_rindegastos", content)
+        self.assertIn("Camion 12,154320,45.500,Diesel", content)
 
         page = self.client.get(reverse("expense_list"))
         self.assertContains(page, 'name="fuel_km"')
         self.assertContains(page, 'name="fuel_liters"')
+        self.assertContains(page, "Categoría Rindegastos (tipo de combustible)")
         self.assertContains(page, 'value="154320.00"')
 
     def test_export_includes_vehicle_for_machinery_policy(self):
@@ -113,7 +115,7 @@ class FuelExpenseExportTests(TestCase):
             vehicle="Camión Mack LXXR28",
         )
 
-        response = self.client.get(reverse("expense_rindegastos_export"))
+        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed"})
         content = response.content.decode("utf-8-sig")
 
         self.assertEqual(response.status_code, 200)
@@ -127,6 +129,25 @@ class FuelExpenseExportTests(TestCase):
             note,
             "[Francisco] | Compra informada por WhatsApp. Gasto id OTZ-TEST",
         )
+
+    def test_export_status_scopes(self):
+        Expense.objects.create(status="completed", supplier="Parametrizado", category="Oficina Central")
+        Expense.objects.create(status="approved", supplier="Aprobado", category="Oficina Central")
+        Expense.objects.create(status="pending", supplier="Pendiente", category="Oficina Central")
+
+        approved = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "approved"}).content.decode("utf-8-sig")
+        both = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed_and_approved"}).content.decode("utf-8-sig")
+        completed = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed"}).content.decode("utf-8-sig")
+        all_rows = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "all"}).content.decode("utf-8-sig")
+
+        self.assertIn("Aprobado", approved)
+        self.assertNotIn("Parametrizado", approved)
+        self.assertIn("Aprobado", both)
+        self.assertIn("Parametrizado", both)
+        self.assertNotIn("Pendiente", both)
+        self.assertIn("Parametrizado", completed)
+        self.assertNotIn("Aprobado", completed)
+        self.assertIn("Pendiente", all_rows)
 
 
 class RindegastosVehicleOptionsTests(TestCase):
@@ -161,7 +182,6 @@ class RindegastosVehicleOptionsTests(TestCase):
             field_type="Select",
             options=[{"Code": "FS", "Value": "Francisco Santibañez"}],
         )
-
         response = self.client.get(reverse("expense_list"))
 
         self.assertEqual(response.status_code, 200)
@@ -174,6 +194,7 @@ class RindegastosVehicleOptionsTests(TestCase):
             reverse("rindegastos_policy_options", kwargs={"external_id": policy.external_id}),
         )
         self.assertContains(response, 'data-rindegastos-field="Nombre quien rinde"')
+        self.assertContains(response, "Categoría Rindegastos (tipo de combustible)")
         self.assertIn(
             {
                 "policy_id": policy.id,
@@ -428,6 +449,9 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "Tipo de documento reportado")
         self.assertContains(response, "Tipo de documento Rindegastos")
         self.assertContains(response, "findReportedDocumentTypeMatch")
+        self.assertContains(response, "expenses-column-filters")
+        self.assertContains(response, "data-filter-date")
+        self.assertContains(response, "data-filter-value")
         self.assertContains(response, 'class="modal fade supplier-quick-modal"')
         self.assertContains(response, "supplier-quick-backdrop")
         self.assertNotContains(response, 'name="worksite_standard"')
@@ -479,6 +503,49 @@ class SupplierCatalogFlowTests(TestCase):
         expense.refresh_from_db()
         self.assertEqual(expense.document_type, "boleta")
         self.assertIsNone(expense.rindegastos_document_type)
+
+    def test_edit_saves_expense_type_for_combustibles(self):
+        supplier = SupplierCatalog.objects.create(
+            name="Proveedor Combustible",
+            rut="76.000.000-0",
+        )
+        fuel_policy, _ = CategoryCatalog.objects.update_or_create(
+            name="Combustibles",
+            defaults={
+                "external_id": "policy-fuel-save",
+                "is_active": True,
+            },
+        )
+        ExpenseTypeCatalog.objects.create(
+            policy=fuel_policy,
+            name="Diesel",
+            sync_status="synced",
+            is_active=True,
+        )
+        expense = Expense.objects.create(
+            status="pending",
+            category=fuel_policy.name,
+            supplier=supplier.name,
+            supplier_rut=supplier.rut,
+            is_vehicle=True,
+        )
+
+        response = self.client.post(
+            reverse("expense_detail", args=[expense.pk]),
+            {
+                "status": "pending",
+                "category_select": fuel_policy.name,
+                "supplier_select": supplier.name,
+                "supplier_rut": supplier.rut,
+                "fuel_km": "1000",
+                "fuel_liters": "45.5",
+                "expense_type_select": "Diesel",
+            },
+        )
+
+        self.assertRedirects(response, reverse("expense_list"))
+        expense.refresh_from_db()
+        self.assertEqual(expense.expense_type, "Diesel")
 
     def test_expense_table_displays_rindegastos_trace_id(self):
         expense = Expense.objects.create(

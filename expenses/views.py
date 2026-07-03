@@ -230,7 +230,12 @@ def _missing_fields_for_parametrization(expense, has_receipt=None):
 
 
 def _rindegastos_field_options_payload():
-    target_names = {"Centro de Costo / Faena", "Nombre quien rinde", "Tipo de Documento", "Vehiculo o Equipo"}
+    target_names = {
+        "Centro de Costo / Faena",
+        "Nombre quien rinde",
+        "Tipo de Documento",
+        "Vehiculo o Equipo",
+    }
     payload = []
     fields = (
         RindegastosExpenseFieldCatalog.objects.filter(is_active=True, name__in=target_names)
@@ -261,7 +266,12 @@ def _rindegastos_field_options_payload():
 
 
 def _serialize_rindegastos_options(policy):
-    target_names = {"Centro de Costo / Faena", "Nombre quien rinde", "Tipo de Documento", "Vehiculo o Equipo"}
+    target_names = {
+        "Centro de Costo / Faena",
+        "Nombre quien rinde",
+        "Tipo de Documento",
+        "Vehiculo o Equipo",
+    }
     fields = RindegastosExpenseFieldCatalog.objects.filter(
         policy=policy,
         is_active=True,
@@ -550,24 +560,19 @@ def expense_detail(request, pk: int):
                 messages.error(request, "Km carguío o litros combustible tienen un valor inválido.")
 
         expense_type_select = request.POST.get("expense_type_select", "").strip()
-        if expense.is_vehicle:
-            expense.expense_type = None
-            expense.expense_type_other = None
+        if expense_type_select:
+            et_queryset = ExpenseTypeCatalog.objects.filter(
+                is_active=True,
+                name=expense_type_select,
+            )
+            policy_id = request.POST.get("category_policy_id", "").strip()
+            if policy_id:
+                et_queryset = et_queryset.filter(policy_id=policy_id)
+            et_obj = et_queryset.first()
+            expense.expense_type = et_obj.name if et_obj else None
         else:
-            if expense_type_select:
-                et_queryset = ExpenseTypeCatalog.objects.filter(
-                    is_active=True,
-                    name=expense_type_select,
-                )
-                policy_id = request.POST.get("category_policy_id", "").strip()
-                if policy_id:
-                    et_queryset = et_queryset.filter(policy_id=policy_id)
-                et_obj = et_queryset.first()
-                expense.expense_type = et_obj.name if et_obj else None
-            else:
-                expense.expense_type = None
-
-            expense.expense_type_other = None
+            expense.expense_type = None
+        expense.expense_type_other = None
 
         notes = request.POST.get("notes", "")
         expense.notes = notes.strip()
@@ -721,21 +726,19 @@ def expense_create(request):
         expense.fuel_liters = None
 
     expense_type_select = request.POST.get("expense_type_select", "").strip()
-    if expense.is_vehicle:
-        expense.expense_type = None
-        expense.expense_type_other = None
+    if expense_type_select:
+        et_queryset = ExpenseTypeCatalog.objects.filter(
+            is_active=True,
+            name=expense_type_select,
+        )
+        policy_id = request.POST.get("category_policy_id", "").strip()
+        if policy_id:
+            et_queryset = et_queryset.filter(policy_id=policy_id)
+        et_obj = et_queryset.first()
+        expense.expense_type = et_obj.name if et_obj else None
     else:
-        if expense_type_select:
-            et_queryset = ExpenseTypeCatalog.objects.filter(
-                is_active=True,
-                name=expense_type_select,
-            )
-            policy_id = request.POST.get("category_policy_id", "").strip()
-            if policy_id:
-                et_queryset = et_queryset.filter(policy_id=policy_id)
-            et_obj = et_queryset.first()
-            expense.expense_type = et_obj.name if et_obj else None
-        expense.expense_type_other = None
+        expense.expense_type = None
+    expense.expense_type_other = None
     expense.notes = request.POST.get("notes", "").strip()
 
     paid_at_raw = request.POST.get("paid_at", "").strip()
@@ -900,7 +903,11 @@ def expense_rindegastos_export(request):
         .prefetch_related("attachments")
         .order_by("category", "paid_at", "id")
     )
-    if status_scope != "all":
+    if status_scope == "approved":
+        queryset = queryset.filter(status="approved")
+    elif status_scope == "completed_and_approved":
+        queryset = queryset.filter(status__in=["completed", "approved"])
+    elif status_scope == "completed":
         queryset = queryset.filter(status="completed")
     if start_date:
         queryset = queryset.filter(paid_at__gte=start_date)
