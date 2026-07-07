@@ -203,6 +203,133 @@ def _log_expense_event(expense, action, actor=None, source="web", reason="", cha
     )
 
 
+def _normalized_duplicate_text(value):
+    return re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        (value or "")
+        .casefold()
+        .replace("á", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+        .replace("ñ", "n"),
+    ).strip()
+
+
+def _normalized_document_number(value):
+    return re.sub(r"[^a-z0-9]+", "", (value or "").casefold())
+
+
+def _amount_similarity_score(current_amount, candidate_amount):
+    if current_amount is None or candidate_amount is None:
+        return 0, ""
+    if current_amount == candidate_amount:
+        return 35, "mismo monto"
+    bigger = max(abs(current_amount), abs(candidate_amount))
+    if bigger and abs(current_amount - candidate_amount) / bigger <= Decimal("0.01"):
+        return 25, "monto muy cercano"
+    return 0, ""
+
+
+def _date_similarity_score(current_date, candidate_date):
+    if isinstance(current_date, str):
+        current_date = parse_date(current_date)
+    if isinstance(candidate_date, str):
+        candidate_date = parse_date(candidate_date)
+    if not current_date or not candidate_date:
+        return 0, ""
+    delta_days = abs((current_date - candidate_date).days)
+    if delta_days == 0:
+        return 25, "misma fecha"
+    if delta_days <= 2:
+        return 15, "fecha cercana"
+    return 0, ""
+
+
+def _expense_attachment_checksums(expense):
+    prefetched = getattr(expense, "_prefetched_objects_cache", {}).get("attachments")
+    attachments = prefetched if prefetched is not None else expense.attachments.all()
+    return {attachment.checksum_sha256 for attachment in attachments if attachment.checksum_sha256}
+
+
+def _similar_expense_score(expense, candidate):
+    score = 0
+    reasons = []
+
+    if _expense_attachment_checksums(expense) & _expense_attachment_checksums(candidate):
+        score += 70
+        reasons.append("mismo comprobante")
+
+    amount_score, amount_reason = _amount_similarity_score(expense.amount, candidate.amount)
+    if amount_score:
+        score += amount_score
+        reasons.append(amount_reason)
+
+    date_score, date_reason = _date_similarity_score(expense.paid_at, candidate.paid_at)
+    if date_score:
+        score += date_score
+        reasons.append(date_reason)
+
+    current_rut = normalize_rut(expense.supplier_rut) if expense.supplier_rut else ""
+    candidate_rut = normalize_rut(candidate.supplier_rut) if candidate.supplier_rut else ""
+    if current_rut and candidate_rut and current_rut == candidate_rut:
+        score += 25
+        reasons.append("mismo RUT proveedor")
+
+    current_document = _normalized_document_number(expense.document_number)
+    candidate_document = _normalized_document_number(candidate.document_number)
+    if current_document and candidate_document and current_document == candidate_document:
+        score += 40
+        reasons.append("mismo número de documento")
+
+    current_supplier = _normalized_duplicate_text(expense.supplier)
+    candidate_supplier = _normalized_duplicate_text(candidate.supplier)
+    if current_supplier and candidate_supplier:
+        if current_supplier == candidate_supplier:
+            score += 20
+            reasons.append("mismo proveedor")
+        elif current_supplier in candidate_supplier or candidate_supplier in current_supplier:
+            score += 10
+            reasons.append("proveedor similar")
+
+    current_doc_type = expense.rindegastos_document_type or expense.document_type
+    candidate_doc_type = candidate.rindegastos_document_type or candidate.document_type
+    if current_doc_type and candidate_doc_type and _normalized_duplicate_text(current_doc_type) == _normalized_duplicate_text(candidate_doc_type):
+        score += 10
+        reasons.append("mismo tipo de documento")
+
+    if expense.category and candidate.category and _normalized_duplicate_text(expense.category) == _normalized_duplicate_text(candidate.category):
+        score += 10
+        reasons.append("misma política")
+
+    if expense.wa_sender_phone and candidate.wa_sender_phone and expense.wa_sender_phone == candidate.wa_sender_phone:
+        score += 5
+        reasons.append("mismo usuario WhatsApp")
+
+    return score, reasons
+
+
+def _find_similar_expenses(expense, candidates, threshold=60, max_results=3):
+    matches = []
+    for candidate in candidates:
+        if candidate.pk == expense.pk:
+            continue
+        score, reasons = _similar_expense_score(expense, candidate)
+        if score < threshold:
+            continue
+        matches.append(
+            {
+                "expense": candidate,
+                "export_id": _expense_export_id(candidate.id),
+                "score": score,
+                "reasons": reasons[:4],
+            }
+        )
+    return sorted(matches, key=lambda item: (-item["score"], -item["expense"].created_at.timestamp()))[:max_results]
+
+
 def _missing_fields_for_parametrization(expense, has_receipt=None):
     missing = []
     if expense.amount is None:
@@ -806,7 +933,7 @@ def expense_create(request):
 @login_required
 def expense_list(request):
     can_manage_expenses = _can_manage_expenses(request.user)
-    gastos = (
+    gastos = list(
         Expense.objects.select_related("created_by", "wa_sender", "decision_by")
         .prefetch_related("attachments", "audit_logs")
         .order_by("-created_at")
@@ -838,6 +965,8 @@ def expense_list(request):
         gasto.split_label = ""
         if gasto.split_group_id and gasto.split_index and gasto.split_total:
             gasto.split_label = f"División {gasto.split_index}/{gasto.split_total}"
+    for gasto in gastos:
+        gasto.similar_expenses = _find_similar_expenses(gasto, gastos)
     context = {
         "gastos": gastos,
         "can_manage_expenses": can_manage_expenses,

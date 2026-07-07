@@ -27,7 +27,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">RUT</label>
-            <input type="text" name="rut" class="form-control js-rut-input" placeholder="Ej: 76123456-7" required>
+            <input type="text" name="rut" class="form-control js-rut-input" inputmode="text" autocomplete="off" placeholder="Ej: 76123456-7" required>
           </div>
           <div class="col-12">
             <button class="btn btn-primary w-100" type="submit">Guardar</button>
@@ -112,7 +112,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">RUT</label>
-            <input type="text" name="rut" class="form-control js-rut-input" value="{{ supplier.rut }}" required>
+            <input type="text" name="rut" class="form-control js-rut-input" inputmode="text" autocomplete="off" value="{{ supplier.rut }}" required>
           </div>
         </div>
         <div class="modal-footer">
@@ -144,8 +144,8 @@
       }
 
       function normalizeRut(value) {
-        var compact = String(value || "").replace(/[.\-\s]/g, "").replace(/[^0-9kK]/g, "");
-        if (compact.length < 2) return String(value || "").trim().toUpperCase();
+        var compact = String(value || "").replace(/[.\-\s]/g, "").replace(/[^0-9kK]/g, "").toUpperCase();
+        if (compact.length < 2) return compact;
         return compact.slice(0, -1) + "-" + compact.slice(-1).toUpperCase();
       }
 

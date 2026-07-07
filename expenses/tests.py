@@ -23,7 +23,7 @@ from expenses.models import (
     normalize_rut,
 )
 from expenses.rindegastos_sync import RindegastosCatalogSync
-from expenses.views import _expense_export_id, _missing_fields_for_parametrization, _rindegastos_note
+from expenses.views import _expense_export_id, _find_similar_expenses, _missing_fields_for_parametrization, _rindegastos_note
 
 LOCAL_TEST_STORAGES = {
     "default": {
@@ -575,6 +575,55 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, 'class="modal-body expense-workspace"')
         self.assertContains(response, 'class="expense-form-pane"')
         self.assertContains(response, 'class="expense-receipt-pane"')
+
+    def test_similar_expense_warning_is_rendered_inside_modal(self):
+        older = Expense.objects.create(
+            status="completed",
+            amount=Decimal("25000"),
+            category=self.policy.name,
+            supplier="Proveedor Duplicado",
+            supplier_rut="76123456-7",
+            paid_at="2026-06-10",
+            document_number="12345",
+            rindegastos_document_type="Boleta",
+        )
+        current = Expense.objects.create(
+            status="pending",
+            amount=Decimal("25000"),
+            category=self.policy.name,
+            supplier="Proveedor Duplicado",
+            supplier_rut="76.123.456-7",
+            paid_at="2026-06-10",
+            document_number="12345",
+            rindegastos_document_type="Boleta",
+        )
+
+        response = self.client.get(reverse("expense_list"))
+
+        self.assertContains(response, f'id="expenseModal{current.pk}"')
+        self.assertContains(response, "Posible gasto duplicado")
+        self.assertContains(response, _expense_export_id(older.id))
+        self.assertContains(response, "mismo número de documento")
+
+    def test_similar_expense_helper_ignores_unrelated_expenses(self):
+        current = Expense.objects.create(
+            status="pending",
+            amount=Decimal("25000"),
+            category=self.policy.name,
+            supplier="Proveedor Actual",
+            paid_at="2026-06-10",
+        )
+        unrelated = Expense.objects.create(
+            status="completed",
+            amount=Decimal("99000"),
+            category="Combustibles",
+            supplier="Otro Proveedor",
+            paid_at="2026-06-01",
+        )
+
+        matches = _find_similar_expenses(current, [current, unrelated])
+
+        self.assertEqual(matches, [])
 
     def test_edit_preserves_reported_document_type_without_rindegastos_fallback(self):
         supplier = SupplierCatalog.objects.create(
