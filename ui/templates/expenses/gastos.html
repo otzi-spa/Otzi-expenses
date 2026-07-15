@@ -403,7 +403,9 @@
               -
             {% endif %}
           </td>
-          <td data-filter-value="{{ gasto.supplier|default:'-' }}">{{ gasto.supplier|default:"-" }}</td>
+          <td data-filter-value="{{ gasto.supplier|default:'-' }}" title="{{ gasto.supplier|default:'-' }}">
+            <span class="expenses-cell-truncate">{{ gasto.supplier|default:"-" }}</span>
+          </td>
           <td data-order="{{ gasto.amount|default:0 }}">
             {% if gasto.amount is not none %}
               ${{ gasto.amount|cl_currency }} {{ gasto.currency }}
@@ -411,9 +413,18 @@
               -
             {% endif %}
           </td>
-          <td data-filter-value="{{ gasto.category|default:'-' }}">{{ gasto.category|default:"-" }}</td>
-          <td data-filter-value="{{ gasto.worksite|default:'-' }}">{{ gasto.worksite|default:"-" }}</td>
-          <td data-filter-value="{% if gasto.is_vehicle %}Sí{% else %}No{% endif %}{% if gasto.vehicle %} {{ gasto.vehicle }}{% endif %}">{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</td>
+          <td data-filter-value="{{ gasto.category|default:'-' }}" title="{{ gasto.category|default:'-' }}">
+            <span class="expenses-cell-truncate">{{ gasto.category|default:"-" }}</span>
+          </td>
+          <td data-filter-value="{{ gasto.worksite|default:'-' }}" title="{{ gasto.worksite|default:'-' }}">
+            <span class="expenses-cell-truncate">{{ gasto.worksite|default:"-" }}</span>
+          </td>
+          <td
+            data-filter-value="{% if gasto.is_vehicle %}Sí{% else %}No{% endif %}{% if gasto.vehicle %} {{ gasto.vehicle }}{% endif %}"
+            title="{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:'-' }}){% else %}No{% endif %}"
+          >
+            <span class="expenses-cell-truncate">{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</span>
+          </td>
           <td data-filter-value="{% if gasto.rindegastos_expense_id %}Subido{% else %}No subido{% endif %}" data-order="{% if gasto.rindegastos_expense_id %}1{% else %}0{% endif %}">
             {% if gasto.rindegastos_expense_id %}
               <span class="badge badge-light-success">Subido</span>
@@ -1371,6 +1382,14 @@
     #expensesTable tbody td {
       font-size: 0.82rem;
       overflow-wrap: anywhere;
+    }
+
+    #expensesTable .expenses-cell-truncate {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     #expensesTable .badge {
