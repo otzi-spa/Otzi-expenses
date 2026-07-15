@@ -24,7 +24,7 @@ from expenses.models import (
     normalize_rut,
 )
 from expenses.rindegastos_sync import RindegastosCatalogSync
-from expenses.rindegastos_expense_probe import extract_otzi_ids, summarize_rindegastos_expense
+from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
 from expenses.views import _expense_export_id, _find_similar_expenses, _missing_fields_for_parametrization, _rindegastos_note
 
 LOCAL_TEST_STORAGES = {
@@ -76,16 +76,7 @@ class FuelExpenseValidationTests(TestCase):
         self.assertEqual(_missing_fields_for_parametrization(expense), [])
 
 
-class RindegastosExpenseProbeTests(TestCase):
-    def setUp(self):
-        self.user = get_user_model().objects.create_user(
-            username="probe@example.com",
-            email="probe@example.com",
-            password="test",
-            role="admin",
-        )
-        self.client.force_login(self.user)
-
+class RindegastosUploadedExpenseSyncTests(TestCase):
     def test_extract_otzi_ids_from_note(self):
         self.assertEqual(
             extract_otzi_ids("Compra llave. Gasto id OTZ-7RHAFIME y OTZ-S5FAEKWM"),
@@ -107,25 +98,39 @@ class RindegastosExpenseProbeTests(TestCase):
         self.assertEqual(summary["id"], 123)
         self.assertEqual(summary["otzi_ids"], ["OTZ-YKQL54N2"])
 
-    @patch("expenses.views.RindegastosExpenseProbe")
-    def test_probe_view_returns_json_payload(self, probe_cls):
-        probe_cls.return_value.fetch.return_value = {
-            "since": "2026-04-01",
-            "until": "2026-07-14",
-            "pages_read": 1,
-            "results_per_page": 100,
-            "total_fetched": 1,
-            "total_with_otzi_id": 1,
-            "otzi_ids": ["OTZ-YKQL54N2"],
-            "matches": [],
-            "sample": [],
-        }
+    def test_sync_marks_local_expense_from_rindegastos_note(self):
+        expense = Expense.objects.create(
+            status="completed",
+            amount=Decimal("5900"),
+            currency="CLP",
+            category="Oficina Central",
+            supplier="starbucks Coffee Chile S.A.",
+            paid_at="2026-06-11",
+        )
+        export_id = _expense_export_id(expense.id)
 
-        response = self.client.get(reverse("expense_rindegastos_probe"), {"since": "2026-04-01"})
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "ReportId": 654,
+                        "Status": "Borrador",
+                        "IssueDate": "2026-06-11",
+                        "Total": 5900,
+                        "Note": f"Alimentación. Gasto id {export_id}",
+                    }
+                ], {"Pages": 1}
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["otzi_ids"], ["OTZ-YKQL54N2"])
-        probe_cls.return_value.fetch.assert_called_once()
+        stats = RindegastosUploadedExpenseSync(client=FakeClient(), export_id_func=_expense_export_id).sync(
+            since=timezone.datetime(2026, 4, 1).date(),
+            until=timezone.datetime(2026, 7, 15).date(),
+        )
+
+        expense.refresh_from_db()
+        self.assertEqual(stats["matched"], 1)
+        self.assertEqual(expense.rindegastos_expense_id, "987")
+        self.assertEqual(expense.rindegastos_report_id, "654")
 
 
 class FuelExpenseExportTests(TestCase):
@@ -155,7 +160,7 @@ class FuelExpenseExportTests(TestCase):
             expense_type="Diesel",
         )
 
-        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed"})
+        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed", "sync_before_export": "0"})
         content = response.content.decode("utf-8-sig")
 
         self.assertEqual(response.status_code, 200)
@@ -183,7 +188,7 @@ class FuelExpenseExportTests(TestCase):
             vehicle="Camión Mack LXXR28",
         )
 
-        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed"})
+        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed", "sync_before_export": "0"})
         content = response.content.decode("utf-8-sig")
 
         self.assertEqual(response.status_code, 200)
@@ -203,10 +208,10 @@ class FuelExpenseExportTests(TestCase):
         Expense.objects.create(status="approved", supplier="Aprobado", category="Oficina Central")
         Expense.objects.create(status="pending", supplier="Pendiente", category="Oficina Central")
 
-        approved = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "approved"}).content.decode("utf-8-sig")
-        both = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed_and_approved"}).content.decode("utf-8-sig")
-        completed = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed"}).content.decode("utf-8-sig")
-        all_rows = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "all"}).content.decode("utf-8-sig")
+        approved = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "approved", "sync_before_export": "0"}).content.decode("utf-8-sig")
+        both = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed_and_approved", "sync_before_export": "0"}).content.decode("utf-8-sig")
+        completed = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed", "sync_before_export": "0"}).content.decode("utf-8-sig")
+        all_rows = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "all", "sync_before_export": "0"}).content.decode("utf-8-sig")
 
         self.assertIn("Aprobado", approved)
         self.assertNotIn("Parametrizado", approved)
@@ -216,6 +221,29 @@ class FuelExpenseExportTests(TestCase):
         self.assertIn("Parametrizado", completed)
         self.assertNotIn("Aprobado", completed)
         self.assertIn("Pendiente", all_rows)
+
+    @patch("expenses.views.RindegastosUploadedExpenseSync")
+    def test_export_excludes_uploaded_expenses_by_default(self, sync_cls):
+        sync_cls.return_value.sync.return_value = {"matched": 0}
+        Expense.objects.create(
+            status="approved",
+            supplier="Ya subido",
+            category="Oficina Central",
+            rindegastos_expense_id="987",
+        )
+        Expense.objects.create(status="approved", supplier="No subido", category="Oficina Central")
+
+        default_content = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "approved"}).content.decode(
+            "utf-8-sig"
+        )
+        include_uploaded_content = self.client.get(
+            reverse("expense_rindegastos_export"),
+            {"status_scope": "approved", "sync_before_export": "0", "exclude_uploaded": "0"},
+        ).content.decode("utf-8-sig")
+
+        self.assertNotIn("Ya subido", default_content)
+        self.assertIn("No subido", default_content)
+        self.assertIn("Ya subido", include_uploaded_content)
 
     def test_export_uses_expense_date_not_creation_date(self):
         expense = Expense.objects.create(
@@ -228,7 +256,7 @@ class FuelExpenseExportTests(TestCase):
 
         content = self.client.get(
             reverse("expense_rindegastos_export"),
-            {"status_scope": "completed"},
+            {"status_scope": "completed", "sync_before_export": "0"},
         ).content.decode("utf-8-sig")
 
         self.assertIn("9/6/2026", content)
@@ -248,7 +276,7 @@ class FuelExpenseExportTests(TestCase):
             content_type="image/jpeg",
         )
 
-        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed"})
+        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed", "sync_before_export": "0"})
         content = response.content.decode("utf-8-sig")
         rows = list(csv.reader(io.StringIO(content)))
         header_index = rows.index(
@@ -906,7 +934,11 @@ class ExpenseApprovalFlowTests(TestCase):
         )
         self.assertContains(page, 'data-form-locked="true"')
         self.assertContains(page, "window.jQuery(select).prop('disabled', true)")
-        self.assertContains(page, "No se puede dividir en este estado")
+        self.assertContains(
+            page,
+            f'data-split-url="{reverse("expense_action", args=[self.expense.pk, "split"])}"',
+        )
+        self.assertContains(page, "disabled")
 
     def test_only_superadmin_can_revert_decision(self):
         self.expense.status = "approved"

@@ -92,6 +92,12 @@ class Expense(models.Model):
         related_name="decided_expenses",
     )
     decision_at = models.DateTimeField(null=True, blank=True)
+    rindegastos_expense_id = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+    rindegastos_report_id = models.CharField(max_length=255, blank=True, null=True)
+    rindegastos_uploaded_at = models.DateTimeField(null=True, blank=True)
+    rindegastos_synced_at = models.DateTimeField(null=True, blank=True)
+    rindegastos_status = models.CharField(max_length=255, blank=True, null=True)
+    rindegastos_raw_payload = models.JSONField(default=dict, blank=True)
 
 class Attachment(models.Model):
     expense = models.ForeignKey(Expense, related_name="attachments", on_delete=models.CASCADE)

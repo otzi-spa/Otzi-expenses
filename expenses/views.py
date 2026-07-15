@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 from django.conf import settings
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
@@ -33,8 +33,8 @@ from django.utils.dateparse import parse_date
 from django.contrib import messages
 from django.utils import timezone
 from .rindegastos_client import RindegastosAPIError
-from .rindegastos_expense_probe import RindegastosExpenseProbe, default_probe_since
 from .rindegastos_sync import RindegastosCatalogSync
+from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, default_uploaded_sync_since
 
 
 ALLOWED_RECEIPT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
@@ -1054,6 +1054,26 @@ def expense_rindegastos_export(request):
     status_scope = request.GET.get("status_scope", "completed")
     start_date = parse_date(request.GET.get("start_date", "") or "")
     end_date = parse_date(request.GET.get("end_date", "") or "")
+    sync_before_export = request.GET.get("sync_before_export", "1") != "0"
+    exclude_uploaded = request.GET.get("exclude_uploaded", "1") != "0"
+
+    sync_since = start_date or default_uploaded_sync_since()
+    sync_until = end_date or timezone.localdate()
+    if sync_before_export:
+        try:
+            RindegastosUploadedExpenseSync(export_id_func=_expense_export_id).sync(
+                since=sync_since,
+                until=sync_until,
+                max_pages=20,
+            )
+        except (RindegastosAPIError, ValueError) as exc:
+            messages.error(
+                request,
+                "No se pudo sincronizar con Rindegastos antes de exportar. "
+                "Desmarca la sincronización previa solo si quieres exportar de todas formas. "
+                f"Detalle: {exc}",
+            )
+            return redirect("expense_list")
 
     queryset = (
         Expense.objects.select_related("created_by", "wa_sender")
@@ -1070,6 +1090,8 @@ def expense_rindegastos_export(request):
         queryset = queryset.filter(paid_at__gte=start_date)
     if end_date:
         queryset = queryset.filter(paid_at__lte=end_date)
+    if exclude_uploaded:
+        queryset = queryset.filter(Q(rindegastos_expense_id__isnull=True) | Q(rindegastos_expense_id=""))
 
     expenses = list(queryset)
     policy_by_name = {
@@ -1149,36 +1171,6 @@ def expense_rindegastos_export(request):
         )
 
     return response
-
-
-@login_required
-def expense_rindegastos_probe(request):
-    if not _can_manage_expenses(request.user):
-        return JsonResponse({"ok": False, "error": "No autorizado."}, status=403)
-
-    since = parse_date(request.GET.get("since", "") or "") or default_probe_since()
-    until = parse_date(request.GET.get("until", "") or "") or timezone.localdate()
-    try:
-        max_pages = int(request.GET.get("max_pages", "5") or 5)
-    except ValueError:
-        max_pages = 5
-    try:
-        results_per_page = int(request.GET.get("results_per_page", "100") or 100)
-    except ValueError:
-        results_per_page = 100
-
-    try:
-        payload = RindegastosExpenseProbe().fetch(
-            since=since,
-            until=until,
-            max_pages=max_pages,
-            results_per_page=results_per_page,
-        )
-    except RindegastosAPIError as exc:
-        return JsonResponse({"ok": False, "error": str(exc)}, status=502)
-
-    return JsonResponse({"ok": True, **payload}, json_dumps_params={"ensure_ascii": False, "indent": 2})
-
 
 @login_required
 def attachment_serve(request, pk: int):

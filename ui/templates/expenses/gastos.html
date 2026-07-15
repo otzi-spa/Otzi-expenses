@@ -77,8 +77,27 @@
               <input type="date" name="end_date" class="form-control">
             </div>
             <div class="col-12">
+              <div class="form-check form-switch">
+                <input type="hidden" name="sync_before_export" value="0">
+                <input class="form-check-input" type="checkbox" value="1" name="sync_before_export" id="syncBeforeExportInput" checked>
+                <label class="form-check-label" for="syncBeforeExportInput">
+                  Sincronizar con Rindegastos antes de exportar
+                </label>
+              </div>
+              <div class="form-text">Busca gastos ya cargados en Rindegastos dentro del periodo seleccionado antes de generar el CSV.</div>
+            </div>
+            <div class="col-12">
+              <div class="form-check form-switch">
+                <input type="hidden" name="exclude_uploaded" value="0">
+                <input class="form-check-input" type="checkbox" value="1" name="exclude_uploaded" id="excludeUploadedInput" checked>
+                <label class="form-check-label" for="excludeUploadedInput">
+                  Excluir gastos ya subidos a Rindegastos
+                </label>
+              </div>
+            </div>
+            <div class="col-12">
               <div class="alert alert-light-info mb-0">
-                El archivo incluye un resumen por política y luego las filas para copiar a Rindegastos. Los comprobantes no se exportan en este MVP.
+                El archivo incluye un resumen por política y luego las filas para copiar a Rindegastos.
               </div>
             </div>
           </div>
@@ -328,6 +347,8 @@
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="pending">Pendiente</button>
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="completed">Parametrizado</button>
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="approved">Aprobado</button>
+        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="uploaded_rindegastos">Subidos RG</button>
+        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="not_uploaded_rindegastos">No subidos RG</button>
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="without_receipt">Sin comprobante</button>
       </div>
       <div class="expenses-search-box">
@@ -348,6 +369,7 @@
           <th data-sortable="true">Política</th>
           <th data-sortable="true">Obra</th>
           <th data-sortable="true">Vehículo</th>
+          <th data-sortable="true">Rindegastos</th>
           <th data-sortable="true">Status</th>
           <th data-sortable="true">Recibido</th>
           <th data-sortable="false">Comprobante</th>
@@ -356,7 +378,7 @@
       </thead>
       <tbody class="text-gray-600 fw-semibold">
         {% for gasto in gastos %}
-        <tr data-status="{{ gasto.status }}" data-has-attachment="{% if gasto.attachments.all %}1{% else %}0{% endif %}">
+        <tr data-status="{{ gasto.status }}" data-has-attachment="{% if gasto.attachments.all %}1{% else %}0{% endif %}" data-rindegastos-uploaded="{% if gasto.rindegastos_expense_id %}1{% else %}0{% endif %}">
           <td data-order="{{ gasto.export_id }}">{{ gasto.export_id }}</td>
           <td data-order="{{ gasto.created_at|date:'Y-m-d H:i:s' }}" data-filter-date="{{ gasto.created_at|date:'Y-m-d' }}">{{ gasto.created_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
           <td data-order="{{ gasto.paid_at|date:'Y-m-d' }}" data-filter-date="{{ gasto.paid_at|date:'Y-m-d' }}">{{ gasto.paid_at|date:"d/m/Y"|default:"-" }}</td>
@@ -392,6 +414,14 @@
           <td data-filter-value="{{ gasto.category|default:'-' }}">{{ gasto.category|default:"-" }}</td>
           <td data-filter-value="{{ gasto.worksite|default:'-' }}">{{ gasto.worksite|default:"-" }}</td>
           <td data-filter-value="{% if gasto.is_vehicle %}Sí{% else %}No{% endif %}{% if gasto.vehicle %} {{ gasto.vehicle }}{% endif %}">{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</td>
+          <td data-filter-value="{% if gasto.rindegastos_expense_id %}Subido{% else %}No subido{% endif %}" data-order="{% if gasto.rindegastos_expense_id %}1{% else %}0{% endif %}">
+            {% if gasto.rindegastos_expense_id %}
+              <span class="badge badge-light-success">Subido</span>
+              <div class="text-muted fs-8 mt-1">ID {{ gasto.rindegastos_expense_id }}</div>
+            {% else %}
+              <span class="badge badge-light">No subido</span>
+            {% endif %}
+          </td>
           <td data-filter-value="{{ gasto.get_status_display|default:gasto.status }}" data-status-code="{{ gasto.status }}">
             {% with gasto.get_status_display|default:gasto.status as status_label %}
               {% if gasto.status == "incomplete" %}
@@ -755,6 +785,13 @@
                               <div>Usuario creador: {% if gasto.created_by %}{{ gasto.created_by.get_full_name|default:gasto.created_by.email }}{% else %}-{% endif %}</div>
                               <div>Creado: {{ gasto.created_at|localtime|date:'d/m/Y H:i' }}</div>
                               <div>Recibido: {{ gasto.message_sent_at|localtime|date:'d/m/Y H:i' }}</div>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="fw-semibold text-secondary">Rindegastos</div>
+                              <div>Estado carga: {% if gasto.rindegastos_expense_id %}Subido{% else %}No detectado{% endif %}</div>
+                              <div>ID gasto: {{ gasto.rindegastos_expense_id|default:"-" }}</div>
+                              <div>ID informe: {{ gasto.rindegastos_report_id|default:"-" }}</div>
+                              <div>Última sync: {{ gasto.rindegastos_synced_at|localtime|date:'d/m/Y H:i'|default:"-" }}</div>
                             </div>
                           </div>
                           <hr>
@@ -1248,7 +1285,7 @@
     }
 
     #expensesTable {
-      min-width: 1280px;
+      min-width: 1390px;
       margin-bottom: 0;
       table-layout: fixed;
       --bs-table-striped-bg: #fbfcff;
@@ -1283,8 +1320,8 @@
     #expensesTable td:nth-child(2),
     #expensesTable th:nth-child(3),
     #expensesTable td:nth-child(3),
-    #expensesTable th:nth-child(11),
-    #expensesTable td:nth-child(11) {
+    #expensesTable th:nth-child(12),
+    #expensesTable td:nth-child(12) {
       width: 112px;
     }
 
@@ -1309,19 +1346,24 @@
     #expensesTable td:nth-child(8),
     #expensesTable th:nth-child(9),
     #expensesTable td:nth-child(9),
-    #expensesTable th:nth-child(10),
-    #expensesTable td:nth-child(10) {
+    #expensesTable th:nth-child(11),
+    #expensesTable td:nth-child(11) {
       width: 96px;
     }
 
-    #expensesTable th:nth-child(12),
-    #expensesTable td:nth-child(12) {
-      width: 92px;
-      text-align: center;
+    #expensesTable th:nth-child(10),
+    #expensesTable td:nth-child(10) {
+      width: 112px;
     }
 
     #expensesTable th:nth-child(13),
     #expensesTable td:nth-child(13) {
+      width: 92px;
+      text-align: center;
+    }
+
+    #expensesTable th:nth-child(14),
+    #expensesTable td:nth-child(14) {
       width: 92px;
       text-align: center;
     }
@@ -1696,9 +1738,10 @@
           { index: 6, type: "select", placeholder: "Todas" },
           { index: 7, type: "text", placeholder: "Obra" },
           { index: 8, type: "text", placeholder: "Vehículo" },
-          { index: 9, type: "select", placeholder: "Todos" },
-          { index: 10, type: "date-range" },
-          { index: 11, type: "select", placeholder: "Todos", options: ["Sí", "No"] },
+          { index: 9, type: "select", placeholder: "Todos", options: ["Subido", "No subido"] },
+          { index: 10, type: "select", placeholder: "Todos" },
+          { index: 11, type: "date-range" },
+          { index: 12, type: "select", placeholder: "Todos", options: ["Sí", "No"] },
         ];
         var configsByIndex = {};
         filterConfigs.forEach(function (config) {
@@ -1748,6 +1791,7 @@
       function rowMatches(row) {
         var status = row.getAttribute("data-status") || "";
         var hasAttachment = row.getAttribute("data-has-attachment") === "1";
+        var uploadedRindegastos = row.getAttribute("data-rindegastos-uploaded") === "1";
         var text = (row.textContent || "").toLowerCase();
 
         if (activeQuickFilter === "pending" && status !== "pending") return false;
@@ -1755,6 +1799,8 @@
         if (activeQuickFilter === "not_completed" && status !== "not_completed") return false;
         if (activeQuickFilter === "completed" && status !== "completed") return false;
         if (activeQuickFilter === "approved" && status !== "approved") return false;
+        if (activeQuickFilter === "uploaded_rindegastos" && !uploadedRindegastos) return false;
+        if (activeQuickFilter === "not_uploaded_rindegastos" && uploadedRindegastos) return false;
         if (activeQuickFilter === "without_receipt" && hasAttachment) return false;
         if (searchTerm && text.indexOf(searchTerm) === -1) return false;
 
