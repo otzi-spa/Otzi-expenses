@@ -367,7 +367,7 @@
           <th data-sortable="true">Proveedor</th>
           <th data-sortable="true">Monto</th>
           <th data-sortable="true">Política</th>
-          <th data-sortable="true">Obra</th>
+          <th data-sortable="true" class="expense-worksite-col">Obra</th>
           <th data-sortable="true">Vehículo</th>
           <th data-sortable="true">Rindegastos</th>
           <th data-sortable="true">Status</th>
@@ -413,17 +413,15 @@
               -
             {% endif %}
           </td>
-          <td data-filter-value="{{ gasto.category|default:'-' }}" title="{{ gasto.category|default:'-' }}">
-            <span class="expenses-cell-truncate">{{ gasto.category|default:"-" }}</span>
-          </td>
-          <td data-filter-value="{{ gasto.worksite|default:'-' }}" title="{{ gasto.worksite|default:'-' }}">
+          <td data-filter-value="{{ gasto.category|default:'-' }}">{{ gasto.category|default:"-" }}</td>
+          <td class="expense-worksite-col" data-filter-value="{{ gasto.worksite|default:'-' }}" title="{{ gasto.worksite|default:'-' }}">
             <span class="expenses-cell-truncate">{{ gasto.worksite|default:"-" }}</span>
           </td>
           <td
             data-filter-value="{% if gasto.is_vehicle %}Sí{% else %}No{% endif %}{% if gasto.vehicle %} {{ gasto.vehicle }}{% endif %}"
             title="{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:'-' }}){% else %}No{% endif %}"
           >
-            <span class="expenses-cell-truncate">{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</span>
+            <span class="expenses-cell-truncate expenses-cell-truncate-lg">{% if gasto.is_vehicle %}Sí ({{ gasto.vehicle|default:"-" }}){% else %}No{% endif %}</span>
           </td>
           <td data-filter-value="{% if gasto.rindegastos_expense_id %}Subido{% else %}No subido{% endif %}" data-order="{% if gasto.rindegastos_expense_id %}1{% else %}0{% endif %}">
             {% if gasto.rindegastos_expense_id %}
@@ -1296,7 +1294,7 @@
     }
 
     #expensesTable {
-      min-width: 1390px;
+      min-width: 1450px;
       margin-bottom: 0;
       table-layout: fixed;
       --bs-table-striped-bg: #fbfcff;
@@ -1355,11 +1353,14 @@
 
     #expensesTable th:nth-child(8),
     #expensesTable td:nth-child(8),
-    #expensesTable th:nth-child(9),
-    #expensesTable td:nth-child(9),
     #expensesTable th:nth-child(11),
     #expensesTable td:nth-child(11) {
       width: 96px;
+    }
+
+    #expensesTable th:nth-child(9),
+    #expensesTable td:nth-child(9) {
+      width: 192px;
     }
 
     #expensesTable th:nth-child(10),
@@ -1390,6 +1391,18 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      cursor: help;
+    }
+
+    #expensesTable .expenses-cell-truncate.is-expanded {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      cursor: zoom-out;
+    }
+
+    #expensesTable .expense-worksite-col {
+      display: none;
     }
 
     #expensesTable .badge {
@@ -1613,6 +1626,14 @@
         });
       }
 
+      if (expensesTable) {
+        expensesTable.addEventListener("click", function (event) {
+          var truncatable = event.target.closest(".expenses-cell-truncate");
+          if (!truncatable || !expensesTable.contains(truncatable)) return;
+          truncatable.classList.toggle("is-expanded");
+        });
+      }
+
       function getCellSortValue(row, index) {
         var cell = row.cells[index];
         if (!cell) return "";
@@ -1769,8 +1790,11 @@
 
         var filterRow = document.createElement("tr");
         filterRow.className = "expenses-column-filters";
-        Array.from(headerRow.children).forEach(function (_th, index) {
+        Array.from(headerRow.children).forEach(function (th, index) {
           var cell = document.createElement("th");
+          if (th.classList.contains("expense-worksite-col")) {
+            cell.classList.add("expense-worksite-col");
+          }
           if (configsByIndex[index]) {
             var control = createFilterControl(configsByIndex[index]);
             control.addEventListener("click", function (event) {
