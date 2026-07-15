@@ -75,3 +75,15 @@ class RindegastosClient:
         if users:
             return users
         return self._get_paginated("getUsers", "Employees")
+
+    def get_expenses(self, params=None):
+        return self._get_paginated("getExpenses", "Expenses", params=params)
+
+    def get_expenses_page(self, params=None):
+        payload = self._get("getExpenses", params=params)
+        expenses = payload.get("Expenses")
+        if expenses is None:
+            expenses = payload.get("expenses", [])
+        if isinstance(expenses, dict):
+            expenses = [expenses]
+        return expenses or [], payload.get("Records") or {}

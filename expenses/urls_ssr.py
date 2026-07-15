@@ -6,6 +6,7 @@ from .views import (
     expense_detail,
     expense_list,
     expense_rindegastos_export,
+    expense_rindegastos_probe,
     attachment_export_serve,
     rindegastos_policy_options,
     attachment_serve,
@@ -24,6 +25,7 @@ urlpatterns = [
     path("gastos/", expense_list, name="expense_list"),
     path("expenses/create/", expense_create, name="expense_create"),
     path("expenses/export/rindegastos/", expense_rindegastos_export, name="expense_rindegastos_export"),
+    path("expenses/rindegastos/probe/", expense_rindegastos_probe, name="expense_rindegastos_probe"),
     path(
         "expenses/rindegastos/policies/<str:external_id>/options/",
         rindegastos_policy_options,

@@ -2,6 +2,7 @@
   "use strict";
 
   const BATCH_SIZE = 50;
+  const REQUIRED_CONTENT_SCRIPT_VERSION = "0.4.7";
   const DATA_HEADER = [
     "politica",
     "expenses_id",
@@ -370,13 +371,33 @@
 
   async function ensureContentScript(tabId) {
     try {
-      await chrome.tabs.sendMessage(tabId, { type: "OTZI_RINDEGASTOS_PING" });
-      return;
+      const response = await chrome.tabs.sendMessage(tabId, { type: "OTZI_RINDEGASTOS_PING" });
+      if (response && response.contentScriptVersion === REQUIRED_CONTENT_SCRIPT_VERSION) {
+        return response;
+      }
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["content-script.js"],
+      });
+      const recheck = await chrome.tabs.sendMessage(tabId, { type: "OTZI_RINDEGASTOS_PING" });
+      if (!recheck || recheck.contentScriptVersion !== REQUIRED_CONTENT_SCRIPT_VERSION) {
+        throw new Error(
+          `La pestana de Rindegastos tiene content script viejo (${(recheck && recheck.contentScriptVersion) || "sin version"}). Cierra esa pestana y abre Rindegastos de nuevo.`,
+        );
+      }
+      return recheck;
     } catch (error) {
       await chrome.scripting.executeScript({
         target: { tabId },
         files: ["content-script.js"],
       });
+      const response = await chrome.tabs.sendMessage(tabId, { type: "OTZI_RINDEGASTOS_PING" });
+      if (!response || response.contentScriptVersion !== REQUIRED_CONTENT_SCRIPT_VERSION) {
+        throw new Error(
+          `No pude confirmar el content script actualizado en Rindegastos. Version detectada: ${(response && response.contentScriptVersion) || "sin version"}.`,
+        );
+      }
+      return response;
     }
   }
 
@@ -447,7 +468,11 @@
         throw new Error((response && response.error) || "Rindegastos no respondio.");
       }
       const failed = response.results.filter((item) => item.errors.length).length;
-      els.runStatus.textContent = `${response.results.length} filas procesadas. ${failed} con advertencias.`;
+      const warned = response.results.filter((item) => item.warnings.length).length;
+      const firstError = response.results
+        .flatMap((item) => item.errors.map((error) => `${item.expenses_id || "fila"}: ${error}`))[0];
+      const suffix = firstError ? ` Primer error: ${firstError}` : "";
+      els.runStatus.textContent = `${response.results.length} filas procesadas. ${failed} con errores, ${warned} con advertencias.${suffix}`;
     } catch (error) {
       els.runStatus.textContent = error.message || "No se pudo rellenar Rindegastos.";
     }

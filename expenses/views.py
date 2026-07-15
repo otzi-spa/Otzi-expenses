@@ -33,6 +33,7 @@ from django.utils.dateparse import parse_date
 from django.contrib import messages
 from django.utils import timezone
 from .rindegastos_client import RindegastosAPIError
+from .rindegastos_expense_probe import RindegastosExpenseProbe, default_probe_since
 from .rindegastos_sync import RindegastosCatalogSync
 
 
@@ -1148,6 +1149,35 @@ def expense_rindegastos_export(request):
         )
 
     return response
+
+
+@login_required
+def expense_rindegastos_probe(request):
+    if not _can_manage_expenses(request.user):
+        return JsonResponse({"ok": False, "error": "No autorizado."}, status=403)
+
+    since = parse_date(request.GET.get("since", "") or "") or default_probe_since()
+    until = parse_date(request.GET.get("until", "") or "") or timezone.localdate()
+    try:
+        max_pages = int(request.GET.get("max_pages", "5") or 5)
+    except ValueError:
+        max_pages = 5
+    try:
+        results_per_page = int(request.GET.get("results_per_page", "100") or 100)
+    except ValueError:
+        results_per_page = 100
+
+    try:
+        payload = RindegastosExpenseProbe().fetch(
+            since=since,
+            until=until,
+            max_pages=max_pages,
+            results_per_page=results_per_page,
+        )
+    except RindegastosAPIError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=502)
+
+    return JsonResponse({"ok": True, **payload}, json_dumps_params={"ensure_ascii": False, "indent": 2})
 
 
 @login_required

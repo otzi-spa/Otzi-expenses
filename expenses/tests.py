@@ -1,6 +1,7 @@
 import csv
 import io
 from decimal import Decimal
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 from django.contrib.auth import get_user_model
@@ -23,6 +24,7 @@ from expenses.models import (
     normalize_rut,
 )
 from expenses.rindegastos_sync import RindegastosCatalogSync
+from expenses.rindegastos_expense_probe import extract_otzi_ids, summarize_rindegastos_expense
 from expenses.views import _expense_export_id, _find_similar_expenses, _missing_fields_for_parametrization, _rindegastos_note
 
 LOCAL_TEST_STORAGES = {
@@ -72,6 +74,58 @@ class FuelExpenseValidationTests(TestCase):
         )
 
         self.assertEqual(_missing_fields_for_parametrization(expense), [])
+
+
+class RindegastosExpenseProbeTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="probe@example.com",
+            email="probe@example.com",
+            password="test",
+            role="admin",
+        )
+        self.client.force_login(self.user)
+
+    def test_extract_otzi_ids_from_note(self):
+        self.assertEqual(
+            extract_otzi_ids("Compra llave. Gasto id OTZ-7RHAFIME y OTZ-S5FAEKWM"),
+            ["OTZ-7RHAFIME", "OTZ-S5FAEKWM"],
+        )
+
+    def test_summarize_rindegastos_expense_includes_otzi_ids(self):
+        summary = summarize_rindegastos_expense(
+            {
+                "Id": 123,
+                "Supplier": "Proveedor",
+                "IssueDate": "2026-06-11",
+                "Total": 5900,
+                "Currency": "CLP",
+                "Note": "Alimentación. Gasto id OTZ-YKQL54N2",
+            }
+        )
+
+        self.assertEqual(summary["id"], 123)
+        self.assertEqual(summary["otzi_ids"], ["OTZ-YKQL54N2"])
+
+    @patch("expenses.views.RindegastosExpenseProbe")
+    def test_probe_view_returns_json_payload(self, probe_cls):
+        probe_cls.return_value.fetch.return_value = {
+            "since": "2026-04-01",
+            "until": "2026-07-14",
+            "pages_read": 1,
+            "results_per_page": 100,
+            "total_fetched": 1,
+            "total_with_otzi_id": 1,
+            "otzi_ids": ["OTZ-YKQL54N2"],
+            "matches": [],
+            "sample": [],
+        }
+
+        response = self.client.get(reverse("expense_rindegastos_probe"), {"since": "2026-04-01"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["otzi_ids"], ["OTZ-YKQL54N2"])
+        probe_cls.return_value.fetch.assert_called_once()
 
 
 class FuelExpenseExportTests(TestCase):

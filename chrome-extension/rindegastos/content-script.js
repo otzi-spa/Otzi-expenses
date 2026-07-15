@@ -1,10 +1,12 @@
 (function () {
   "use strict";
 
-  if (window.__OTZI_RINDEGASTOS_CONTENT_SCRIPT_LOADED__) {
+  const CONTENT_SCRIPT_VERSION = "0.4.7";
+
+  if (window.__OTZI_RINDEGASTOS_CONTENT_SCRIPT_VERSION__ === CONTENT_SCRIPT_VERSION) {
     return;
   }
-  window.__OTZI_RINDEGASTOS_CONTENT_SCRIPT_LOADED__ = true;
+  window.__OTZI_RINDEGASTOS_CONTENT_SCRIPT_VERSION__ = CONTENT_SCRIPT_VERSION;
 
   const FALLBACK_FIELD_ORDER = [
     "selector",
@@ -85,6 +87,71 @@
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
+  let bridgeInjected = false;
+  let bridgeInputCounter = 0;
+  let bridgeReadyPromise = null;
+
+  function injectPageBridge() {
+    if (bridgeInjected || document.documentElement.dataset.otziRindegastosBridgeInjected === "true") {
+      bridgeInjected = true;
+      return bridgeReadyPromise || Promise.resolve();
+    }
+    bridgeReadyPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = chrome.runtime.getURL("page-bridge.js");
+      script.async = false;
+      script.onload = () => {
+        script.remove();
+        resolve();
+      };
+      script.onerror = () => reject(new Error("no se pudo cargar bridge de pagina"));
+      (document.head || document.documentElement).appendChild(script);
+      document.documentElement.dataset.otziRindegastosBridgeInjected = "true";
+      bridgeInjected = true;
+    });
+    return bridgeReadyPromise;
+  }
+
+  async function pageBridgeRequest(action, payload) {
+    await injectPageBridge();
+    const id = `otzi-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        reject(new Error("timeout esperando bridge de pagina"));
+      }, 5000);
+
+      function onMessage(event) {
+        if (event.source !== window) return;
+        const message = event.data || {};
+        if (message.source !== "OTZI_RINDEGASTOS_PAGE_BRIDGE" || message.id !== id) return;
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+        if (message.ok) {
+          resolve(message.result || {});
+        } else {
+          reject(new Error(message.error || "error en bridge de pagina"));
+        }
+      }
+
+      window.addEventListener("message", onMessage);
+      window.postMessage({
+        source: "OTZI_RINDEGASTOS_EXTENSION",
+        id,
+        action,
+        payload,
+      }, "*");
+    });
+  }
+
+  function ensureBridgeSelector(element) {
+    if (!element.dataset.otziInputId) {
+      bridgeInputCounter += 1;
+      element.dataset.otziInputId = `input-${Date.now()}-${bridgeInputCounter}`;
+    }
+    return `[data-otzi-input-id="${CSS.escape(element.dataset.otziInputId)}"]`;
+  }
+
   function normalizeText(value) {
     return String(value || "")
       .normalize("NFD")
@@ -113,13 +180,13 @@
 
   function dispatchInputEvents(element) {
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: element.value || "" }));
+    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Unidentified" }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
     element.dispatchEvent(new Event("blur", { bubbles: true }));
+    element.dispatchEvent(new Event("focusout", { bubbles: true }));
   }
 
-  function setNativeValue(element, value) {
-    element.focus();
-    element.click();
+  function setRawValue(element, value) {
     const descriptor =
       Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value") ||
       Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value") ||
@@ -130,6 +197,12 @@
       element.value = value;
     }
     element.setAttribute("value", value);
+  }
+
+  function setNativeValue(element, value) {
+    element.focus();
+    element.click();
+    setRawValue(element, value);
     dispatchInputEvents(element);
   }
 
@@ -138,6 +211,78 @@
     element.click();
     setNativeValue(element, "");
     setNativeValue(element, value);
+  }
+
+  async function typeValueLikeUser(element, value) {
+    element.focus();
+    element.click();
+    setRawValue(element, "");
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: "" }));
+    await sleep(30);
+    const text = String(value || "");
+    for (const char of text) {
+      element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: char }));
+      const nextValue = `${element.value || ""}${char}`;
+      setRawValue(element, nextValue);
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: char }));
+      element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: char }));
+      await sleep(8);
+    }
+    element.setAttribute("value", element.value || text);
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    element.dispatchEvent(new Event("blur", { bubbles: true }));
+    element.dispatchEvent(new Event("focusout", { bubbles: true }));
+  }
+
+  async function setInputViaPageBridge(input, fieldName, value) {
+    const selector = ensureBridgeSelector(input);
+    const mode = fieldName === "total" || fieldName === "valor_impuesto" || fieldName === "otros_impuestos" ? "type" : "set";
+    return pageBridgeRequest("setInputValue", {
+      selector,
+      fieldName,
+      value: String(value || ""),
+      mode,
+    });
+  }
+
+  function canUseDebuggerTyping(fieldName) {
+    return (
+      fieldName === "total" ||
+      fieldName === "valor_impuesto" ||
+      fieldName === "otros_impuestos" ||
+      fieldName === "fecha" ||
+      fieldName === "km_carguio" ||
+      fieldName === "litros_combustible"
+    );
+  }
+
+  function debuggerInsertText(value) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          type: "OTZI_DEBUGGER_INSERT_TEXT",
+          text: String(value || ""),
+        },
+        (response) => {
+          const error = chrome.runtime.lastError;
+          if (error) {
+            reject(new Error(error.message || "runtime no pudo comunicarse con background"));
+            return;
+          }
+          resolve(response);
+        },
+      );
+    });
+  }
+
+  async function setInputViaDebugger(input, fieldName, value) {
+    const selector = ensureBridgeSelector(input);
+    await pageBridgeRequest("prepareDebuggerInput", { selector, fieldName });
+    const response = await debuggerInsertText(value);
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "debugger no pudo escribir el valor");
+    }
+    return pageBridgeRequest("finalizeDebuggerInput", { selector, fieldName });
   }
 
   function findSheet() {
@@ -300,13 +445,41 @@
       .replace(/[^\d.]/g, "");
   }
 
-  function normalizeDateValue(value) {
+  function dateParts(value, order = "dmy") {
     const parts = String(value || "").trim().match(/\d+/g) || [];
-    if (parts.length < 3) return String(value || "").trim();
-    const day = String(Number(parts[0]));
-    const month = String(Number(parts[1]));
-    const year = parts[2];
+    if (parts.length < 3) return null;
+    if (parts[0].length === 4) {
+      return { year: parts[0], month: parts[1], day: parts[2] };
+    }
+    if (order === "mdy") {
+      return { month: parts[0], day: parts[1], year: parts[2].length === 2 ? `20${parts[2]}` : parts[2] };
+    }
+    return { day: parts[0], month: parts[1], year: parts[2].length === 2 ? `20${parts[2]}` : parts[2] };
+  }
+
+  function normalizeDateValue(value) {
+    const parsed = dateParts(value);
+    if (!parsed) return String(value || "").trim();
+    const day = String(Number(parsed.day));
+    const month = String(Number(parsed.month));
+    const year = parsed.year;
     return `${day}/${month}/${year}`;
+  }
+
+  function formatDateForRindegastos(value) {
+    const parsed = dateParts(value);
+    if (!parsed) return String(value || "").trim();
+    const day = String(Number(parsed.day));
+    const month = String(Number(parsed.month));
+    return `${month}/${day}/${parsed.year}`;
+  }
+
+  function normalizeRindegastosInputDate(value) {
+    const parsed = dateParts(value, "mdy");
+    if (!parsed) return String(value || "").trim();
+    const day = String(Number(parsed.day));
+    const month = String(Number(parsed.month));
+    return `${day}/${month}/${parsed.year}`;
   }
 
   function fieldValueMatches(fieldName, actual, expected) {
@@ -323,7 +496,7 @@
       return Math.abs(actualNumber - expectedNumber) < 0.0001;
     }
     if (fieldName === "fecha") {
-      return normalizeDateValue(actual) === normalizeDateValue(expected);
+      return normalizeDateValue(actual) === normalizeRindegastosInputDate(expected);
     }
     return normalizeText(actual) === normalizeText(expected);
   }
@@ -336,7 +509,7 @@
       impuesto: rowData.impuesto,
       valor_impuesto: parseMoney(rowData.valor_impuesto),
       otros_impuestos: parseMoney(rowData.otros_impuestos),
-      fecha: rowData.fecha,
+      fecha: formatDateForRindegastos(rowData.fecha),
       centro_costo_faena: rowData.centro_costo_faena,
       nombre_quien_rinde: rowData.nombre_quien_rinde,
       rut_proveedor: rowData.rut_proveedor,
@@ -494,14 +667,48 @@
       return { ok: true, skipped: true, warning: "input deshabilitado" };
     }
 
-    if (fieldName === "fecha") {
-      input.removeAttribute("readonly");
-      input.readOnly = false;
+    try {
+      if (canUseDebuggerTyping(fieldName)) {
+        await setInputViaDebugger(input, fieldName, value);
+      } else {
+        await setInputViaPageBridge(input, fieldName, value);
+      }
+    } catch (error) {
+      if (canUseDebuggerTyping(fieldName)) {
+        return { ok: false, error: `debugger no disponible para escribir "${value}": ${error.message}` };
+      }
+      if (fieldName === "fecha") {
+        input.removeAttribute("readonly");
+        input.readOnly = false;
+      }
+      if (fieldName === "total" || fieldName === "valor_impuesto" || fieldName === "otros_impuestos") {
+        await typeValueLikeUser(input, value);
+      } else {
+        setNativeValue(input, value);
+        if (fieldName === "fecha") {
+          input.dispatchEvent(new Event("dateInput", { bubbles: true }));
+          input.dispatchEvent(new Event("dateChange", { bubbles: true }));
+        }
+      }
     }
-    setNativeValue(input, value);
     await sleep(80);
     if (value && !fieldValueMatches(fieldName, input.value, value)) {
-      clearAndTypeValue(input, value);
+      try {
+        if (canUseDebuggerTyping(fieldName)) {
+          await setInputViaDebugger(input, fieldName, value);
+        } else {
+          await setInputViaPageBridge(input, fieldName, value);
+        }
+      } catch (error) {
+        if (canUseDebuggerTyping(fieldName)) {
+          return { ok: false, error: `debugger no disponible para reintento "${value}": ${error.message}` };
+        }
+        if (fieldName === "total" || fieldName === "valor_impuesto" || fieldName === "otros_impuestos") {
+          await typeValueLikeUser(input, value);
+        } else {
+          clearAndTypeValue(input, value);
+        }
+      }
       await sleep(120);
     }
     if (value && !fieldValueMatches(fieldName, input.value, value)) {
@@ -595,7 +802,11 @@
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.type === "OTZI_RINDEGASTOS_PING") {
-      sendResponse({ ok: true });
+      sendResponse({
+        ok: true,
+        contentScriptVersion: CONTENT_SCRIPT_VERSION,
+        manifestVersion: chrome.runtime.getManifest().version,
+      });
       return false;
     }
 
