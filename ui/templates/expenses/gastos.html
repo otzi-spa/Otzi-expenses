@@ -863,16 +863,24 @@
                           <a class="btn btn-sm btn-light-primary" href="{% url 'attachment_serve' attachment.pk %}" target="_blank" rel="noopener">Abrir</a>
                         </div>
                       </div>
-                      <div class="expense-receipt-canvas js-receipt-viewer" data-viewer-type="{% if 'pdf' in attachment.content_type|lower %}pdf{% else %}image{% endif %}">
-                        {% if "pdf" in attachment.content_type|lower %}
-                          <div class="receipt-viewer-content">
-                            <iframe class="receipt-viewer-media" src="{% url 'attachment_serve' attachment.pk %}" title="Comprobante PDF #{{ forloop.counter }}"></iframe>
-                          </div>
-                        {% else %}
-                          <div class="receipt-viewer-content">
-                            <img class="receipt-viewer-media" src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante #{{ forloop.counter }}">
-                          </div>
-                        {% endif %}
+                      <div class="receipt-viewer-frame">
+                        <div class="expense-receipt-canvas js-receipt-viewer" data-viewer-type="{% if 'pdf' in attachment.content_type|lower %}pdf{% else %}image{% endif %}">
+                          {% if "pdf" in attachment.content_type|lower %}
+                            <div class="receipt-viewer-content">
+                              <iframe class="receipt-viewer-media" src="{% url 'attachment_serve' attachment.pk %}" title="Comprobante PDF #{{ forloop.counter }}"></iframe>
+                            </div>
+                          {% else %}
+                            <div class="receipt-viewer-content">
+                              <img class="receipt-viewer-media" src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante #{{ forloop.counter }}">
+                            </div>
+                          {% endif %}
+                        </div>
+                        <div class="receipt-scrollbar receipt-scrollbar-horizontal" data-receipt-scrollbar="horizontal" aria-hidden="true">
+                          <div class="receipt-scrollbar-thumb" data-receipt-scrollbar-thumb="horizontal"></div>
+                        </div>
+                        <div class="receipt-scrollbar receipt-scrollbar-vertical" data-receipt-scrollbar="vertical" aria-hidden="true">
+                          <div class="receipt-scrollbar-thumb" data-receipt-scrollbar-thumb="vertical"></div>
+                        </div>
                       </div>
                     </div>
                     {% endfor %}
@@ -1097,6 +1105,14 @@
       display: flex;
     }
 
+    .expense-edit-modal .receipt-viewer-frame {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+      background: #eef1f5;
+    }
+
     .expense-edit-modal .expense-receipt-actions {
       display: flex;
       align-items: center;
@@ -1143,8 +1159,8 @@
     }
 
     .expense-edit-modal .expense-receipt-canvas {
-      flex: 1 1 auto;
-      min-height: 0;
+      width: 100%;
+      height: 100%;
       overflow: scroll;
       scrollbar-gutter: stable both-edges;
       scrollbar-width: thin;
@@ -1174,6 +1190,54 @@
 
     .expense-edit-modal .expense-receipt-canvas::-webkit-scrollbar-corner {
       background: #e5e7eb;
+    }
+
+    .expense-edit-modal .receipt-scrollbar {
+      position: absolute;
+      z-index: 6;
+      display: none;
+      background: rgba(226, 232, 240, 0.96);
+      border: 1px solid rgba(148, 163, 184, 0.75);
+      border-radius: 999px;
+      box-shadow: 0 6px 16px rgba(15, 23, 42, 0.16);
+      pointer-events: auto;
+    }
+
+    .expense-edit-modal .receipt-scrollbar.is-visible {
+      display: block;
+    }
+
+    .expense-edit-modal .receipt-scrollbar-horizontal {
+      left: 12px;
+      right: 30px;
+      bottom: 12px;
+      height: 14px;
+    }
+
+    .expense-edit-modal .receipt-scrollbar-vertical {
+      top: 12px;
+      right: 12px;
+      bottom: 30px;
+      width: 14px;
+    }
+
+    .expense-edit-modal .receipt-scrollbar-thumb {
+      position: absolute;
+      left: 0;
+      top: 0;
+      background: #64748b;
+      border-radius: 999px;
+      box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
+    }
+
+    .expense-edit-modal .receipt-scrollbar-horizontal .receipt-scrollbar-thumb {
+      min-width: 34px;
+      height: 100%;
+    }
+
+    .expense-edit-modal .receipt-scrollbar-vertical .receipt-scrollbar-thumb {
+      width: 100%;
+      min-height: 34px;
     }
 
     .expense-edit-modal .receipt-viewer-content {
@@ -2210,9 +2274,78 @@
         var media = panel.querySelector('.receipt-viewer-media');
         var label = panel.querySelector('[data-receipt-zoom-label]');
         var controls = panel.querySelectorAll('[data-receipt-zoom]');
+        var horizontalBar = panel.querySelector('[data-receipt-scrollbar="horizontal"]');
+        var verticalBar = panel.querySelector('[data-receipt-scrollbar="vertical"]');
+        var horizontalThumb = panel.querySelector('[data-receipt-scrollbar-thumb="horizontal"]');
+        var verticalThumb = panel.querySelector('[data-receipt-scrollbar-thumb="vertical"]');
         var viewerType = viewer ? viewer.getAttribute('data-viewer-type') : '';
 
         if (!viewer || !content || !media || !label) return null;
+
+        function updateCustomScrollbars() {
+          if (!horizontalBar || !verticalBar || !horizontalThumb || !verticalThumb) return;
+
+          var canScrollX = viewer.scrollWidth > viewer.clientWidth + 1;
+          var canScrollY = viewer.scrollHeight > viewer.clientHeight + 1;
+          horizontalBar.classList.toggle('is-visible', canScrollX);
+          verticalBar.classList.toggle('is-visible', canScrollY);
+
+          if (canScrollX) {
+            var horizontalTrack = horizontalBar.clientWidth || 1;
+            var horizontalRatio = viewer.clientWidth / viewer.scrollWidth;
+            var horizontalThumbWidth = Math.max(34, horizontalTrack * horizontalRatio);
+            var horizontalMaxLeft = Math.max(horizontalTrack - horizontalThumbWidth, 0);
+            var horizontalScrollRatio = viewer.scrollLeft / Math.max(viewer.scrollWidth - viewer.clientWidth, 1);
+            horizontalThumb.style.width = horizontalThumbWidth + 'px';
+            horizontalThumb.style.transform = 'translateX(' + (horizontalMaxLeft * horizontalScrollRatio) + 'px)';
+          }
+
+          if (canScrollY) {
+            var verticalTrack = verticalBar.clientHeight || 1;
+            var verticalRatio = viewer.clientHeight / viewer.scrollHeight;
+            var verticalThumbHeight = Math.max(34, verticalTrack * verticalRatio);
+            var verticalMaxTop = Math.max(verticalTrack - verticalThumbHeight, 0);
+            var verticalScrollRatio = viewer.scrollTop / Math.max(viewer.scrollHeight - viewer.clientHeight, 1);
+            verticalThumb.style.height = verticalThumbHeight + 'px';
+            verticalThumb.style.transform = 'translateY(' + (verticalMaxTop * verticalScrollRatio) + 'px)';
+          }
+        }
+
+        function bindCustomScrollbar(bar, axis) {
+          if (!bar) return;
+
+          function scrollToPointer(event) {
+            var rect = bar.getBoundingClientRect();
+            if (axis === 'x') {
+              var x = event.clientX - rect.left;
+              var ratioX = x / Math.max(rect.width, 1);
+              viewer.scrollLeft = ratioX * (viewer.scrollWidth - viewer.clientWidth);
+            } else {
+              var y = event.clientY - rect.top;
+              var ratioY = y / Math.max(rect.height, 1);
+              viewer.scrollTop = ratioY * (viewer.scrollHeight - viewer.clientHeight);
+            }
+            updateCustomScrollbars();
+          }
+
+          bar.addEventListener('pointerdown', function (event) {
+            event.preventDefault();
+            bar.setPointerCapture(event.pointerId);
+            scrollToPointer(event);
+            var onMove = function (moveEvent) {
+              scrollToPointer(moveEvent);
+            };
+            var onUp = function (upEvent) {
+              bar.releasePointerCapture(upEvent.pointerId);
+              bar.removeEventListener('pointermove', onMove);
+              bar.removeEventListener('pointerup', onUp);
+              bar.removeEventListener('pointercancel', onUp);
+            };
+            bar.addEventListener('pointermove', onMove);
+            bar.addEventListener('pointerup', onUp);
+            bar.addEventListener('pointercancel', onUp);
+          });
+        }
 
         if (viewerType !== 'image') {
           label.textContent = 'PDF';
@@ -2272,6 +2405,7 @@
             viewer.scrollLeft = 0;
             viewer.scrollTop = 0;
           }
+          updateCustomScrollbars();
         }
 
         function fitViewer() {
@@ -2293,6 +2427,9 @@
         });
 
         media.addEventListener('load', fitViewer);
+        viewer.addEventListener('scroll', updateCustomScrollbars);
+        bindCustomScrollbar(horizontalBar, 'x');
+        bindCustomScrollbar(verticalBar, 'y');
         viewer.addEventListener('dblclick', function () {
           if (Math.abs(state.zoom - 1) < 0.01) {
             fitViewer();
@@ -2312,6 +2449,7 @@
             if (state.fitted && panel.classList.contains('is-active')) {
               fitViewer();
             }
+            updateCustomScrollbars();
           });
         }
 
@@ -2319,10 +2457,12 @@
           if (state.fitted) {
             fitViewer();
           }
+          updateCustomScrollbars();
         });
 
         return {
-          fit: fitViewer
+          fit: fitViewer,
+          updateScrollbars: updateCustomScrollbars
         };
       }
 
@@ -2349,6 +2489,9 @@
             });
             if (viewerApis[targetId] && typeof viewerApis[targetId].fit === 'function') {
               viewerApis[targetId].fit();
+              if (typeof viewerApis[targetId].updateScrollbars === 'function') {
+                viewerApis[targetId].updateScrollbars();
+              }
             }
           });
         });
