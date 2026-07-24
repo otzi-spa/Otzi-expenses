@@ -1145,8 +1145,35 @@
     .expense-edit-modal .expense-receipt-canvas {
       flex: 1 1 auto;
       min-height: 0;
-      overflow: auto;
+      overflow: scroll;
+      scrollbar-gutter: stable both-edges;
+      scrollbar-width: thin;
+      scrollbar-color: #94a3b8 #e5e7eb;
       background: #eef1f5;
+    }
+
+    .expense-edit-modal .expense-receipt-canvas::-webkit-scrollbar {
+      width: 14px;
+      height: 14px;
+    }
+
+    .expense-edit-modal .expense-receipt-canvas::-webkit-scrollbar-track {
+      background: #e5e7eb;
+      border-radius: 10px;
+    }
+
+    .expense-edit-modal .expense-receipt-canvas::-webkit-scrollbar-thumb {
+      background: #94a3b8;
+      border: 3px solid #e5e7eb;
+      border-radius: 10px;
+    }
+
+    .expense-edit-modal .expense-receipt-canvas::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+
+    .expense-edit-modal .expense-receipt-canvas::-webkit-scrollbar-corner {
+      background: #e5e7eb;
     }
 
     .expense-edit-modal .receipt-viewer-content {
