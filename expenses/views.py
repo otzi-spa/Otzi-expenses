@@ -484,9 +484,6 @@ def _apply_supplier(expense, request):
                 supplier.save(update_fields=["is_active", "updated_at"])
         else:
             new_supplier_rut = normalize_rut(request.POST.get("supplier_rut"))
-            if not new_supplier_rut:
-                messages.error(request, "El RUT es obligatorio para crear un proveedor.")
-                return False
             supplier = SupplierCatalog.objects.create(
                 name=new_supplier_name,
                 rut=new_supplier_rut,
@@ -1746,8 +1743,8 @@ def settings_suppliers(request):
         if action == "add_supplier":
             name = request.POST.get("name", "").strip()
             rut = normalize_rut(request.POST.get("rut"))
-            if not name or not rut:
-                messages.error(request, "Nombre y RUT son obligatorios.")
+            if not name:
+                messages.error(request, "El nombre es obligatorio.")
             elif SupplierCatalog.objects.filter(name__iexact=name).exists():
                 messages.error(request, "Ya existe un proveedor con ese nombre.")
             else:
@@ -1758,8 +1755,8 @@ def settings_suppliers(request):
             supplier = get_object_or_404(SupplierCatalog, pk=request.POST.get("supplier_id"))
             name = request.POST.get("name", "").strip()
             rut = normalize_rut(request.POST.get("rut"))
-            if not name or not rut:
-                messages.error(request, "Nombre y RUT son obligatorios.")
+            if not name:
+                messages.error(request, "El nombre es obligatorio.")
             elif SupplierCatalog.objects.filter(name__iexact=name).exclude(pk=supplier.pk).exists():
                 messages.error(request, "Ya existe un proveedor con ese nombre.")
             else:

@@ -176,7 +176,7 @@ class WorksiteCatalog(models.Model):
 
 class SupplierCatalog(models.Model):
     name = models.CharField(max_length=128, unique=True)
-    rut = models.CharField(max_length=32)
+    rut = models.CharField(max_length=32, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

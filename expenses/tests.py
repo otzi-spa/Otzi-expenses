@@ -602,6 +602,38 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertEqual(supplier.rut, "16608218-8")
         self.assertEqual(expense.supplier_rut, "16608218-8")
 
+    def test_new_supplier_can_be_created_without_rut(self):
+        response = self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "new_supplier_name": "Proveedor Sin Rut",
+                "supplier_select": "Proveedor Sin Rut",
+                "supplier_rut": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("expense_list"))
+        supplier = SupplierCatalog.objects.get(name="Proveedor Sin Rut")
+        expense = Expense.objects.get(supplier="Proveedor Sin Rut")
+        self.assertEqual(supplier.rut, "")
+        self.assertIsNone(expense.supplier_rut)
+
+    def test_supplier_maintainer_accepts_blank_rut(self):
+        response = self.client.post(
+            reverse("settings_suppliers"),
+            {
+                "action": "add_supplier",
+                "name": "Proveedor Mantenedor Sin Rut",
+                "rut": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("settings_suppliers"))
+        supplier = SupplierCatalog.objects.get(name="Proveedor Mantenedor Sin Rut")
+        self.assertEqual(supplier.rut, "")
+
     def test_rut_normalizer_accepts_dots_spaces_and_k(self):
         self.assertEqual(normalize_rut("76.123.456-7"), "76123456-7")
         self.assertEqual(normalize_rut("16 608 2188"), "16608218-8")

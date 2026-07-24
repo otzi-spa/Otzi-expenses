@@ -154,7 +154,7 @@
           </div>
           <div class="col-12">
             <label class="form-label">RUT proveedor</label>
-            <input type="text" class="form-control" id="supplierQuickRut" inputmode="text" autocomplete="off" placeholder="Ej: 76123456-7">
+            <input type="text" class="form-control" id="supplierQuickRut" inputmode="text" autocomplete="off" placeholder="Opcional">
           </div>
         </div>
       </div>
@@ -2468,7 +2468,7 @@
           );
           supplierRutInput.value = rut;
           supplierRutInput.disabled = !isNewSupplier;
-          supplierRutInput.required = isNewSupplier;
+          supplierRutInput.required = false;
           if (!isNewSupplier && newSupplierInput) {
             newSupplierInput.value = '';
           }
@@ -2716,9 +2716,8 @@
           var name = (supplierQuickName.value || '').trim();
           var rut = supplierQuickRut ? normalizeRut(supplierQuickRut.value) : '';
           if (supplierQuickRut) supplierQuickRut.value = rut;
-          if (!name || !rut) {
-            if (!name) supplierQuickName.focus();
-            else supplierQuickRut.focus();
+          if (!name) {
+            supplierQuickName.focus();
             return;
           }
 
@@ -2752,7 +2751,7 @@
             if (supplierRutInput) {
               supplierRutInput.value = rut;
               supplierRutInput.disabled = false;
-              supplierRutInput.required = true;
+              supplierRutInput.required = false;
             }
             if (newSupplierInput) newSupplierInput.value = name;
           }
