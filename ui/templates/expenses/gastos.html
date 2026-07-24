@@ -849,19 +849,29 @@
                 <div class="expense-receipt-viewer">
                   {% if attachments %}
                     {% for attachment in attachments %}
-                    <div class="expense-receipt-panel {% if forloop.first %}is-active{% endif %}" data-receipt-panel="{{ attachment.pk }}">
+                    <div class="expense-receipt-panel {% if forloop.first %}is-active{% endif %}" data-receipt-panel="{{ attachment.pk }}" data-receipt-kind="{% if 'pdf' in attachment.content_type|lower %}pdf{% else %}image{% endif %}">
                       <div class="expense-receipt-actions">
                         <span class="badge badge-light">{{ forloop.counter }} de {{ attachments|length }}</span>
-                        <div class="d-flex gap-2">
+                        <div class="receipt-viewer-controls" data-receipt-controls>
+                          <button type="button" class="btn btn-sm btn-light receipt-zoom-button" data-receipt-zoom="out" aria-label="Alejar comprobante">-</button>
+                          <span class="receipt-zoom-value" data-receipt-zoom-label>100%</span>
+                          <button type="button" class="btn btn-sm btn-light receipt-zoom-button" data-receipt-zoom="in" aria-label="Acercar comprobante">+</button>
+                          <button type="button" class="btn btn-sm btn-light receipt-fit-button" data-receipt-zoom="fit">Ajustar</button>
+                        </div>
+                        <div class="d-flex gap-2 receipt-file-actions">
                           <a class="btn btn-sm btn-light" href="{% url 'attachment_serve' attachment.pk %}?download=1" target="_blank" rel="noopener">Descargar</a>
                           <a class="btn btn-sm btn-light-primary" href="{% url 'attachment_serve' attachment.pk %}" target="_blank" rel="noopener">Abrir</a>
                         </div>
                       </div>
-                      <div class="expense-receipt-canvas">
+                      <div class="expense-receipt-canvas js-receipt-viewer" data-viewer-type="{% if 'pdf' in attachment.content_type|lower %}pdf{% else %}image{% endif %}">
                         {% if "pdf" in attachment.content_type|lower %}
-                          <iframe src="{% url 'attachment_serve' attachment.pk %}" title="Comprobante PDF #{{ forloop.counter }}"></iframe>
+                          <div class="receipt-viewer-content">
+                            <iframe class="receipt-viewer-media" src="{% url 'attachment_serve' attachment.pk %}" title="Comprobante PDF #{{ forloop.counter }}"></iframe>
+                          </div>
                         {% else %}
-                          <img src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante #{{ forloop.counter }}">
+                          <div class="receipt-viewer-content">
+                            <img class="receipt-viewer-media" src="{% url 'attachment_serve' attachment.pk %}" alt="Comprobante #{{ forloop.counter }}">
+                          </div>
                         {% endif %}
                       </div>
                     </div>
@@ -1097,21 +1107,61 @@
       background: #fff;
     }
 
+    .expense-edit-modal .receipt-viewer-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      min-width: 0;
+    }
+
+    .expense-edit-modal .receipt-zoom-button,
+    .expense-edit-modal .receipt-fit-button {
+      height: 30px;
+      min-width: 30px;
+      padding: 0 0.55rem;
+      border-radius: 6px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .expense-edit-modal .receipt-fit-button {
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .expense-edit-modal .receipt-zoom-value {
+      min-width: 44px;
+      text-align: center;
+      color: #4b5563;
+      font-size: 0.78rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .expense-edit-modal .receipt-file-actions {
+      flex: 0 0 auto;
+    }
+
     .expense-edit-modal .expense-receipt-canvas {
       flex: 1 1 auto;
       min-height: 0;
       overflow: auto;
+      background: #eef1f5;
+    }
+
+    .expense-edit-modal .receipt-viewer-content {
+      min-width: 100%;
+      min-height: 100%;
       display: flex;
       align-items: flex-start;
       justify-content: center;
-      background: #eef1f5;
+      padding: 0;
     }
 
     .expense-edit-modal .expense-receipt-canvas img {
       display: block;
-      width: 100%;
+      max-width: none;
       height: auto;
-      object-fit: contain;
       object-position: top center;
       background: #fff;
     }
@@ -1122,6 +1172,10 @@
       min-height: 520px;
       border: 0;
       background: #fff;
+    }
+
+    .expense-edit-modal .expense-receipt-panel[data-receipt-kind="pdf"] .receipt-viewer-controls {
+      opacity: 0.6;
     }
 
     .expense-edit-modal .expense-receipt-empty {
@@ -2123,9 +2177,136 @@
         });
       });
 
+      function initializeReceiptViewer(panel) {
+        var viewer = panel.querySelector('.js-receipt-viewer');
+        var content = panel.querySelector('.receipt-viewer-content');
+        var media = panel.querySelector('.receipt-viewer-media');
+        var label = panel.querySelector('[data-receipt-zoom-label]');
+        var controls = panel.querySelectorAll('[data-receipt-zoom]');
+        var viewerType = viewer ? viewer.getAttribute('data-viewer-type') : '';
+
+        if (!viewer || !content || !media || !label) return null;
+
+        if (viewerType !== 'image') {
+          label.textContent = 'PDF';
+          controls.forEach(function (control) {
+            control.disabled = true;
+            control.title = 'Zoom disponible cuando activemos el visor PDF';
+          });
+          return {
+            fit: function () {}
+          };
+        }
+
+        var state = {
+          zoom: 1,
+          minZoom: 0.25,
+          maxZoom: 4,
+          step: 0.25,
+          fitted: true
+        };
+
+        function getNaturalSize() {
+          return {
+            width: media.naturalWidth || media.clientWidth || 1,
+            height: media.naturalHeight || media.clientHeight || 1
+          };
+        }
+
+        function clampZoom(value) {
+          return Math.min(state.maxZoom, Math.max(state.minZoom, value));
+        }
+
+        function getFitZoom() {
+          var size = getNaturalSize();
+          var availableWidth = Math.max(viewer.clientWidth - 2, 1);
+          return clampZoom(Math.min(1, availableWidth / size.width));
+        }
+
+        function applyZoom(nextZoom, keepScrollRatio) {
+          var size = getNaturalSize();
+          var previousScrollLeftRatio = viewer.scrollWidth > 0 ? viewer.scrollLeft / viewer.scrollWidth : 0;
+          var previousScrollTopRatio = viewer.scrollHeight > 0 ? viewer.scrollTop / viewer.scrollHeight : 0;
+
+          state.zoom = clampZoom(nextZoom);
+          var renderedWidth = Math.max(size.width * state.zoom, viewer.clientWidth);
+          var renderedHeight = Math.max(size.height * state.zoom, viewer.clientHeight);
+
+          content.style.width = renderedWidth + 'px';
+          content.style.height = renderedHeight + 'px';
+          media.style.width = (size.width * state.zoom) + 'px';
+          media.style.height = 'auto';
+          label.textContent = Math.round(state.zoom * 100) + '%';
+
+          if (keepScrollRatio) {
+            viewer.scrollLeft = previousScrollLeftRatio * viewer.scrollWidth;
+            viewer.scrollTop = previousScrollTopRatio * viewer.scrollHeight;
+          } else {
+            viewer.scrollLeft = 0;
+            viewer.scrollTop = 0;
+          }
+        }
+
+        function fitViewer() {
+          state.fitted = true;
+          applyZoom(getFitZoom(), false);
+        }
+
+        controls.forEach(function (control) {
+          control.addEventListener('click', function () {
+            var action = control.getAttribute('data-receipt-zoom');
+            if (action === 'fit') {
+              fitViewer();
+              return;
+            }
+            state.fitted = false;
+            var direction = action === 'in' ? 1 : -1;
+            applyZoom(state.zoom + (state.step * direction), true);
+          });
+        });
+
+        media.addEventListener('load', fitViewer);
+        viewer.addEventListener('dblclick', function () {
+          if (Math.abs(state.zoom - 1) < 0.01) {
+            fitViewer();
+            return;
+          }
+          state.fitted = false;
+          applyZoom(1, false);
+        });
+
+        if (media.complete) {
+          fitViewer();
+        }
+
+        var parentModal = panel.closest('.modal');
+        if (parentModal) {
+          parentModal.addEventListener('shown.bs.modal', function () {
+            if (state.fitted && panel.classList.contains('is-active')) {
+              fitViewer();
+            }
+          });
+        }
+
+        window.addEventListener('resize', function () {
+          if (state.fitted) {
+            fitViewer();
+          }
+        });
+
+        return {
+          fit: fitViewer
+        };
+      }
+
       document.querySelectorAll('.expense-receipt-pane').forEach(function (pane) {
         var thumbnailButtons = pane.querySelectorAll('[data-receipt-target]');
         var panels = pane.querySelectorAll('[data-receipt-panel]');
+        var viewerApis = {};
+
+        panels.forEach(function (panel) {
+          viewerApis[panel.getAttribute('data-receipt-panel')] = initializeReceiptViewer(panel);
+        });
 
         thumbnailButtons.forEach(function (button) {
           button.addEventListener('click', function () {
@@ -2139,6 +2320,9 @@
                 panel.getAttribute('data-receipt-panel') === targetId
               );
             });
+            if (viewerApis[targetId] && typeof viewerApis[targetId].fit === 'function') {
+              viewerApis[targetId].fit();
+            }
           });
         });
       });

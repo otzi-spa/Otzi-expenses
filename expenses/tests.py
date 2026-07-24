@@ -679,11 +679,17 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertNotContains(response, "Categoría Rindegastos (detalle)")
         self.assertContains(response, 'name="supplier_rut"')
 
+    @override_settings(STORAGES=LOCAL_TEST_STORAGES, MEDIA_ROOT="/tmp/otzi-expenses-test-media")
     def test_edit_modal_uses_side_receipt_viewer(self):
         expense = Expense.objects.create(
             status="pending",
             category=self.policy.name,
             supplier="Proveedor",
+        )
+        Attachment.objects.create(
+            expense=expense,
+            file=ContentFile(b"receipt-bytes", name="receipt.jpg"),
+            content_type="image/jpeg",
         )
 
         response = self.client.get(reverse("expense_list"))
@@ -692,6 +698,11 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, 'class="modal-body expense-workspace"')
         self.assertContains(response, 'class="expense-form-pane"')
         self.assertContains(response, 'class="expense-receipt-pane"')
+        self.assertContains(response, 'class="expense-receipt-canvas js-receipt-viewer"')
+        self.assertContains(response, 'data-viewer-type="image"')
+        self.assertContains(response, 'data-receipt-zoom="in"')
+        self.assertContains(response, 'data-receipt-zoom="out"')
+        self.assertContains(response, 'data-receipt-zoom="fit"')
 
     def test_similar_expense_warning_is_rendered_inside_modal(self):
         older = Expense.objects.create(
