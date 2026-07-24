@@ -351,7 +351,16 @@
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="not_uploaded_rindegastos">No subidos RG</button>
         <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="without_receipt">Sin comprobante</button>
       </div>
-      <div class="expenses-search-box">
+      <div class="expenses-search-box d-flex flex-wrap align-items-center justify-content-end gap-2">
+        <span id="expensesFiltersActiveIndicator" class="badge badge-light-primary expenses-active-filter-badge" hidden>
+          <span class="svg-icon svg-icon-6" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 3.5H14L9.25 8.5V12.25L6.75 13.5V8.5L2 3.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          Filtros activos
+        </span>
+        <button type="button" id="expensesClearFiltersBtn" class="btn btn-sm btn-light" hidden>Limpiar filtros</button>
         <input type="text" id="expensesTableSearch" class="form-control form-control-sm" placeholder="Buscar gastos...">
       </div>
     </div>
@@ -1281,12 +1290,20 @@
     }
 
     .expenses-search-box {
-      width: min(100%, 280px);
+      width: min(100%, 520px);
     }
 
     .expenses-search-box .form-control {
+      width: min(100%, 280px);
       min-height: 36px;
       font-size: 0.82rem;
+    }
+
+    .expenses-active-filter-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      white-space: nowrap;
     }
 
     .card > .card-body {
@@ -1570,6 +1587,11 @@
       var searchTerm = "";
       var sortState = { columnIndex: 1, direction: "desc" };
       var columnFilters = {};
+      var FILTER_STORAGE_VERSION = 1;
+      var FILTER_STORAGE_KEY = "expenses.tableFilters.v" + FILTER_STORAGE_VERSION + ":" + window.location.pathname;
+      var filterStateRestoring = false;
+      var clearFiltersBtn = document.getElementById("expensesClearFiltersBtn");
+      var filtersActiveIndicator = document.getElementById("expensesFiltersActiveIndicator");
       var rindegastosFieldOptionsEl = document.getElementById("rindegastos-field-options-data");
       var rindegastosFieldOptions = [];
       var activeSupplierForm = null;
@@ -1671,6 +1693,113 @@
         return Number.isNaN(number) ? null : number;
       }
 
+      function getFilterStatePayload() {
+        return {
+          version: FILTER_STORAGE_VERSION,
+          quickFilter: activeQuickFilter,
+          searchTerm: searchTerm,
+          sortState: {
+            columnIndex: sortState.columnIndex,
+            direction: sortState.direction,
+          },
+          columnFilters: columnFilters,
+        };
+      }
+
+      function hasActiveFilters() {
+        return (
+          activeQuickFilter !== "all" ||
+          Boolean(searchTerm) ||
+          sortState.columnIndex !== 1 ||
+          sortState.direction !== "desc" ||
+          Object.keys(columnFilters).length > 0
+        );
+      }
+
+      function updateFilterStateUi() {
+        var active = hasActiveFilters();
+        if (filtersActiveIndicator) filtersActiveIndicator.hidden = !active;
+        if (clearFiltersBtn) clearFiltersBtn.hidden = !active;
+      }
+
+      function persistFilterState() {
+        if (filterStateRestoring) return;
+        updateFilterStateUi();
+        try {
+          window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(getFilterStatePayload()));
+        } catch (error) {
+          // localStorage can be unavailable in restricted browsing modes.
+        }
+      }
+
+      function readStoredFilterState() {
+        try {
+          var raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
+          if (!raw) return null;
+          var parsed = JSON.parse(raw);
+          if (!parsed || parsed.version !== FILTER_STORAGE_VERSION) {
+            window.localStorage.removeItem(FILTER_STORAGE_KEY);
+            return null;
+          }
+          return parsed;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function applyStoredFilterControls() {
+        if (searchInput) {
+          searchInput.value = searchTerm;
+        }
+        document.querySelectorAll(".expenses-quick-filter").forEach(function (button) {
+          var filter = button.getAttribute("data-expenses-filter") || "all";
+          button.classList.toggle("active", filter === activeQuickFilter);
+        });
+        document.querySelectorAll(".expenses-column-filter[data-filter-index][data-filter-key]").forEach(function (control) {
+          var index = control.dataset.filterIndex;
+          var key = control.dataset.filterKey;
+          var value = columnFilters[index] && columnFilters[index][key] ? columnFilters[index][key] : "";
+          control.value = value;
+        });
+      }
+
+      function restoreFilterState() {
+        var stored = readStoredFilterState();
+        if (!stored) return;
+        filterStateRestoring = true;
+        activeQuickFilter = stored.quickFilter || "all";
+        searchTerm = stored.searchTerm || "";
+        if (
+          stored.sortState &&
+          Number.isInteger(stored.sortState.columnIndex) &&
+          ["asc", "desc"].indexOf(stored.sortState.direction) !== -1
+        ) {
+          sortState = {
+            columnIndex: stored.sortState.columnIndex,
+            direction: stored.sortState.direction,
+          };
+        }
+        columnFilters = stored.columnFilters && typeof stored.columnFilters === "object" ? stored.columnFilters : {};
+        applyStoredFilterControls();
+        filterStateRestoring = false;
+        updateFilterStateUi();
+      }
+
+      function clearFilterState() {
+        activeQuickFilter = "all";
+        searchTerm = "";
+        sortState = { columnIndex: 1, direction: "desc" };
+        columnFilters = {};
+        try {
+          window.localStorage.removeItem(FILTER_STORAGE_KEY);
+        } catch (error) {
+          // Ignore storage cleanup failures.
+        }
+        applyStoredFilterControls();
+        updateFilterStateUi();
+        renderExpenseRows();
+      }
+
       function uniqueColumnOptions(index) {
         var seen = {};
         var values = [];
@@ -1693,6 +1822,7 @@
           if (!columnFilters[index][filterKey]) delete columnFilters[index][filterKey];
         });
         if (!Object.keys(columnFilters[index]).length) delete columnFilters[index];
+        persistFilterState();
         renderExpenseRows();
       }
 
@@ -1700,6 +1830,8 @@
         if (config.type === "select") {
           var select = document.createElement("select");
           select.className = "form-select expenses-column-filter";
+          select.dataset.filterIndex = String(config.index);
+          select.dataset.filterKey = "exact";
           select.appendChild(new Option(config.placeholder || "Todos", ""));
           (config.options || uniqueColumnOptions(config.index)).forEach(function (value) {
             select.appendChild(new Option(value, value));
@@ -1717,10 +1849,14 @@
           min.type = "number";
           min.className = "form-control expenses-column-filter compact";
           min.placeholder = "Min";
+          min.dataset.filterIndex = String(config.index);
+          min.dataset.filterKey = "min";
           var max = document.createElement("input");
           max.type = "number";
           max.className = "form-control expenses-column-filter compact";
           max.placeholder = "Max";
+          max.dataset.filterIndex = String(config.index);
+          max.dataset.filterKey = "max";
           min.addEventListener("input", function () {
             setColumnFilter(config.index, "min", min.value);
           });
@@ -1738,10 +1874,14 @@
           from.type = "date";
           from.className = "form-control expenses-column-filter compact";
           from.title = "Desde";
+          from.dataset.filterIndex = String(config.index);
+          from.dataset.filterKey = "from";
           var to = document.createElement("input");
           to.type = "date";
           to.className = "form-control expenses-column-filter compact";
           to.title = "Hasta";
+          to.dataset.filterIndex = String(config.index);
+          to.dataset.filterKey = "to";
           from.addEventListener("input", function () {
             setColumnFilter(config.index, "from", from.value);
           });
@@ -1756,6 +1896,8 @@
         input.type = "text";
         input.className = "form-control expenses-column-filter";
         input.placeholder = config.placeholder || "Filtrar";
+        input.dataset.filterIndex = String(config.index);
+        input.dataset.filterKey = "value";
         input.addEventListener("input", function () {
           setColumnFilter(config.index, "value", input.value);
         });
@@ -1906,6 +2048,7 @@
       if (searchInput) {
         searchInput.addEventListener("input", function () {
           searchTerm = (searchInput.value || "").trim().toLowerCase();
+          persistFilterState();
           renderExpenseRows();
         });
       }
@@ -1917,9 +2060,14 @@
             btn.classList.remove("active");
           });
           button.classList.add("active");
+          persistFilterState();
           renderExpenseRows();
         });
       });
+
+      if (clearFiltersBtn) {
+        clearFiltersBtn.addEventListener("click", clearFilterState);
+      }
 
       if (expensesTable) {
         buildColumnFilters();
@@ -1936,10 +2084,12 @@
               sortState.columnIndex = index;
               sortState.direction = "asc";
             }
+            persistFilterState();
             renderExpenseRows();
           });
         });
       }
+      restoreFilterState();
       renderExpenseRows();
 
       var rindegastosExportModal = document.getElementById("rindegastosExportModal");
