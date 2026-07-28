@@ -71,6 +71,12 @@ class Expense(models.Model):
     vehicle = models.CharField(max_length=255, blank=True, null=True)
     fuel_km = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
     fuel_liters = models.DecimalField(max_digits=12, decimal_places=3, blank=True, null=True)
+    gasoline_type = models.CharField(max_length=16, blank=True, null=True)
+    iva_amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    specific_tax_amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    rindegastos_tax = models.CharField(max_length=255, blank=True, null=True)
+    tax_calculation_source = models.CharField(max_length=32, blank=True, default="")
+    tax_calculation_metadata = models.JSONField(default=dict, blank=True)
 
     expense_type = models.CharField(max_length=255, blank=True, null=True)
     expense_type_other = models.CharField(max_length=255, blank=True, null=True)
@@ -282,6 +288,49 @@ class RindegastosExpenseFieldCatalog(models.Model):
 
     def __str__(self):
         return f"{self.policy.name} - {self.name}"
+
+
+class TaxIndicatorValue(models.Model):
+    indicator = models.CharField(max_length=32)
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    value = models.DecimalField(max_digits=14, decimal_places=4)
+    source_url = models.URLField(max_length=500, blank=True)
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Indicador tributario"
+        verbose_name_plural = "Indicadores tributarios"
+        unique_together = ("indicator", "year", "month")
+        ordering = ("-year", "-month", "indicator")
+
+    def __str__(self):
+        return f"{self.indicator} {self.month:02d}/{self.year}: {self.value}"
+
+
+class FuelSpecificTaxRate(models.Model):
+    effective_date = models.DateField()
+    fuel_name = models.CharField(max_length=255)
+    fuel_key = models.CharField(max_length=80)
+    component_base = models.DecimalField(max_digits=12, decimal_places=4)
+    component_variable = models.DecimalField(max_digits=12, decimal_places=4)
+    resulting_tax = models.DecimalField(max_digits=12, decimal_places=4)
+    unit = models.CharField(max_length=32)
+    source_url = models.URLField(max_length=500, blank=True)
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Tasa impuesto especifico combustible"
+        verbose_name_plural = "Tasas impuesto especifico combustible"
+        unique_together = ("effective_date", "fuel_key", "unit")
+        ordering = ("-effective_date", "fuel_key")
+
+    def __str__(self):
+        return f"{self.fuel_name} {self.effective_date}: {self.resulting_tax} {self.unit}"
 
 
 class RindegastosUserCatalog(models.Model):

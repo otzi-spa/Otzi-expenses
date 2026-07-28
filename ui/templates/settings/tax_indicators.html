@@ -1,0 +1,287 @@
+{% extends "metronic/base_app.html" %}
+{% load tz %}
+{% block page_title %}Indicadores SII{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Indicadores SII</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-6 mb-6">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Sincronización</h3>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3">
+          {% csrf_token %}
+          <div class="col-12">
+            <label class="form-label">Año</label>
+            <input type="number" name="year" class="form-control" value="{{ selected_year }}" min="2020" max="2100">
+          </div>
+          <div class="col-12 text-muted">
+            Actualiza UTM mensual y tasas Mepco publicadas por el SII para el año seleccionado.
+          </div>
+          <div class="col-12">
+            <button class="btn btn-light-primary w-100" type="submit">Sincronizar indicadores</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Estado</h3>
+      </div>
+      <div class="card-body">
+        <div class="row g-4">
+          <div class="col-12 col-md-4">
+            <div class="border rounded p-4 h-100">
+              <div class="text-muted">Última sincronización</div>
+              <div class="fw-bold fs-5">{{ last_sync|localtime|date:"d/m/Y H:i"|default:"Sin sincronizar" }}</div>
+            </div>
+          </div>
+          <div class="col-12 col-md-4">
+            <div class="border rounded p-4 h-100">
+              <div class="text-muted">UTM {{ selected_year }}</div>
+              <div class="fw-bold fs-5">{{ utm_values|length }} meses</div>
+            </div>
+          </div>
+          <div class="col-12 col-md-4">
+            <div class="border rounded p-4 h-100">
+              <div class="text-muted">Tasas Mepco {{ selected_year }}</div>
+              <div class="fw-bold fs-5">{{ fuel_rates_count }} registros</div>
+            </div>
+          </div>
+        </div>
+        <div class="text-muted mt-4">
+          El cálculo automático de impuestos se implementa en el siguiente sprint. Esta vista solo mantiene las tasas auditables.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-6">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">UTM mensual</h3>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle" id="utmTable">
+            <thead>
+              <tr>
+                <th>Mes</th>
+                <th>Valor</th>
+                <th>Sync</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in utm_values %}
+              <tr>
+                <td>{{ item.month|stringformat:"02d" }}/{{ item.year }}</td>
+                <td>{{ item.value }}</td>
+                <td class="text-muted">{{ item.last_synced_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="3" class="text-muted">Sin UTM sincronizada para este año.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Tasas Mepco</h3>
+        <div class="card-toolbar">
+          <input type="text" class="form-control w-300px" id="mepcoSearch" placeholder="Buscar combustible o fecha">
+        </div>
+      </div>
+      <div class="card-body">
+        <div
+          class="table-responsive"
+          id="mepcoTableContainer"
+          style="max-height: 620px; overflow-y: auto;"
+          data-year="{{ selected_year }}"
+          data-loaded="{{ fuel_rates_loaded_count }}"
+          data-total="{{ fuel_rates_count }}"
+          data-endpoint="{% url 'settings_tax_indicators_mepco_data' %}"
+        >
+          <table class="table align-middle" id="mepcoTable">
+            <thead>
+              <tr>
+                <th>Vigencia</th>
+                <th>Combustible</th>
+                <th>Base</th>
+                <th>Variable</th>
+                <th>Resultante</th>
+                <th>Unidad</th>
+                <th>Sync</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for rate in fuel_rates %}
+              <tr>
+                <td>{{ rate.effective_date|date:"d/m/Y" }}</td>
+                <td>{{ rate.fuel_name }}</td>
+                <td>{{ rate.component_base }}</td>
+                <td>{{ rate.component_variable }}</td>
+                <td>{{ rate.resulting_tax }}</td>
+                <td>{{ rate.unit }}</td>
+                <td class="text-muted">{{ rate.last_synced_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="7" class="text-muted">Sin tasas Mepco sincronizadas para este año.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="d-flex align-items-center justify-content-between mt-3">
+          <div class="text-muted" id="mepcoLoadedStatus">
+            Mostrando {{ fuel_rates_loaded_count }} de {{ fuel_rates_count }} registros cargados.
+          </div>
+          <div class="spinner-border spinner-border-sm text-primary d-none" id="mepcoLoading" role="status">
+            <span class="visually-hidden">Cargando...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    $("#utmTable").DataTable({
+      info: false,
+      pageLength: 12,
+      lengthChange: false,
+      searching: false,
+      order: [],
+    });
+
+    var mepco = $("#mepcoTable").DataTable({
+      info: false,
+      pageLength: 25,
+      lengthChange: true,
+      lengthMenu: [
+        [25, 50, 100, -1],
+        [25, 50, 100, "Todos"],
+      ],
+      searching: false,
+      order: [],
+    });
+    var container = document.getElementById("mepcoTableContainer");
+    var status = document.getElementById("mepcoLoadedStatus");
+    var spinner = document.getElementById("mepcoLoading");
+    var loading = false;
+    var loaded = container ? Number(container.dataset.loaded || 0) : 0;
+    var total = container ? Number(container.dataset.total || 0) : 0;
+    var batchSize = 200;
+
+    function setLoading(isLoading) {
+      loading = isLoading;
+      if (spinner) {
+        spinner.classList.toggle("d-none", !isLoading);
+      }
+    }
+
+    function updateLoadedStatus() {
+      if (status) {
+        status.textContent = "Mostrando " + loaded + " de " + total + " registros cargados.";
+      }
+    }
+
+    function rowToData(row) {
+      return [
+        row.effective_date,
+        row.fuel_name,
+        row.component_base,
+        row.component_variable,
+        row.resulting_tax,
+        row.unit,
+        row.last_synced_at,
+      ];
+    }
+
+    function fetchMepcoRows(reset) {
+      if (!container || loading) {
+        return;
+      }
+      if (!reset && loaded >= total) {
+        return;
+      }
+      setLoading(true);
+      var params = new URLSearchParams({
+        year: container.dataset.year,
+        offset: reset ? "0" : String(loaded),
+        limit: String(batchSize),
+        search: search ? search.value : "",
+      });
+      fetch(container.dataset.endpoint + "?" + params.toString(), {
+        headers: {"X-Requested-With": "XMLHttpRequest"},
+      })
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error("No se pudieron cargar tasas Mepco.");
+          }
+          return response.json();
+        })
+        .then(function (payload) {
+          if (reset) {
+            mepco.clear();
+            loaded = 0;
+          }
+          (payload.rows || []).forEach(function (row) {
+            mepco.row.add(rowToData(row));
+          });
+          loaded = payload.next_offset || loaded;
+          total = payload.total || 0;
+          mepco.draw(false);
+          updateLoadedStatus();
+        })
+        .catch(function () {
+          if (status) {
+            status.textContent = "No se pudieron cargar más tasas Mepco.";
+          }
+        })
+        .finally(function () {
+          setLoading(false);
+        });
+    }
+
+    var search = document.getElementById("mepcoSearch");
+    if (search) {
+      var searchTimeout = null;
+      search.addEventListener("keyup", function () {
+        window.clearTimeout(searchTimeout);
+        searchTimeout = window.setTimeout(function () {
+          fetchMepcoRows(true);
+        }, 250);
+      });
+    }
+    if (container) {
+      container.addEventListener("scroll", function () {
+        var distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (distanceFromBottom < 120) {
+          fetchMepcoRows(false);
+        }
+      });
+    }
+  });
+</script>
+{% endblock %}

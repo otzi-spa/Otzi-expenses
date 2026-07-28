@@ -118,6 +118,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "expenses.sync_rindegastos_uploaded_expenses",
         "schedule": crontab(hour=3, minute=0),
     },
+    "sync-tax-indicators-daily": {
+        "task": "expenses.sync_tax_indicators",
+        "schedule": crontab(hour=2, minute=30),
+    },
 }
 
 RINDEGASTOS_API_BASE_URL = os.environ.get("RINDEGASTOS_API_BASE_URL", "https://api.rindegastos.com/v1").rstrip("/")

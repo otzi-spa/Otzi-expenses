@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import re
 import secrets
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
@@ -22,8 +23,11 @@ from .models import (
     CategoryCatalog,
     ExpenseAuditLog,
     ExpenseTypeCatalog,
+    FuelSpecificTaxRate,
     RindegastosExpenseFieldCatalog,
+    RindegastosTaxCatalog,
     SupplierCatalog,
+    TaxIndicatorValue,
     WorksiteCatalog,
     SYNC_STATUS,
     normalize_rut,
@@ -32,9 +36,12 @@ from django.contrib.auth.decorators import login_required
 from django.utils.dateparse import parse_date
 from django.contrib import messages
 from django.utils import timezone
+from requests import RequestException
+from .invoice_tax_calculator import calculate_invoice_taxes
 from .rindegastos_client import RindegastosAPIError
 from .rindegastos_sync import RindegastosCatalogSync
 from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, default_uploaded_sync_since
+from .tax_indicators_sync import SiiTaxIndicatorSync
 
 
 ALLOWED_RECEIPT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
@@ -91,6 +98,7 @@ def _settings_menu_urls():
         "settings_expense_types",
         "settings_rindegastos_fields",
         "settings_rindegastos_submitters",
+        "settings_tax_indicators",
     }
 
 
@@ -154,12 +162,133 @@ def _is_fuel_policy(policy_name):
     return (policy_name or "").strip().casefold() == "combustibles"
 
 
+def _is_generic_gasoline_category(value):
+    normalized = (value or "").strip().casefold()
+    if not normalized:
+        return False
+    return ("bencina" in normalized or "gasolina" in normalized) and not any(
+        octane in normalized for octane in ("93", "95", "97")
+    )
+
+
+def _effective_fuel_type_for_tax(expense):
+    if _is_generic_gasoline_category(expense.expense_type) and expense.gasoline_type:
+        return f"Bencina {expense.gasoline_type}"
+    return expense.expense_type or ""
+
+
+def _is_invoice_document_type(*values):
+    for value in values:
+        normalized = (value or "").strip().casefold()
+        if "factura" in normalized:
+            return True
+    return False
+
+
 def _parse_optional_decimal(raw_value):
     value = (raw_value or "").strip()
     if not value:
         return None
     normalized = value.replace(" ", "").replace(",", ".")
     return Decimal(normalized)
+
+
+def _parse_optional_money_decimal(raw_value):
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    normalized = value.replace(" ", "").replace("$", "")
+    normalized = normalized.replace(".", "").replace(",", ".")
+    return Decimal(normalized)
+
+
+def _tax_fields_manually_overridden(post_data):
+    return (post_data.get("tax_manual_override") or "").strip() == "1"
+
+
+def _resolve_rindegastos_tax_name(expense):
+    if not _is_invoice_document_type(expense.rindegastos_document_type, expense.document_type):
+        return None
+
+    policy = (
+        CategoryCatalog.objects.filter(
+            name=expense.category,
+            is_active=True,
+            external_id__isnull=False,
+        )
+        .exclude(external_id="")
+        .first()
+    )
+    if not policy:
+        return None
+
+    taxes = list(RindegastosTaxCatalog.objects.filter(policy=policy, is_active=True).order_by("name"))
+    if len(taxes) == 1:
+        return taxes[0].name
+
+    iva_taxes = [
+        tax
+        for tax in taxes
+        if "iva" in (tax.name or "").strip().casefold() and (tax.value is None or tax.value == Decimal("19"))
+    ]
+    if len(iva_taxes) == 1:
+        return iva_taxes[0].name
+    return None
+
+
+def _export_rindegastos_tax_name(expense):
+    if not _is_invoice_document_type(expense.rindegastos_document_type, expense.document_type):
+        return ""
+    return _resolve_rindegastos_tax_name(expense) or expense.rindegastos_tax or ""
+
+
+def _apply_invoice_tax_fields(expense, post_data):
+    is_invoice = _is_invoice_document_type(expense.rindegastos_document_type, expense.document_type)
+    is_fuel_invoice = is_invoice and _is_fuel_policy(expense.category)
+
+    if not is_invoice:
+        expense.iva_amount = Decimal("0")
+        expense.specific_tax_amount = Decimal("0")
+        expense.rindegastos_tax = None
+        expense.tax_calculation_source = "none"
+        expense.tax_calculation_metadata = {}
+        return
+
+    expense.rindegastos_tax = _resolve_rindegastos_tax_name(expense)
+
+    calculation = calculate_invoice_taxes(
+        total=expense.amount,
+        paid_at=expense.paid_at,
+        document_type=expense.rindegastos_document_type or expense.document_type,
+        policy=expense.category,
+        fuel_liters=expense.fuel_liters,
+        fuel_type=_effective_fuel_type_for_tax(expense),
+    )
+    if calculation.can_autofill and not _tax_fields_manually_overridden(post_data):
+        expense.iva_amount = calculation.iva_amount
+        expense.specific_tax_amount = calculation.specific_tax_amount if is_fuel_invoice else Decimal("0")
+        expense.tax_calculation_source = "auto"
+        expense.tax_calculation_metadata = {
+            **calculation.metadata,
+            "editable_fields": ["iva_amount", "specific_tax_amount"] if is_fuel_invoice else ["iva_amount"],
+        }
+        return
+
+    iva_amount = _parse_optional_money_decimal(post_data.get("iva_amount"))
+    specific_tax_amount = (
+        _parse_optional_money_decimal(post_data.get("specific_tax_amount")) if is_fuel_invoice else Decimal("0")
+    )
+    expense.iva_amount = iva_amount if iva_amount is not None else Decimal("0")
+    expense.specific_tax_amount = specific_tax_amount if specific_tax_amount is not None else Decimal("0")
+    expense.tax_calculation_source = "manual"
+    expense.tax_calculation_metadata = {
+        **calculation.metadata,
+        "document_type": expense.document_type or "",
+        "rindegastos_document_type": expense.rindegastos_document_type or "",
+        "policy": expense.category or "",
+        "warnings": calculation.warnings,
+        "editable_fields": ["iva_amount", "specific_tax_amount"] if is_fuel_invoice else ["iva_amount"],
+    }
 
 
 def _ensure_rindegastos_policies():
@@ -356,6 +485,8 @@ def _missing_fields_for_parametrization(expense, has_receipt=None):
             missing.append("Km carguío")
         if expense.fuel_liters is None:
             missing.append("Litros combustible")
+        if _is_generic_gasoline_category(expense.expense_type) and not _normalize_empty(expense.gasoline_type):
+            missing.append("Tipo de bencina")
     return missing
 
 
@@ -393,6 +524,31 @@ def _rindegastos_field_options_payload():
                 }
             )
     return payload
+
+
+def _tax_calculation_payload():
+    utm_values = TaxIndicatorValue.objects.filter(indicator="UTM").order_by("year", "month")
+    fuel_rates = FuelSpecificTaxRate.objects.order_by("effective_date", "fuel_key")
+    return {
+        "utm": [
+            {
+                "year": item.year,
+                "month": item.month,
+                "value": str(item.value),
+            }
+            for item in utm_values
+        ],
+        "fuel_rates": [
+            {
+                "effective_date": item.effective_date.isoformat(),
+                "fuel_name": item.fuel_name,
+                "fuel_key": item.fuel_key,
+                "resulting_tax": str(item.resulting_tax),
+                "unit": item.unit,
+            }
+            for item in fuel_rates
+        ],
+    }
 
 
 def _serialize_rindegastos_options(policy):
@@ -623,6 +779,12 @@ def expense_detail(request, pk: int):
             "vehicle",
             "fuel_km",
             "fuel_liters",
+            "gasoline_type",
+            "iva_amount",
+            "specific_tax_amount",
+            "rindegastos_tax",
+            "tax_calculation_source",
+            "tax_calculation_metadata",
             "expense_type",
             "expense_type_other",
         ]
@@ -699,6 +861,11 @@ def expense_detail(request, pk: int):
             expense.expense_type = et_obj.name if et_obj else None
         else:
             expense.expense_type = None
+        gasoline_type = request.POST.get("gasoline_type", "").strip()
+        if _is_fuel_policy(expense.category) and _is_generic_gasoline_category(expense.expense_type):
+            expense.gasoline_type = gasoline_type if gasoline_type in {"93", "95", "97"} else "93"
+        else:
+            expense.gasoline_type = None
         expense.expense_type_other = None
 
         notes = request.POST.get("notes", "")
@@ -706,6 +873,12 @@ def expense_detail(request, pk: int):
 
         paid_at_raw = request.POST.get("paid_at", "").strip()
         expense.paid_at = parse_date(paid_at_raw) if paid_at_raw else None
+
+        try:
+            _apply_invoice_tax_fields(expense, request.POST)
+        except InvalidOperation:
+            messages.error(request, "IVA o impuesto específico tienen un valor inválido.")
+            return redirect("expense_list")
 
         uploaded_receipts = request.FILES.getlist("receipt_files")
         added_receipt_names = []
@@ -865,11 +1038,22 @@ def expense_create(request):
         expense.expense_type = et_obj.name if et_obj else None
     else:
         expense.expense_type = None
+    gasoline_type = request.POST.get("gasoline_type", "").strip()
+    if _is_fuel_policy(expense.category) and _is_generic_gasoline_category(expense.expense_type):
+        expense.gasoline_type = gasoline_type if gasoline_type in {"93", "95", "97"} else "93"
+    else:
+        expense.gasoline_type = None
     expense.expense_type_other = None
     expense.notes = request.POST.get("notes", "").strip()
 
     paid_at_raw = request.POST.get("paid_at", "").strip()
     expense.paid_at = parse_date(paid_at_raw) if paid_at_raw else None
+
+    try:
+        _apply_invoice_tax_fields(expense, request.POST)
+    except InvalidOperation:
+        messages.error(request, "IVA o impuesto específico tienen un valor inválido.")
+        return redirect("expense_list")
 
     expense.save()
 
@@ -980,6 +1164,7 @@ def expense_list(request):
             "name",
         ),
         "rindegastos_field_options": _rindegastos_field_options_payload(),
+        "tax_calculation_payload": _tax_calculation_payload(),
         "suppliers_catalog": SupplierCatalog.objects.filter(is_active=True).order_by("name"),
         "settings_menu_urls": _settings_menu_urls(),
     }
@@ -1148,9 +1333,9 @@ def expense_rindegastos_export(request):
                 expense.supplier or "",
                 _export_amount(expense.amount),
                 (policy.currency if policy and policy.currency else expense.currency) or "CLP",
-                "",
-                "",
-                "",
+                _export_rindegastos_tax_name(expense),
+                _export_amount(expense.iva_amount),
+                _export_amount(expense.specific_tax_amount),
                 f"{expense.paid_at.day}/{expense.paid_at.month}/{expense.paid_at.year}" if expense.paid_at else "",
                 expense.rindegastos_cost_center or "",
                 expense.rindegastos_submitter or _reporter_label(expense),
@@ -1384,6 +1569,12 @@ def expense_action(request, pk: int, action: str):
                 vehicle=expense.vehicle,
                 fuel_km=expense.fuel_km,
                 fuel_liters=expense.fuel_liters,
+                gasoline_type=expense.gasoline_type,
+                iva_amount=expense.iva_amount,
+                specific_tax_amount=expense.specific_tax_amount,
+                rindegastos_tax=expense.rindegastos_tax,
+                tax_calculation_source=expense.tax_calculation_source,
+                tax_calculation_metadata=expense.tax_calculation_metadata,
                 expense_type=expense.expense_type,
                 expense_type_other=expense.expense_type_other,
                 split_group_id=group_id,
@@ -1936,6 +2127,114 @@ def settings_rindegastos_submitters(request):
         **_catalog_sync_status(RindegastosExpenseFieldCatalog),
     }
     return render(request, "settings/rindegastos_submitters.html", context)
+
+
+@login_required
+@admin_required
+def settings_tax_indicators(request):
+    selected_year = timezone.localdate().year
+    if request.method == "POST":
+        try:
+            selected_year = int(request.POST.get("year") or selected_year)
+        except ValueError:
+            messages.error(request, "El año indicado no es válido.")
+            return redirect("settings_tax_indicators")
+
+        try:
+            stats = SiiTaxIndicatorSync().sync_year(selected_year)
+            messages.success(
+                request,
+                f"Sincronización SII completada: {stats['utm_values']} UTM y "
+                f"{stats['fuel_rates']} tasas Mepco para {stats['year']}.",
+            )
+        except (InvalidOperation, RequestException, ValueError) as exc:
+            messages.error(request, f"No se pudo sincronizar indicadores SII: {exc}")
+        return redirect(f"{reverse('settings_tax_indicators')}?year={selected_year}")
+
+    try:
+        selected_year = int(request.GET.get("year") or selected_year)
+    except ValueError:
+        selected_year = timezone.localdate().year
+
+    utm_values = TaxIndicatorValue.objects.filter(indicator="UTM", year=selected_year).order_by("month")
+    fuel_rates = FuelSpecificTaxRate.objects.filter(effective_date__year=selected_year).order_by(
+        "-effective_date",
+        "fuel_name",
+    )
+    last_sync = max(
+        [
+            value
+            for value in [
+                TaxIndicatorValue.objects.aggregate(value=Max("last_synced_at"))["value"],
+                FuelSpecificTaxRate.objects.aggregate(value=Max("last_synced_at"))["value"],
+            ]
+            if value
+        ],
+        default=None,
+    )
+
+    context = {
+        "selected_year": selected_year,
+        "utm_values": utm_values,
+        "fuel_rates": fuel_rates[:200],
+        "fuel_rates_count": fuel_rates.count(),
+        "fuel_rates_loaded_count": min(fuel_rates.count(), 200),
+        "last_sync": last_sync,
+        "settings_menu_urls": _settings_menu_urls(),
+    }
+    return render(request, "settings/tax_indicators.html", context)
+
+
+@login_required
+@admin_required
+def settings_tax_indicators_mepco_data(request):
+    try:
+        year = int(request.GET.get("year") or timezone.localdate().year)
+        offset = max(int(request.GET.get("offset") or 0), 0)
+        limit = min(max(int(request.GET.get("limit") or 200), 1), 200)
+    except ValueError:
+        return JsonResponse({"error": "Parámetros inválidos."}, status=400)
+
+    search = (request.GET.get("search") or "").strip()
+    queryset = FuelSpecificTaxRate.objects.filter(effective_date__year=year)
+    if search:
+        search_filter = (
+            Q(fuel_name__icontains=search)
+            | Q(fuel_key__icontains=search)
+            | Q(unit__icontains=search)
+        )
+        try:
+            search_filter |= Q(effective_date=datetime.strptime(search, "%d/%m/%Y").date())
+        except ValueError:
+            pass
+        queryset = queryset.filter(search_filter)
+
+    total = queryset.count()
+    rows = queryset.order_by("-effective_date", "fuel_name")[offset : offset + limit]
+    data = [
+        {
+            "effective_date": rate.effective_date.strftime("%d/%m/%Y"),
+            "fuel_name": rate.fuel_name,
+            "component_base": str(rate.component_base),
+            "component_variable": str(rate.component_variable),
+            "resulting_tax": str(rate.resulting_tax),
+            "unit": rate.unit,
+            "last_synced_at": timezone.localtime(rate.last_synced_at).strftime("%d/%m/%Y %H:%M")
+            if rate.last_synced_at
+            else "-",
+        }
+        for rate in rows
+    ]
+    return JsonResponse(
+        {
+            "rows": data,
+            "offset": offset,
+            "limit": limit,
+            "total": total,
+            "next_offset": offset + len(data),
+            "has_more": offset + len(data) < total,
+        }
+    )
 
 
 @login_required

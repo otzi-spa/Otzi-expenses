@@ -16,6 +16,8 @@ from .views import (
     settings_rindegastos_submitters,
     settings_system_users,
     settings_suppliers,
+    settings_tax_indicators,
+    settings_tax_indicators_mepco_data,
     settings_users,
     settings_worksites,
 )
@@ -49,5 +51,15 @@ urlpatterns = [
         "configuracion/usuarios-rindegastos/",
         settings_rindegastos_submitters,
         name="settings_rindegastos_submitters",
+    ),
+    path(
+        "configuracion/indicadores-sii/",
+        settings_tax_indicators,
+        name="settings_tax_indicators",
+    ),
+    path(
+        "configuracion/indicadores-sii/mepco/",
+        settings_tax_indicators_mepco_data,
+        name="settings_tax_indicators_mepco_data",
     ),
 ]

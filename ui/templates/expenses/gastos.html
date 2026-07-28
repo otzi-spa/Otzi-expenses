@@ -176,6 +176,7 @@
       </div>
       <form method="post" action="{% url 'expense_create' %}" enctype="multipart/form-data">
         {% csrf_token %}
+        <input type="hidden" name="tax_manual_override" value="0" data-tax-manual-override>
         <div class="modal-body">
           <div class="row g-3">
             <div class="col-md-4">
@@ -206,16 +207,6 @@
               </select>
             </div>
             <div class="col-md-3">
-              <label class="form-label">Monto</label>
-              <input type="text" inputmode="decimal" name="amount" class="form-control" placeholder="0" data-required-param="true">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Moneda</label>
-              <select name="currency" class="form-select" data-required-param="true" data-current-value="CLP">
-                <option value="CLP" selected>CLP</option>
-              </select>
-            </div>
-            <div class="col-md-6">
               <label class="form-label">Proveedor</label>
               <select name="supplier_select" class="form-select js-searchable-select" data-required-param="true">
                 <option value="">Selecciona proveedor</option>
@@ -226,7 +217,7 @@
               <input type="hidden" name="new_supplier_name" value="">
               <button class="btn btn-sm btn-light-primary supplier-modal-btn mt-2" type="button">Agregar proveedor</button>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-3">
               <label class="form-label">RUT proveedor</label>
               <input type="text" name="supplier_rut" class="form-control" placeholder="Selecciona o agrega un proveedor" disabled>
             </div>
@@ -236,7 +227,7 @@
             </div>
             <div class="col-md-3">
               <label class="form-label">Tipo de documento reportado</label>
-              <input type="text" class="form-control" value="" placeholder="Sin dato WhatsApp" disabled>
+              <input type="text" class="form-control" value="" placeholder="Sin dato WhatsApp" data-reported-document-type disabled>
             </div>
             <div class="col-md-3">
               <label class="form-label">Tipo de documento Rindegastos</label>
@@ -248,13 +239,23 @@
               <label class="form-label">Número de documento</label>
               <input type="text" name="document_number" class="form-control" placeholder="Número de documento">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-3">
+              <label class="form-label">Monto</label>
+              <input type="text" inputmode="decimal" name="amount" class="form-control" placeholder="0" data-required-param="true">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Moneda</label>
+              <select name="currency" class="form-select" data-required-param="true" data-current-value="CLP">
+                <option value="CLP" selected>CLP</option>
+              </select>
+            </div>
+            <div class="col-md-3">
               <label class="form-label">Usuario que reporta</label>
               <select class="form-select" disabled>
                 <option selected>{{ request.user.get_full_name|default:request.user.email|default:"Usuario web" }}</option>
               </select>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-3">
               <label class="form-label">Nombre quien rinde</label>
               <select name="rindegastos_submitter" class="form-select js-searchable-select" data-rindegastos-field="Nombre quien rinde" data-required-param="true">
                 <option value="">Selecciona nombre quien rinde</option>
@@ -295,7 +296,7 @@
             </div>
             <div class="col-12">
               <div class="row g-2 expense-type-row">
-                <div class="col-12">
+                <div class="col-12 col-md-6">
                   <label class="form-label" data-role="expense-type-label">Categoría Rindegastos</label>
                   <select name="expense_type_select" class="form-select js-searchable-select">
                     <option value="">Selecciona categoría Rindegastos</option>
@@ -303,6 +304,39 @@
                     <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" data-policy-external-id="{{ t.policy.external_id|default:'' }}" data-policy-name="{{ t.policy.name|default:'' }}">{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                     {% endfor %}
                   </select>
+                </div>
+                <div class="col-12 col-md-6 gasoline-type-field d-none">
+                  <label class="form-label">Tipo de bencina</label>
+                  <select name="gasoline_type" class="form-select">
+                    <option value="93" selected>93 octanos</option>
+                    <option value="95">95 octanos</option>
+                    <option value="97">97 octanos</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 tax-section">
+              <div class="section-label mb-2">Impuestos</div>
+              <div class="row g-2">
+                <div class="col-md-6">
+                  <div class="d-flex align-items-center gap-2">
+                    <label class="form-label mb-0">IVA</label>
+                    <button type="button" class="tax-info-button d-none" data-tax-info="iva" aria-label="Ver cálculo automático IVA">i</button>
+                  </div>
+                  <input type="text" inputmode="decimal" name="iva_amount" class="form-control tax-money-input" value="0" placeholder="0" disabled>
+                </div>
+                <div class="col-md-6">
+                  <div class="d-flex align-items-center gap-2">
+                    <label class="form-label mb-0">Impuesto específico</label>
+                    <button type="button" class="tax-info-button d-none" data-tax-info="specific" aria-label="Ver cálculo automático impuesto específico">i</button>
+                  </div>
+                  <input type="text" inputmode="decimal" name="specific_tax_amount" class="form-control tax-money-input" value="0" placeholder="0" disabled>
+                </div>
+                <div class="col-12">
+                  <div class="form-text tax-fields-help">Disponibles cuando el tipo de documento es factura.</div>
+                </div>
+                <div class="col-12">
+                  <div class="alert alert-light-primary py-2 px-3 d-none tax-calculation-note" role="alert"></div>
                 </div>
               </div>
             </div>
@@ -591,6 +625,7 @@
             data-duplicate-summary="{% if gasto.similar_expenses %}{% for match in gasto.similar_expenses %}{{ match.export_id }}{% if match.expense.supplier %} - {{ match.expense.supplier }}{% endif %}{% if match.expense.amount %} - ${{ match.expense.amount|cl_currency }}{% endif %}{% if not forloop.last %}; {% endif %}{% endfor %}{% endif %}"
           >
             {% csrf_token %}
+            <input type="hidden" name="tax_manual_override" value="0" data-tax-manual-override>
             <div class="modal-body expense-workspace">
               <div class="expense-form-pane">
               <div class="row g-2">
@@ -675,16 +710,6 @@
                   </select>
                 </div>
                 <div class="col-md-3">
-                  <label class="form-label">Monto</label>
-                  <input type="text" inputmode="decimal" name="amount" class="form-control" value="{{ gasto.amount|cl_currency }}" placeholder="0" data-required-param="true">
-                </div>
-                <div class="col-md-3">
-                  <label class="form-label">Moneda</label>
-                  <select name="currency" class="form-select" data-required-param="true" data-current-value="{{ gasto.currency|default:'CLP' }}">
-                    <option value="{{ gasto.currency|default:'CLP' }}" selected>{{ gasto.currency|default:'CLP' }}</option>
-                  </select>
-                </div>
-                <div class="col-md-6">
                   <label class="form-label">Proveedor</label>
                   <select name="supplier_select" class="form-select js-searchable-select" data-required-param="true">
                     <option value="">Selecciona proveedor</option>
@@ -695,7 +720,7 @@
                   <input type="hidden" name="new_supplier_name" value="">
                   <button class="btn btn-sm btn-light-primary supplier-modal-btn mt-2" type="button">Agregar proveedor</button>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-3">
                   <label class="form-label">RUT proveedor</label>
                   <input type="text" name="supplier_rut" class="form-control" value="{{ gasto.supplier_rut|default:'' }}" placeholder="Selecciona o agrega un proveedor" disabled>
                 </div>
@@ -705,7 +730,7 @@
                 </div>
                 <div class="col-md-3">
                   <label class="form-label">Tipo de documento reportado</label>
-                  <input type="text" class="form-control" value="{{ gasto.document_type|default:'' }}" placeholder="Sin dato WhatsApp" disabled>
+                  <input type="text" class="form-control" value="{{ gasto.document_type|default:'' }}" placeholder="Sin dato WhatsApp" data-reported-document-type disabled>
                 </div>
                 <div class="col-md-3">
                   <label class="form-label">Tipo de documento Rindegastos</label>
@@ -717,13 +742,23 @@
                   <label class="form-label">Número de documento</label>
                   <input type="text" name="document_number" class="form-control" value="{{ gasto.document_number|default:'' }}" placeholder="Número de documento">
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-3">
+                  <label class="form-label">Monto</label>
+                  <input type="text" inputmode="decimal" name="amount" class="form-control" value="{{ gasto.amount|cl_currency }}" placeholder="0" data-required-param="true">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">Moneda</label>
+                  <select name="currency" class="form-select" data-required-param="true" data-current-value="{{ gasto.currency|default:'CLP' }}">
+                    <option value="{{ gasto.currency|default:'CLP' }}" selected>{{ gasto.currency|default:'CLP' }}</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
                   <label class="form-label">Usuario que reporta</label>
                   <select class="form-select" disabled>
                     <option selected>{{ gasto.reporter_label|default:"-" }}</option>
                   </select>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-3">
                   <label class="form-label">Nombre quien rinde</label>
                   <select name="rindegastos_submitter" class="form-select js-searchable-select" data-rindegastos-field="Nombre quien rinde" data-current-value="{{ gasto.rindegastos_submitter|default:'' }}" data-required-param="true">
                     <option value="">Selecciona nombre quien rinde</option>
@@ -764,7 +799,7 @@
                 </div>
                 <div class="col-12">
                   <div class="row g-2 expense-type-row">
-                    <div class="col-12">
+                    <div class="col-12 col-md-6">
                       <label class="form-label" data-role="expense-type-label">Categoría Rindegastos</label>
                       <select name="expense_type_select" class="form-select js-searchable-select">
                         <option value="">Selecciona categoría Rindegastos</option>
@@ -772,6 +807,43 @@
                         <option value="{{ t.name }}" data-policy-id="{{ t.policy_id|default:'' }}" data-policy-external-id="{{ t.policy.external_id|default:'' }}" data-policy-name="{{ t.policy.name|default:'' }}" {% if gasto.expense_type == t.name and gasto.policy_catalog_id == t.policy_id %}selected{% endif %}>{{ t.name }}{% if t.group_name %} / {{ t.group_name }}{% endif %}</option>
                         {% endfor %}
                       </select>
+                    </div>
+                    <div class="col-12 col-md-6 gasoline-type-field {% if gasto.gasoline_type %}{% else %}d-none{% endif %}">
+                      <label class="form-label">Tipo de bencina</label>
+                      <select name="gasoline_type" class="form-select" data-current-value="{{ gasto.gasoline_type|default:'93' }}">
+                        <option value="93" {% if gasto.gasoline_type == "93" or not gasto.gasoline_type %}selected{% endif %}>93 octanos</option>
+                        <option value="95" {% if gasto.gasoline_type == "95" %}selected{% endif %}>95 octanos</option>
+                        <option value="97" {% if gasto.gasoline_type == "97" %}selected{% endif %}>97 octanos</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12 tax-section">
+                  <div class="section-label mb-2">Impuestos</div>
+                  <div class="row g-2">
+                    <div class="col-md-6">
+                      <div class="d-flex align-items-center gap-2">
+                        <label class="form-label mb-0">IVA</label>
+                        <button type="button" class="tax-info-button d-none" data-tax-info="iva" aria-label="Ver cálculo automático IVA">i</button>
+                      </div>
+                      <input type="text" inputmode="decimal" name="iva_amount" class="form-control tax-money-input" value="{{ gasto.iva_amount|cl_currency|default:'0' }}" placeholder="0">
+                    </div>
+                    <div class="col-md-6">
+                      <div class="d-flex align-items-center gap-2">
+                        <label class="form-label mb-0">Impuesto específico</label>
+                        <button type="button" class="tax-info-button d-none" data-tax-info="specific" aria-label="Ver cálculo automático impuesto específico">i</button>
+                      </div>
+                      <input type="text" inputmode="decimal" name="specific_tax_amount" class="form-control tax-money-input" value="{{ gasto.specific_tax_amount|cl_currency|default:'0' }}" placeholder="0">
+                    </div>
+                    <div class="col-12">
+                      <div class="form-text tax-fields-help">Disponibles cuando el tipo de documento es factura.</div>
+                    </div>
+                    <div class="col-12">
+                      <div class="alert alert-light-primary py-2 px-3 d-none tax-calculation-note" role="alert">
+                        {% if gasto.tax_calculation_source == "auto" %}
+                        Calculado automáticamente.
+                        {% endif %}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1015,6 +1087,29 @@
     .select2-container--default.select2-container--disabled .select2-selection__arrow,
     .select2-container--default.select2-container--disabled .select2-selection__clear {
       opacity: 0.45;
+    }
+
+    .tax-info-button {
+      align-items: center;
+      background: #eef6ff;
+      border: 1px solid #b8dcff;
+      border-radius: 50%;
+      color: #066bf1;
+      display: inline-flex;
+      font-size: 11px;
+      font-weight: 700;
+      height: 18px;
+      justify-content: center;
+      line-height: 1;
+      padding: 0;
+      width: 18px;
+    }
+
+    .tax-info-button:hover,
+    .tax-info-button:focus {
+      background: #dceeff;
+      border-color: #7bbdff;
+      outline: none;
     }
 
     .expense-edit-modal .modal-dialog {
@@ -1317,6 +1412,18 @@
       flex: 0 0 auto;
       margin-top: 0.75rem;
       padding: 0.75rem;
+    }
+
+    .tax-section {
+      padding-top: 0.25rem;
+    }
+
+    .tax-section .section-label {
+      color: #374151;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
     }
 
     .expense-history-modal .modal-dialog {
@@ -1723,8 +1830,10 @@
 {% block extra_js %}
   {{ block.super }}
   {{ rindegastos_field_options|json_script:"rindegastos-field-options-data" }}
+  {{ tax_calculation_payload|json_script:"tax-calculation-data" }}
   <script>
     document.addEventListener("DOMContentLoaded", function () {
+      var taxCalculationData = JSON.parse(document.getElementById('tax-calculation-data').textContent || '{}');
       var expensesTable = document.getElementById("expensesTable");
       var expensesTbody = expensesTable ? expensesTable.querySelector("tbody") : null;
       var allExpenseRows = expensesTbody ? Array.from(expensesTbody.querySelectorAll("tr")) : [];
@@ -2543,7 +2652,7 @@
         return withThousands;
       }
 
-      var amountInputs = document.querySelectorAll('input[name="amount"]');
+      var amountInputs = document.querySelectorAll('input[name="amount"], .tax-money-input');
       amountInputs.forEach(function (input) {
         input.addEventListener("input", function () {
           var formatted = formatChileanCurrency(input.value);
@@ -2643,11 +2752,23 @@
         var policySelect = form.querySelector('select[name="category_select"]');
         var policyIdInput = form.querySelector('input[name="category_policy_id"]');
         var currencySelect = form.querySelector('select[name="currency"]');
+        var amountInput = form.querySelector('input[name="amount"]');
+        var paidAtInput = form.querySelector('input[name="paid_at"]');
         var expenseTypeSelect = form.querySelector('select[name="expense_type_select"]');
+        var gasolineTypeField = form.querySelector('.gasoline-type-field');
+        var gasolineTypeSelect = form.querySelector('select[name="gasoline_type"]');
         var supplierSelect = form.querySelector('select[name="supplier_select"]');
         var supplierRutInput = form.querySelector('input[name="supplier_rut"]');
         var newSupplierInput = form.querySelector('input[name="new_supplier_name"]');
         var supplierModalBtn = form.querySelector('.supplier-modal-btn');
+        var documentTypeSelect = form.querySelector('select[name="rindegastos_document_type"]');
+        var reportedDocumentTypeInput = form.querySelector('input[data-reported-document-type]');
+        var ivaAmountInput = form.querySelector('input[name="iva_amount"]');
+        var specificTaxAmountInput = form.querySelector('input[name="specific_tax_amount"]');
+        var taxManualOverrideInput = form.querySelector('input[data-tax-manual-override]');
+        var taxFieldsHelp = form.querySelector('.tax-fields-help');
+        var taxCalculationNote = form.querySelector('.tax-calculation-note');
+        var taxInfoButtons = Array.from(form.querySelectorAll('.tax-info-button'));
         var rindegastosFieldSelects = Array.from(form.querySelectorAll('select[data-rindegastos-field]'));
         var statusField = form.querySelector('[data-role="status-field"]');
         var receiptDropzone = form.querySelector('.receipt-dropzone');
@@ -2656,6 +2777,8 @@
         var policyOptionsRequest = 0;
         var policyOptionsCache = {};
         var activePolicyExternalId = '';
+
+        Array.from(form.querySelectorAll('.js-searchable-select')).forEach(initSearchableSelect);
 
         function escapeHtml(text) {
           return text
@@ -2680,6 +2803,368 @@
 
         function isFuelPolicy() {
           return normalizedPolicyName() === 'combustibles';
+        }
+
+        function isInvoiceDocument() {
+          var selectedDocument = '';
+          if (documentTypeSelect) {
+            var selectedOption = documentTypeSelect.options[documentTypeSelect.selectedIndex];
+            selectedDocument = [
+              documentTypeSelect.value || '',
+              selectedOption ? selectedOption.textContent || '' : ''
+            ].join(' ');
+          }
+          var reportedDocument = reportedDocumentTypeInput ? reportedDocumentTypeInput.value || '' : '';
+          return (selectedDocument + ' ' + reportedDocument).toLowerCase().indexOf('factura') !== -1;
+        }
+
+        function normalizeTaxInput(field) {
+          if (!field) return;
+          if (!(field.value || '').trim()) {
+            field.value = '0';
+          }
+        }
+
+        function parseMoney(value) {
+          var normalized = String(value || '')
+            .replace(/\$/g, '')
+            .replace(/\s/g, '')
+            .replace(/\./g, '')
+            .replace(',', '.');
+          var parsed = Number(normalized);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function parseDecimalInput(value) {
+          var normalized = String(value || '')
+            .replace(/\s/g, '')
+            .replace(',', '.');
+          var parsed = Number(normalized);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function formatClp(value) {
+          if (!Number.isFinite(value)) return '0';
+          return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        }
+
+        function splitIvaFromTaxableGross(taxableGross) {
+          var roundedTaxableGross = Math.round(Number(taxableGross || 0));
+          var net = Math.floor(roundedTaxableGross / 1.19);
+          return {
+            net: net,
+            iva: roundedTaxableGross - net,
+          };
+        }
+
+        function normalizeFuelKey(value) {
+          var normalized = String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-zA-Z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .toLowerCase();
+          if (!normalized) return '';
+          if (normalized.indexOf('diesel') !== -1 || normalized.indexOf('petroleo') !== -1) {
+            return 'petroleo_diesel';
+          }
+          if (normalized.indexOf('glp') !== -1 || normalized.indexOf('gas_licuado') !== -1) {
+            return 'gas_licuado_de_petroleo_de_consumo_vehicular';
+          }
+          if (normalized.indexOf('gnc') !== -1 || normalized.indexOf('gas_natural') !== -1) {
+            return 'gas_natural_comprimido_de_consumo_vehicular';
+          }
+          if (normalized.indexOf('97') !== -1) {
+            return 'gasolina_automotriz_97';
+          }
+          if (normalized.indexOf('93') !== -1) {
+            return 'gasolina_automotriz_93';
+          }
+          if (normalized.indexOf('95') !== -1) {
+            return 'gasolina_automotriz_95_promedio_93_97';
+          }
+          if (normalized.indexOf('bencina') !== -1 || normalized.indexOf('gasolina') !== -1) {
+            return 'gasolina_automotriz_93';
+          }
+          return normalized;
+        }
+
+        function isGenericGasolineType(value) {
+          var normalized = String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-zA-Z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .toLowerCase();
+          if (!normalized) return false;
+          return (
+            (normalized.indexOf('bencina') !== -1 || normalized.indexOf('gasolina') !== -1) &&
+            normalized.indexOf('93') === -1 &&
+            normalized.indexOf('95') === -1 &&
+            normalized.indexOf('97') === -1
+          );
+        }
+
+        function selectedSelectText(select) {
+          if (!select) return '';
+          var selectedOption = select.options[select.selectedIndex];
+          var nativeValue = select.value || '';
+          var nativeText = selectedOption ? selectedOption.textContent || '' : '';
+          var select2Container = select.nextElementSibling;
+          var select2Text = '';
+          if (select2Container && select2Container.classList.contains('select2-container')) {
+            var rendered = select2Container.querySelector('.select2-selection__rendered');
+            select2Text = rendered ? rendered.textContent || '' : '';
+          }
+          return (nativeValue || nativeText || select2Text).trim();
+        }
+
+        function selectedFuelTypeForTax() {
+          var categoryType = selectedSelectText(expenseTypeSelect);
+          if (isGenericGasolineType(categoryType) && gasolineTypeSelect && gasolineTypeSelect.value) {
+            return 'Bencina ' + gasolineTypeSelect.value;
+          }
+          return categoryType;
+        }
+
+        function toggleGasolineTypeField() {
+          if (!gasolineTypeField || !gasolineTypeSelect) return;
+          var shouldShow = isFuelPolicy() && isGenericGasolineType(selectedSelectText(expenseTypeSelect));
+          gasolineTypeField.classList.toggle('d-none', !shouldShow);
+          gasolineTypeSelect.disabled = formLocked || !shouldShow;
+          if (!shouldShow) {
+            gasolineTypeSelect.value = '';
+          } else if (!gasolineTypeSelect.value && gasolineTypeSelect.getAttribute('data-current-value')) {
+            gasolineTypeSelect.value = gasolineTypeSelect.getAttribute('data-current-value');
+          } else if (!gasolineTypeSelect.value) {
+            gasolineTypeSelect.value = '93';
+          }
+        }
+
+        function normalizedDateValue(input) {
+          if (!input) return '';
+          var value = (input.value || '').trim();
+          if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+          var match = value.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+          if (match) {
+            var day = match[1].padStart(2, '0');
+            var month = match[2].padStart(2, '0');
+            return match[3] + '-' + month + '-' + day;
+          }
+          if (input.valueAsDate instanceof Date && !Number.isNaN(input.valueAsDate.getTime())) {
+            var date = input.valueAsDate;
+            return date.getFullYear() + '-' +
+              String(date.getMonth() + 1).padStart(2, '0') + '-' +
+              String(date.getDate()).padStart(2, '0');
+          }
+          return value;
+        }
+
+        function findUtm(year, month) {
+          return (taxCalculationData.utm || []).find(function (item) {
+            return Number(item.year) === year && Number(item.month) === month;
+          });
+        }
+
+        function findFuelRateByKey(dateValue, fuelKey) {
+          if (!dateValue || !fuelKey) return null;
+          var paidDate = new Date(dateValue + 'T00:00:00');
+          var candidates = (taxCalculationData.fuel_rates || []).filter(function (rate) {
+            return rate.fuel_key === fuelKey && new Date(rate.effective_date + 'T00:00:00') <= paidDate;
+          });
+          candidates.sort(function (a, b) {
+            return new Date(b.effective_date + 'T00:00:00') - new Date(a.effective_date + 'T00:00:00');
+          });
+          return candidates[0] || null;
+        }
+
+        function findFuelRate(dateValue, fuelType) {
+          var fuelKey = normalizeFuelKey(fuelType);
+          if (!dateValue || !fuelKey) return null;
+          if (fuelKey !== 'gasolina_automotriz_95_promedio_93_97') {
+            return findFuelRateByKey(dateValue, fuelKey);
+          }
+          var rate93 = findFuelRateByKey(dateValue, 'gasolina_automotriz_93');
+          var rate97 = findFuelRateByKey(dateValue, 'gasolina_automotriz_97');
+          if (!rate93 || !rate97) return null;
+          if (String(rate93.unit || '').toUpperCase() !== String(rate97.unit || '').toUpperCase()) return null;
+          return {
+            fuel_key: fuelKey,
+            fuel_name: 'Bencina 95 / bencina generica',
+            effective_date: rate93.effective_date < rate97.effective_date ? rate93.effective_date : rate97.effective_date,
+            resulting_tax: (Number(rate93.resulting_tax) + Number(rate97.resulting_tax)) / 2,
+            unit: rate93.unit,
+            rate_strategy: 'average_93_97',
+            rate_93: rate93,
+            rate_97: rate97,
+          };
+        }
+
+        function disposeTaxPopover(button) {
+          if (!button || !window.bootstrap || !window.bootstrap.Popover) return;
+          var instance = window.bootstrap.Popover.getInstance(button);
+          if (instance) {
+            instance.dispose();
+          }
+        }
+
+        function setTaxInfoButton(button, visible, content) {
+          if (!button) return;
+          disposeTaxPopover(button);
+          button.classList.toggle('d-none', !visible);
+          if (!visible) {
+            button.removeAttribute('title');
+            button.removeAttribute('data-bs-content');
+            return;
+          }
+          button.setAttribute('title', 'Cálculo automático');
+          button.setAttribute('data-bs-toggle', 'popover');
+          button.setAttribute('data-bs-trigger', 'click');
+          button.setAttribute('data-bs-placement', 'top');
+          button.setAttribute('data-bs-container', 'body');
+          button.setAttribute('data-bs-content', content);
+          if (window.bootstrap && window.bootstrap.Popover) {
+            new window.bootstrap.Popover(button);
+          }
+        }
+
+        taxInfoButtons.forEach(function (button) {
+          button.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!window.bootstrap || !window.bootstrap.Popover) return;
+            taxInfoButtons.forEach(function (otherButton) {
+              if (otherButton === button) return;
+              var otherInstance = window.bootstrap.Popover.getInstance(otherButton);
+              if (otherInstance) otherInstance.hide();
+            });
+            var instance = window.bootstrap.Popover.getInstance(button) || new window.bootstrap.Popover(button);
+            instance.toggle();
+          });
+        });
+
+        function updateTaxInfoButtons(suggestion, manualOverride) {
+          var canCompare = Boolean(suggestion && suggestion.source === 'auto' && (manualOverride || suggestion.detail));
+          taxInfoButtons.forEach(function (button) {
+            var type = button.getAttribute('data-tax-info');
+            var autoValue = type === 'specific' ? suggestion.specific : suggestion.iva;
+            var visible = canCompare && (type !== 'specific' || isFuelPolicy());
+            var label = type === 'specific' ? 'Impuesto específico' : 'IVA';
+            var content = label + ' automático: $' + formatClp(autoValue) + '. ' + (suggestion.detail || suggestion.message || '');
+            setTaxInfoButton(button, visible, content);
+          });
+        }
+
+        function calculateTaxSuggestion() {
+          if (!isInvoiceDocument()) {
+            return {source: 'none', iva: 0, specific: 0, message: 'Disponibles cuando el tipo de documento es factura.'};
+          }
+
+          var total = parseMoney(amountInput ? amountInput.value : '');
+          if (total === null) {
+            return {source: 'manual', message: 'Falta monto para calcular impuestos.'};
+          }
+
+          if (!isFuelPolicy()) {
+            var normalSplit = splitIvaFromTaxableGross(total);
+            return {
+              source: 'auto',
+              iva: normalSplit.iva,
+              specific: 0,
+              message: 'Sugerencia automática: IVA calculado con tasa 19% usando neto entero e IVA como diferencia.',
+            };
+          }
+
+          var dateValue = normalizedDateValue(paidAtInput);
+          var liters = parseDecimalInput(fuelLitersInput ? fuelLitersInput.value : '');
+          var rawFuelType = selectedSelectText(expenseTypeSelect);
+          var fuelType = selectedFuelTypeForTax();
+          var missing = [];
+          if (!dateValue) missing.push('fecha');
+          if (liters === null) missing.push('litros');
+          if (!rawFuelType) missing.push('tipo de combustible');
+          if (isGenericGasolineType(rawFuelType) && (!gasolineTypeSelect || !gasolineTypeSelect.value)) {
+            missing.push('tipo de bencina');
+          }
+          if (missing.length) {
+            return {source: 'manual', message: 'Falta ' + missing.join(', ') + ' para calcular impuesto específico.'};
+          }
+
+          var dateParts = dateValue.split('-').map(Number);
+          var utm = findUtm(dateParts[0], dateParts[1]);
+          var rate = findFuelRate(dateValue, fuelType);
+          if (!utm || !rate) {
+            return {source: 'manual', message: 'Falta UTM o tasa Mepco sincronizada para esta fecha/tipo de combustible.'};
+          }
+          if (String(rate.unit || '').toUpperCase() !== 'UTM/M3') {
+            return {source: 'manual', message: 'La unidad Mepco ' + rate.unit + ' requiere revisión manual.'};
+          }
+
+          var specific = Math.round((liters / 1000) * Number(rate.resulting_tax) * Number(utm.value));
+          var split = splitIvaFromTaxableGross(total - specific);
+          var detail = '';
+          if (rate.rate_strategy === 'average_93_97') {
+            detail = 'Bencina 95/generica no tiene fila propia en Mepco SII. Se usa promedio simple de tasas 93 y 97: (' +
+              rate.rate_93.resulting_tax + ' + ' + rate.rate_97.resulting_tax + ') / 2 = ' + rate.resulting_tax +
+              ' ' + rate.unit + '. Impuesto especifico = litros / 1000 * tasa promedio * UTM. IVA = monto afecto - neto entero.';
+          }
+          return {
+            source: 'auto',
+            iva: split.iva,
+            specific: specific,
+            message: 'Sugerencia automática con Mepco vigente desde ' + rate.effective_date + ', UTM del mes e IVA como diferencia sobre neto entero.',
+            detail: detail || 'Impuesto especifico = litros / 1000 * tasa Mepco * UTM. IVA = monto afecto - neto entero.',
+          };
+        }
+
+        function updateTaxSuggestion() {
+          var suggestion = calculateTaxSuggestion();
+          var manualOverride = taxManualOverrideInput && taxManualOverrideInput.value === '1';
+          updateTaxInfoButtons(suggestion, manualOverride);
+          if (suggestion.source === 'auto' && !manualOverride && !formLocked) {
+            if (ivaAmountInput && !ivaAmountInput.disabled) ivaAmountInput.value = formatClp(suggestion.iva);
+            if (specificTaxAmountInput && !specificTaxAmountInput.disabled) specificTaxAmountInput.value = formatClp(suggestion.specific);
+          }
+          if (taxCalculationNote) {
+            taxCalculationNote.textContent = suggestion.message || '';
+            taxCalculationNote.classList.toggle('d-none', !suggestion.message || !isInvoiceDocument());
+            taxCalculationNote.classList.toggle('alert-light-warning', suggestion.source !== 'auto');
+            taxCalculationNote.classList.toggle('alert-light-primary', suggestion.source === 'auto');
+          }
+        }
+
+        function toggleTaxFields() {
+          var invoice = isInvoiceDocument();
+          var fuelInvoice = invoice && isFuelPolicy();
+
+          if (ivaAmountInput) {
+            ivaAmountInput.disabled = formLocked || !invoice;
+            if (!invoice) {
+              ivaAmountInput.value = '0';
+            } else {
+              normalizeTaxInput(ivaAmountInput);
+            }
+          }
+
+          if (specificTaxAmountInput) {
+            specificTaxAmountInput.disabled = formLocked || !fuelInvoice;
+            if (!fuelInvoice) {
+              specificTaxAmountInput.value = '0';
+            } else {
+              normalizeTaxInput(specificTaxAmountInput);
+            }
+          }
+
+          if (taxFieldsHelp) {
+            if (!invoice) {
+              taxFieldsHelp.textContent = 'Disponibles cuando el tipo de documento es factura.';
+            } else if (fuelInvoice) {
+              taxFieldsHelp.textContent = 'Factura de combustibles: IVA e impuesto específico editables.';
+            } else {
+              taxFieldsHelp.textContent = 'Factura no combustible: IVA editable e impuesto específico en 0.';
+            }
+          }
+          updateTaxSuggestion();
         }
 
         function toggleVehicleSection() {
@@ -2718,6 +3203,7 @@
             if (!field) return;
             field.disabled = formLocked || !fuelPolicy;
           });
+          toggleGasolineTypeField();
           if (fuelFieldsHelp) {
             if (fuelPolicy) {
               fuelFieldsHelp.textContent = 'Obligatorios para la política Combustibles.';
@@ -2727,6 +3213,7 @@
               fuelFieldsHelp.textContent = 'Disponibles para la política Combustibles.';
             }
           }
+          toggleTaxFields();
         }
 
         if (vehicleToggle) {
@@ -2888,6 +3375,9 @@
             populateRindegastosFieldSelect(select, data.field_options || []);
           });
           activePolicyExternalId = externalId || '';
+          toggleGasolineTypeField();
+          toggleTaxFields();
+          window.setTimeout(updateTaxSuggestion, 0);
         }
 
         function updatePolicyDependentFields() {
@@ -2936,9 +3426,56 @@
           updatePolicyDependentFields();
         } else {
           updateCurrencySelect('');
+          toggleTaxFields();
         }
 
-        Array.from(form.querySelectorAll('.js-searchable-select')).forEach(initSearchableSelect);
+        if (documentTypeSelect) {
+          documentTypeSelect.addEventListener('change', toggleTaxFields);
+          if (
+            typeof window.jQuery !== 'undefined' &&
+            window.jQuery(documentTypeSelect).hasClass('select2-hidden-accessible')
+          ) {
+            window.jQuery(documentTypeSelect).on('select2:select select2:clear', function () {
+              window.setTimeout(toggleTaxFields, 0);
+            });
+          }
+        }
+        [ivaAmountInput, specificTaxAmountInput].forEach(function (field) {
+          if (!field) return;
+          field.addEventListener('input', function () {
+            if (taxManualOverrideInput) {
+              taxManualOverrideInput.value = '1';
+            }
+            updateTaxSuggestion();
+          });
+        });
+        [amountInput, paidAtInput, fuelLitersInput].forEach(function (field) {
+          if (!field) return;
+          field.addEventListener('input', updateTaxSuggestion);
+          field.addEventListener('change', updateTaxSuggestion);
+        });
+        if (expenseTypeSelect) {
+          expenseTypeSelect.addEventListener('change', function () {
+            toggleGasolineTypeField();
+            updateTaxSuggestion();
+          });
+          if (
+            typeof window.jQuery !== 'undefined' &&
+            window.jQuery(expenseTypeSelect).hasClass('select2-hidden-accessible')
+          ) {
+            window.jQuery(expenseTypeSelect).on('select2:select select2:clear', function () {
+              window.setTimeout(function () {
+                toggleGasolineTypeField();
+                updateTaxSuggestion();
+              }, 0);
+            });
+          }
+        }
+        if (gasolineTypeSelect) {
+          gasolineTypeSelect.addEventListener('change', updateTaxSuggestion);
+        }
+        toggleTaxFields();
+
         if (formLocked) {
           form.querySelectorAll('fieldset input, fieldset select, fieldset textarea, fieldset button').forEach(function (control) {
             control.disabled = true;
@@ -3191,6 +3728,12 @@
             }
             if (!fuelLitersInput || !(fuelLitersInput.value || '').trim()) {
               missing.push('Litros combustible');
+            }
+            if (
+              isGenericGasolineType(selectedSelectText(expenseTypeSelect)) &&
+              (!gasolineTypeSelect || !(gasolineTypeSelect.value || '').trim())
+            ) {
+              missing.push('Tipo de bencina');
             }
           }
 

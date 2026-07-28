@@ -1,5 +1,6 @@
 import csv
 import io
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import urlparse
@@ -18,13 +19,17 @@ from expenses.models import (
     Expense,
     ExpenseAuditLog,
     ExpenseTypeCatalog,
+    FuelSpecificTaxRate,
     RindegastosExpenseFieldCatalog,
     RindegastosTaxCatalog,
     SupplierCatalog,
+    TaxIndicatorValue,
     normalize_rut,
 )
+from expenses.invoice_tax_calculator import calculate_invoice_taxes
 from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
+from expenses.tax_indicators_sync import SiiTaxIndicatorSync
 from expenses.views import _expense_export_id, _find_similar_expenses, _missing_fields_for_parametrization, _rindegastos_note
 
 LOCAL_TEST_STORAGES = {
@@ -172,6 +177,79 @@ class FuelExpenseExportTests(TestCase):
         self.assertContains(page, 'name="fuel_liters"')
         self.assertContains(page, "Categoría Rindegastos (tipo de combustible)")
         self.assertContains(page, 'value="154320.00"')
+
+    def test_export_maps_invoice_tax_name_and_amounts(self):
+        policy = CategoryCatalog.objects.update_or_create(
+            name="Combustibles",
+            defaults={
+                "external_id": "policy-fuel-tax",
+                "is_active": True,
+                "sync_status": "synced",
+            },
+        )[0]
+        RindegastosTaxCatalog.objects.create(
+            policy=policy,
+            name="IVA (Solo para Facturas Afectas)",
+            tax_type="1",
+            value=Decimal("19"),
+        )
+        Expense.objects.create(
+            status="completed",
+            amount=Decimal("100000"),
+            currency="CLP",
+            category="Combustibles",
+            supplier="Proveedor Factura Combustible",
+            paid_at="2026-06-09",
+            rindegastos_document_type="Factura afecta",
+            iva_amount=Decimal("12546"),
+            specific_tax_amount=Decimal("21420"),
+        )
+
+        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed", "sync_before_export": "0"})
+        content = response.content.decode("utf-8-sig")
+        rows = list(csv.reader(io.StringIO(content)))
+        header = rows[rows.index([]) + 1]
+        row = dict(zip(header, rows[rows.index([]) + 2]))
+
+        self.assertEqual(row["impuesto"], "IVA (Solo para Facturas Afectas)")
+        self.assertEqual(row["valor_impuesto"], "12546")
+        self.assertEqual(row["otros_impuestos"], "21420")
+
+    def test_export_leaves_tax_selector_blank_for_non_invoice(self):
+        policy = CategoryCatalog.objects.update_or_create(
+            name="Oficina Central",
+            defaults={
+                "external_id": "policy-office-tax",
+                "is_active": True,
+                "sync_status": "synced",
+            },
+        )[0]
+        RindegastosTaxCatalog.objects.create(
+            policy=policy,
+            name="IVA",
+            tax_type="1",
+            value=Decimal("19"),
+        )
+        Expense.objects.create(
+            status="completed",
+            amount=Decimal("100000"),
+            currency="CLP",
+            category="Oficina Central",
+            supplier="Proveedor Boleta",
+            paid_at="2026-06-09",
+            rindegastos_document_type="Boleta",
+            iva_amount=Decimal("0"),
+            specific_tax_amount=Decimal("0"),
+        )
+
+        response = self.client.get(reverse("expense_rindegastos_export"), {"status_scope": "completed", "sync_before_export": "0"})
+        rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
+        header = rows[rows.index([]) + 1]
+        row = dict(zip(header, rows[rows.index([]) + 2]))
+
+        self.assertEqual(row["impuesto"], "")
+        self.assertEqual(row["valor_impuesto"], "0")
+        self.assertEqual(row["otros_impuestos"], "0")
 
     def test_export_includes_vehicle_for_machinery_policy(self):
         Expense.objects.create(
@@ -563,6 +641,12 @@ class SupplierCatalogFlowTests(TestCase):
                 "is_active": True,
             },
         )[0]
+        RindegastosTaxCatalog.objects.create(
+            policy=self.policy,
+            name="IVA",
+            tax_type="1",
+            value=Decimal("19"),
+        )
 
     def test_new_supplier_is_saved_in_catalog_with_expense(self):
         response = self.client.post(
@@ -658,6 +742,137 @@ class SupplierCatalogFlowTests(TestCase):
         expense = Expense.objects.get(supplier="Proveedor Existente")
         self.assertEqual(expense.supplier_rut, "77777777-7")
 
+    def test_invoice_non_fuel_keeps_iva_and_resets_specific_tax(self):
+        self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "new_supplier_name": "Proveedor Factura",
+                "supplier_select": "Proveedor Factura",
+                "rindegastos_document_type": "Factura afecta",
+                "iva_amount": "19.000",
+                "specific_tax_amount": "5.000",
+            },
+        )
+
+        expense = Expense.objects.get(supplier="Proveedor Factura")
+        self.assertEqual(expense.iva_amount, Decimal("19000"))
+        self.assertEqual(expense.specific_tax_amount, Decimal("0"))
+        self.assertEqual(expense.rindegastos_tax, "IVA")
+        self.assertEqual(expense.tax_calculation_source, "manual")
+
+    def test_fuel_invoice_keeps_iva_and_specific_tax(self):
+        fuel_policy = CategoryCatalog.objects.update_or_create(
+            name="Combustibles",
+            defaults={"external_id": "policy-fuel", "is_active": True},
+        )[0]
+        self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": fuel_policy.name,
+                "new_supplier_name": "Proveedor Combustible",
+                "supplier_select": "Proveedor Combustible",
+                "rindegastos_document_type": "Factura afecta",
+                "iva_amount": "7.000",
+                "specific_tax_amount": "3.500",
+            },
+        )
+
+        expense = Expense.objects.get(supplier="Proveedor Combustible")
+        self.assertEqual(expense.iva_amount, Decimal("7000"))
+        self.assertEqual(expense.specific_tax_amount, Decimal("3500"))
+        self.assertEqual(expense.tax_calculation_metadata["editable_fields"], ["iva_amount", "specific_tax_amount"])
+
+    def test_fuel_invoice_uses_selected_gasoline_octane_for_auto_calculation(self):
+        fuel_policy = CategoryCatalog.objects.update_or_create(
+            name="Combustibles",
+            defaults={"external_id": "policy-fuel-octane", "is_active": True},
+        )[0]
+        ExpenseTypeCatalog.objects.create(policy=fuel_policy, name="01 Bencina", is_active=True)
+        TaxIndicatorValue.objects.create(indicator="UTM", year=2026, month=7, value=Decimal("68000"))
+        FuelSpecificTaxRate.objects.create(
+            effective_date=date(2026, 7, 1),
+            fuel_name="Gasolina Automotriz 97",
+            fuel_key="gasolina_automotriz_97",
+            component_base=Decimal("6.0000"),
+            component_variable=Decimal("0.5000"),
+            resulting_tax=Decimal("6.5000"),
+            unit="UTM/M3",
+        )
+
+        self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": fuel_policy.name,
+                "category_policy_id": str(fuel_policy.id),
+                "amount": "100.000",
+                "paid_at": "2026-07-10",
+                "new_supplier_name": "Proveedor Bencina 97",
+                "supplier_select": "Proveedor Bencina 97",
+                "rindegastos_document_type": "Factura afecta",
+                "fuel_liters": "50",
+                "expense_type_select": "01 Bencina",
+                "gasoline_type": "97",
+                "iva_amount": "0",
+                "specific_tax_amount": "0",
+                "tax_manual_override": "0",
+            },
+        )
+
+        expense = Expense.objects.get(supplier="Proveedor Bencina 97")
+        self.assertEqual(expense.expense_type, "01 Bencina")
+        self.assertEqual(expense.gasoline_type, "97")
+        self.assertEqual(expense.specific_tax_amount, Decimal("22100"))
+        self.assertEqual(expense.tax_calculation_metadata["fuel_type"], "Bencina 97")
+        self.assertEqual(expense.tax_calculation_metadata["fuel_key"], "gasolina_automotriz_97")
+        self.assertEqual(expense.tax_calculation_source, "auto")
+
+    def test_non_invoice_resets_tax_fields(self):
+        self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "new_supplier_name": "Proveedor Boleta",
+                "supplier_select": "Proveedor Boleta",
+                "rindegastos_document_type": "Boleta",
+                "iva_amount": "19.000",
+                "specific_tax_amount": "5.000",
+            },
+        )
+
+        expense = Expense.objects.get(supplier="Proveedor Boleta")
+        self.assertEqual(expense.iva_amount, Decimal("0"))
+        self.assertEqual(expense.specific_tax_amount, Decimal("0"))
+        self.assertIsNone(expense.rindegastos_tax)
+        self.assertEqual(expense.tax_calculation_source, "none")
+
+    def test_invoice_without_manual_override_autocalculates_iva(self):
+        self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "amount": "119.000",
+                "paid_at": "2026-07-10",
+                "new_supplier_name": "Proveedor Auto IVA",
+                "supplier_select": "Proveedor Auto IVA",
+                "rindegastos_document_type": "Factura afecta",
+                "iva_amount": "0",
+                "specific_tax_amount": "0",
+                "tax_manual_override": "0",
+            },
+        )
+
+        expense = Expense.objects.get(supplier="Proveedor Auto IVA")
+        self.assertEqual(expense.iva_amount, Decimal("19000"))
+        self.assertEqual(expense.specific_tax_amount, Decimal("0"))
+        self.assertEqual(expense.rindegastos_tax, "IVA")
+        self.assertEqual(expense.tax_calculation_source, "auto")
+
     def test_modal_uses_synced_policies_and_has_no_standard_worksite(self):
         response = self.client.get(reverse("expense_list"))
 
@@ -673,6 +888,17 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "expenses.tableFilters.v")
         self.assertContains(response, 'class="modal fade supplier-quick-modal"')
         self.assertContains(response, "supplier-quick-backdrop")
+        self.assertContains(response, "Impuestos")
+        self.assertContains(response, "Tipo de bencina")
+        self.assertContains(response, 'name="gasoline_type"')
+        self.assertContains(response, 'name="iva_amount"')
+        self.assertContains(response, 'name="specific_tax_amount"')
+        self.assertContains(response, "toggleTaxFields")
+        self.assertContains(response, "toggleGasolineTypeField")
+        self.assertContains(response, "data-bs-trigger', 'click'")
+        self.assertContains(response, "data-bs-container', 'body'")
+        self.assertContains(response, 'data-tax-info="iva"')
+        self.assertContains(response, 'data-tax-info="specific"')
         self.assertNotContains(response, 'name="worksite_standard"')
         self.assertNotContains(response, 'name="new_category_name"')
         self.assertNotContains(response, 'name="expense_type_other"')
@@ -1101,6 +1327,271 @@ class RindegastosFieldsSettingsTests(TestCase):
 
         self.assertFalse(CategoryCatalog.objects.filter(name="Manual no permitida").exists())
         self.assertFalse(ExpenseTypeCatalog.objects.filter(name="Manual no permitida").exists())
+
+
+class SiiTaxIndicatorsSyncTests(TestCase):
+    UTM_HTML = """
+    <html><body>
+      <table>
+        <tr><td>Enero</td><td>67.294</td></tr>
+        <tr><td>Febrero</td><td>67.429</td></tr>
+      </table>
+    </body></html>
+    """
+
+    MEPCO_HTML = """
+    <html><body>
+      <h2>Vigencia desde 25-06-2026</h2>
+      <table>
+        <tr><td>Gasolina Automotriz 93</td><td>6,0000</td><td>0,1234</td><td>6,1234</td><td>UTM/m3</td></tr>
+        <tr><td>Petróleo Diesel</td><td>1,5000</td><td>-0,0500</td><td>1,4500</td><td>UTM/m3</td></tr>
+      </table>
+    </body></html>
+    """
+
+    def test_parses_utm_and_mepco_sample_html(self):
+        sync = SiiTaxIndicatorSync(http_get=lambda url: "")
+
+        utm_rows = sync.parse_utm_values(self.UTM_HTML, "https://www.sii.cl/utm2026.htm", 2026)
+        mepco_rows = sync.parse_mepco_rates(self.MEPCO_HTML, "https://www.sii.cl/mepco2026.htm", 2026)
+
+        self.assertEqual(len(utm_rows), 2)
+        self.assertEqual(utm_rows[0]["month"], 1)
+        self.assertEqual(utm_rows[0]["value"], Decimal("67294"))
+        self.assertEqual(len(mepco_rows), 2)
+        self.assertEqual(mepco_rows[0]["effective_date"], date(2026, 6, 25))
+        self.assertEqual(mepco_rows[0]["fuel_key"], "gasolina_automotriz_93")
+        self.assertEqual(mepco_rows[0]["resulting_tax"], Decimal("6.1234"))
+        self.assertEqual(mepco_rows[1]["component_variable"], Decimal("-0.0500"))
+
+    def test_sync_year_is_idempotent(self):
+        def fake_get(url):
+            if "utm" in url:
+                return self.UTM_HTML
+            return self.MEPCO_HTML
+
+        sync = SiiTaxIndicatorSync(http_get=fake_get)
+
+        first_stats = sync.sync_year(2026)
+        second_stats = sync.sync_year(2026)
+
+        self.assertEqual(first_stats, {"year": 2026, "utm_values": 2, "fuel_rates": 2})
+        self.assertEqual(second_stats, first_stats)
+        self.assertEqual(TaxIndicatorValue.objects.count(), 2)
+        self.assertEqual(FuelSpecificTaxRate.objects.count(), 2)
+
+    def test_tax_indicators_settings_view_lists_synced_values(self):
+        superadmin = get_user_model().objects.create_superuser(
+            username="tax-admin@example.com",
+            email="tax-admin@example.com",
+            password="test",
+        )
+        self.client.force_login(superadmin)
+        TaxIndicatorValue.objects.create(indicator="UTM", year=2026, month=1, value=Decimal("67294"))
+        FuelSpecificTaxRate.objects.create(
+            effective_date=date(2026, 6, 25),
+            fuel_name="Gasolina Automotriz 93",
+            fuel_key="gasolina_automotriz_93",
+            component_base=Decimal("6.0000"),
+            component_variable=Decimal("0.1234"),
+            resulting_tax=Decimal("6.1234"),
+            unit="UTM/m3",
+        )
+
+        response = self.client.get(reverse("settings_tax_indicators"), {"year": 2026})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Indicadores SII")
+        self.assertContains(response, "Gasolina Automotriz 93")
+        self.assertContains(response, "6.1234")
+
+    def test_tax_indicators_mepco_endpoint_returns_incremental_rows(self):
+        superadmin = get_user_model().objects.create_superuser(
+            username="tax-endpoint-admin@example.com",
+            email="tax-endpoint-admin@example.com",
+            password="test",
+        )
+        self.client.force_login(superadmin)
+        for index in range(3):
+            FuelSpecificTaxRate.objects.create(
+                effective_date=date(2026, 6, 25),
+                fuel_name=f"Gasolina Automotriz {index}",
+                fuel_key=f"gasolina_automotriz_{index}",
+                component_base=Decimal("6.0000"),
+                component_variable=Decimal("0.1234"),
+                resulting_tax=Decimal("6.1234"),
+                unit="UTM/m3",
+            )
+
+        response = self.client.get(
+            reverse("settings_tax_indicators_mepco_data"),
+            {"year": 2026, "offset": 1, "limit": 2},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 3)
+        self.assertEqual(payload["next_offset"], 3)
+        self.assertFalse(payload["has_more"])
+        self.assertEqual(len(payload["rows"]), 2)
+
+
+class InvoiceTaxCalculationTests(TestCase):
+    def test_calculates_non_fuel_invoice_iva_from_total(self):
+        calculation = calculate_invoice_taxes(
+            total=Decimal("119000"),
+            paid_at=date(2026, 7, 10),
+            document_type="Factura afecta",
+            policy="Oficina Central",
+        )
+
+        self.assertEqual(calculation.source, "auto")
+        self.assertEqual(calculation.iva_amount, Decimal("19000"))
+        self.assertEqual(calculation.specific_tax_amount, Decimal("0"))
+
+    def test_generic_gasoline_defaults_to_93_when_no_octane_is_selected(self):
+        user = get_user_model().objects.create_superuser(
+            username="tax-default-octane@example.com",
+            email="tax-default-octane@example.com",
+            password="test",
+        )
+        self.client.force_login(user)
+        TaxIndicatorValue.objects.create(indicator="UTM", year=2026, month=7, value=Decimal("68000"))
+        FuelSpecificTaxRate.objects.create(
+            effective_date=date(2026, 7, 1),
+            fuel_name="Gasolina Automotriz 93",
+            fuel_key="gasolina_automotriz_93",
+            component_base=Decimal("6.0000"),
+            component_variable=Decimal("0.1000"),
+            resulting_tax=Decimal("6.1000"),
+            unit="UTM/M3",
+        )
+        FuelSpecificTaxRate.objects.create(
+            effective_date=date(2026, 7, 1),
+            fuel_name="Gasolina Automotriz 97",
+            fuel_key="gasolina_automotriz_97",
+            component_base=Decimal("6.0000"),
+            component_variable=Decimal("0.5000"),
+            resulting_tax=Decimal("6.5000"),
+            unit="UTM/M3",
+        )
+
+        fuel_policy = CategoryCatalog.objects.update_or_create(
+            name="Combustibles",
+            defaults={"external_id": "policy-fuel-default-octane", "is_active": True},
+        )[0]
+        ExpenseTypeCatalog.objects.create(policy=fuel_policy, name="01 Bencina", is_active=True)
+        self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": fuel_policy.name,
+                "category_policy_id": str(fuel_policy.id),
+                "amount": "100.000",
+                "paid_at": "2026-07-10",
+                "new_supplier_name": "Proveedor Bencina Default",
+                "supplier_select": "Proveedor Bencina Default",
+                "rindegastos_document_type": "Factura afecta",
+                "fuel_liters": "50",
+                "expense_type_select": "01 Bencina",
+                "iva_amount": "0",
+                "specific_tax_amount": "0",
+                "tax_manual_override": "0",
+            },
+        )
+
+        expense = Expense.objects.get(supplier="Proveedor Bencina Default")
+        self.assertEqual(expense.gasoline_type, "93")
+        self.assertEqual(expense.specific_tax_amount, Decimal("20740"))
+        self.assertEqual(expense.tax_calculation_metadata["fuel_key"], "gasolina_automotriz_93")
+
+    def test_calculates_fuel_invoice_with_direct_93_rate(self):
+        TaxIndicatorValue.objects.create(indicator="UTM", year=2026, month=7, value=Decimal("68000"))
+        FuelSpecificTaxRate.objects.create(
+            effective_date=date(2026, 7, 1),
+            fuel_name="Gasolina Automotriz 93",
+            fuel_key="gasolina_automotriz_93",
+            component_base=Decimal("6.0000"),
+            component_variable=Decimal("0.1000"),
+            resulting_tax=Decimal("6.1000"),
+            unit="UTM/M3",
+        )
+
+        calculation = calculate_invoice_taxes(
+            total=Decimal("100000"),
+            paid_at=date(2026, 7, 10),
+            document_type="Factura afecta",
+            policy="Combustibles",
+            fuel_liters=Decimal("50"),
+            fuel_type="Bencina 93",
+        )
+
+        self.assertEqual(calculation.source, "auto")
+        self.assertEqual(calculation.specific_tax_amount, Decimal("20740"))
+        self.assertEqual(calculation.iva_amount, Decimal("12655"))
+        self.assertEqual(calculation.metadata["rate_strategy"], "sii_direct")
+        self.assertEqual(calculation.metadata["fuel_key"], "gasolina_automotriz_93")
+
+    def test_calculates_fuel_invoice_95_with_average_rate(self):
+        TaxIndicatorValue.objects.create(indicator="UTM", year=2026, month=7, value=Decimal("68000"))
+        FuelSpecificTaxRate.objects.create(
+            effective_date=date(2026, 7, 1),
+            fuel_name="Gasolina Automotriz 93",
+            fuel_key="gasolina_automotriz_93",
+            component_base=Decimal("6.0000"),
+            component_variable=Decimal("0.1000"),
+            resulting_tax=Decimal("6.1000"),
+            unit="UTM/M3",
+        )
+        FuelSpecificTaxRate.objects.create(
+            effective_date=date(2026, 7, 1),
+            fuel_name="Gasolina Automotriz 97",
+            fuel_key="gasolina_automotriz_97",
+            component_base=Decimal("6.0000"),
+            component_variable=Decimal("0.5000"),
+            resulting_tax=Decimal("6.5000"),
+            unit="UTM/M3",
+        )
+
+        calculation = calculate_invoice_taxes(
+            total=Decimal("100000"),
+            paid_at=date(2026, 7, 10),
+            document_type="Factura afecta",
+            policy="Combustibles",
+            fuel_liters=Decimal("50"),
+            fuel_type="Bencina 95",
+        )
+
+        self.assertEqual(calculation.source, "auto")
+        self.assertEqual(calculation.specific_tax_amount, Decimal("21420"))
+        self.assertEqual(calculation.metadata["rate_strategy"], "average_93_97")
+
+    def test_calculates_fuel_invoice_iva_as_residual_after_integer_net(self):
+        TaxIndicatorValue.objects.create(indicator="UTM", year=2026, month=7, value=Decimal("1000"))
+        FuelSpecificTaxRate.objects.create(
+            effective_date=date(2026, 7, 16),
+            fuel_name="Petróleo Diesel",
+            fuel_key="petroleo_diesel",
+            component_base=Decimal("0"),
+            component_variable=Decimal("0"),
+            resulting_tax=Decimal("42.1250"),
+            unit="UTM/M3",
+        )
+
+        calculation = calculate_invoice_taxes(
+            total=Decimal("49920"),
+            paid_at=date(2026, 7, 21),
+            document_type="Factura afecta",
+            policy="Combustibles",
+            fuel_liters=Decimal("40"),
+            fuel_type="02 Petróleo",
+        )
+
+        self.assertEqual(calculation.source, "auto")
+        self.assertEqual(calculation.specific_tax_amount, Decimal("1685"))
+        self.assertEqual(calculation.metadata["taxable_gross"], "48235")
+        self.assertEqual(calculation.metadata["net_amount"], "40533")
+        self.assertEqual(calculation.iva_amount, Decimal("7702"))
 
 
 class SystemUsersSettingsTests(TestCase):
