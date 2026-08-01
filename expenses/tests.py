@@ -18,6 +18,7 @@ from expenses.models import (
     CategoryCatalog,
     Expense,
     ExpenseAuditLog,
+    ExpenseNotification,
     ExpenseTypeCatalog,
     FuelSpecificTaxRate,
     RindegastosExpenseFieldCatalog,
@@ -26,11 +27,13 @@ from expenses.models import (
     TaxIndicatorValue,
     normalize_rut,
 )
+from expenses.tasks import send_expense_notification_task
 from expenses.invoice_tax_calculator import calculate_invoice_taxes
 from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
 from expenses.tax_indicators_sync import SiiTaxIndicatorSync
 from expenses.views import _expense_export_id, _find_similar_expenses, _missing_fields_for_parametrization, _rindegastos_note
+from expenses.whatsapp_notifications import build_rejection_payload, build_whatsapp_template_request
 
 LOCAL_TEST_STORAGES = {
     "default": {
@@ -1144,6 +1147,10 @@ class ExpenseApprovalFlowTests(TestCase):
         self.expense = Expense.objects.create(
             status="completed",
             supplier="Proveedor",
+            amount=Decimal("50000"),
+            currency="CLP",
+            wa_sender_phone="56911111111",
+            wa_phone_number_id="phone-number-id",
         )
 
     def test_reviewer_can_approve_only_parametrized_expense(self):
@@ -1161,6 +1168,77 @@ class ExpenseApprovalFlowTests(TestCase):
                 action="approved",
                 actor=self.reviewer,
             ).exists()
+        )
+
+    @patch("expenses.views.enqueue_notification_send", return_value=True)
+    def test_reject_requires_reason_and_creates_single_notification(self, enqueue_mock):
+        self.client.force_login(self.reviewer)
+
+        self.client.post(reverse("expense_action", args=[self.expense.pk, "reject"]), {"reason": ""})
+        self.expense.refresh_from_db()
+        self.assertEqual(self.expense.status, "completed")
+        self.assertEqual(ExpenseNotification.objects.count(), 0)
+
+        self.client.post(
+            reverse("expense_action", args=[self.expense.pk, "reject"]),
+            {"reason": "El comprobante no permite validar el monto."},
+        )
+        self.expense.refresh_from_db()
+        self.assertEqual(self.expense.status, "rejected")
+        self.assertEqual(self.expense.decision_by, self.reviewer)
+        self.assertIsNotNone(self.expense.decision_at)
+        self.assertEqual(self.expense.rejection_reason, "El comprobante no permite validar el monto.")
+        self.assertEqual(ExpenseNotification.objects.count(), 1)
+        notification = ExpenseNotification.objects.get()
+        self.assertEqual(notification.recipient, "56911111111")
+        self.assertEqual(notification.status, "pending")
+        self.assertEqual(notification.payload["trace_id"], _expense_export_id(self.expense.pk))
+        self.assertEqual(notification.payload["template_parameters"][2], "El comprobante no permite validar el monto.")
+        enqueue_mock.assert_called_once_with(notification)
+
+        self.client.post(
+            reverse("expense_action", args=[self.expense.pk, "reject"]),
+            {"reason": "Segundo click"},
+        )
+        self.assertEqual(ExpenseNotification.objects.count(), 1)
+
+    def test_rejection_payload_includes_trace_amount_supplier_and_reason(self):
+        self.expense.rejection_reason = "Factura ilegible"
+        payload = build_rejection_payload(self.expense)
+
+        self.assertEqual(payload["trace_id"], _expense_export_id(self.expense.pk))
+        self.assertEqual(payload["amount"], "$50.000 CLP")
+        self.assertEqual(payload["supplier"], "Proveedor")
+        self.assertEqual(payload["summary"], "$50.000 CLP (Proveedor)")
+        self.assertEqual(payload["reason"], "Factura ilegible")
+        self.assertEqual(payload["header_parameters"], [_expense_export_id(self.expense.pk)])
+        self.assertEqual(
+            payload["template_parameters"],
+            [_expense_export_id(self.expense.pk), "$50.000 CLP (Proveedor)", "Factura ilegible"],
+        )
+
+    def test_template_request_includes_header_and_body_variables(self):
+        self.expense.decision_at = timezone.now()
+        self.expense.rejection_reason = "Factura ilegible"
+        self.expense.save(update_fields=["decision_at", "rejection_reason"])
+        notification = ExpenseNotification.objects.create(
+            expense=self.expense,
+            recipient="56911111111",
+            decision_at=self.expense.decision_at,
+            template_name="rechazo_rendicion",
+            template_language="es_CL",
+            payload=build_rejection_payload(self.expense),
+        )
+
+        request_payload = build_whatsapp_template_request(notification)
+
+        components = request_payload["template"]["components"]
+        self.assertEqual(components[0]["type"], "header")
+        self.assertEqual(components[0]["parameters"][0]["text"], _expense_export_id(self.expense.pk))
+        self.assertEqual(components[1]["type"], "body")
+        self.assertEqual(
+            [parameter["text"] for parameter in components[1]["parameters"]],
+            [_expense_export_id(self.expense.pk), "$50.000 CLP (Proveedor)", "Factura ilegible"],
         )
 
     def test_final_expense_cannot_be_edited_or_deleted_by_reviewer(self):
@@ -1216,6 +1294,7 @@ class ExpenseApprovalFlowTests(TestCase):
         self.expense.status = "approved"
         self.expense.decision_by = self.reviewer
         self.expense.decision_at = timezone.now()
+        self.expense.rejection_reason = "Debe limpiarse"
         self.expense.save()
 
         self.client.force_login(self.reviewer)
@@ -1229,6 +1308,7 @@ class ExpenseApprovalFlowTests(TestCase):
         self.assertEqual(self.expense.status, "completed")
         self.assertIsNone(self.expense.decision_by)
         self.assertIsNone(self.expense.decision_at)
+        self.assertEqual(self.expense.rejection_reason, "")
         self.assertTrue(
             ExpenseAuditLog.objects.filter(
                 expense=self.expense,
@@ -1236,6 +1316,69 @@ class ExpenseApprovalFlowTests(TestCase):
                 actor=self.superadmin,
             ).exists()
         )
+
+    @override_settings(WA_ACCESS_TOKEN="token", WA_NOTIFICATION_MAX_ATTEMPTS=2)
+    @patch("expenses.whatsapp_notifications.requests.post")
+    def test_send_notification_task_marks_sent_and_stores_provider_id(self, post_mock):
+        self.expense.status = "rejected"
+        self.expense.decision_at = timezone.now()
+        self.expense.rejection_reason = "Factura ilegible"
+        self.expense.save()
+        notification = ExpenseNotification.objects.create(
+            expense=self.expense,
+            recipient="56911111111",
+            decision_at=self.expense.decision_at,
+            template_name="expense_rejection",
+            template_language="es_CL",
+            payload=build_rejection_payload(self.expense),
+        )
+        post_mock.return_value.status_code = 200
+        post_mock.return_value.json.return_value = {"messages": [{"id": "wamid.123"}]}
+
+        result = send_expense_notification_task(notification.id)
+
+        notification.refresh_from_db()
+        self.assertEqual(result["status"], "sent")
+        self.assertEqual(notification.status, "sent")
+        self.assertEqual(notification.provider_message_id, "wamid.123")
+        self.assertEqual(notification.payload["last_provider_status_code"], 200)
+
+    @override_settings(WA_ACCESS_TOKEN="token", WA_NOTIFICATION_MAX_ATTEMPTS=2)
+    @patch("expenses.whatsapp_notifications.requests.post")
+    def test_send_notification_task_retries_transient_errors_and_fails_permanent_errors(self, post_mock):
+        self.expense.status = "rejected"
+        self.expense.decision_at = timezone.now()
+        self.expense.rejection_reason = "Factura ilegible"
+        self.expense.save()
+        notification = ExpenseNotification.objects.create(
+            expense=self.expense,
+            recipient="56911111111",
+            decision_at=self.expense.decision_at,
+            template_name="expense_rejection",
+            template_language="es_CL",
+            payload=build_rejection_payload(self.expense),
+        )
+        post_mock.return_value.status_code = 500
+        post_mock.return_value.json.return_value = {"error": {"message": "Temporal"}}
+
+        result = send_expense_notification_task(notification.id)
+
+        notification.refresh_from_db()
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(notification.status, "pending")
+        self.assertIsNotNone(notification.next_retry_at)
+
+        notification.next_retry_at = timezone.now()
+        notification.save(update_fields=["next_retry_at"])
+        post_mock.return_value.status_code = 400
+        post_mock.return_value.json.return_value = {"error": {"message": "Plantilla inválida"}}
+
+        result = send_expense_notification_task(notification.id)
+
+        notification.refresh_from_db()
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(notification.status, "failed")
+        self.assertIn("HTTP 400", notification.last_error)
 
 
 class RindegastosFieldsSettingsTests(TestCase):

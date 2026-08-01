@@ -15,6 +15,7 @@ from expenses.models import (
     ExpenseAuditLog,
     WhatsAppExpenseConversation,
 )
+from expenses.whatsapp_notifications import expense_trace_id, format_expense_amount
 import hashlib, mimetypes
 
 GRAPH_URL = "https://graph.facebook.com/v24.0"
@@ -254,6 +255,7 @@ def whatsapp_webhook(request):
                 wa_sender_phone=from_number,
                 wa_sender=sender,
                 wa_media_id=image_id,
+                wa_phone_number_id=phone_number_id,
                 message_sent_at=msg_dt,
                 status="incomplete",
                 source="whatsapp",
@@ -566,7 +568,9 @@ def whatsapp_webhook(request):
                 user_comment = f"[{reporter_label(sender)}]\n{comment}"
                 exp.notes = f"{exp.notes.rstrip()}\n\n{user_comment}" if exp.notes.strip() else user_comment
                 exp.status = "pending"
-                exp.save(update_fields=["notes", "status"])
+                if not exp.wa_phone_number_id:
+                    exp.wa_phone_number_id = phone_number_id
+                exp.save(update_fields=["notes", "status", "wa_phone_number_id"])
                 log_whatsapp_event(
                     exp,
                     action="whatsapp_update",
@@ -578,10 +582,17 @@ def whatsapp_webhook(request):
                 )
 
                 finish_conversation(from_number)
+                final_lines = [
+                    "✅ Gasto registrado correctamente.",
+                    "",
+                    f"ID: {expense_trace_id(exp)}",
+                ]
+                if exp.amount is not None:
+                    final_lines.append(f"Monto: {format_expense_amount(exp)}")
                 send_whatsapp_reply(
                     phone_number_id,
                     from_number,
-                    "✅ Gasto registrado con comentario. ¡Gracias!",
+                    "\n".join(final_lines),
                 )
                 return HttpResponse(status=200)
 

@@ -3,6 +3,7 @@ import base64
 import csv
 import hashlib
 import hmac
+import logging
 import re
 import secrets
 from datetime import datetime
@@ -10,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Max, Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
@@ -22,6 +24,7 @@ from .models import (
     AllowedSender,
     CategoryCatalog,
     ExpenseAuditLog,
+    ExpenseNotification,
     ExpenseTypeCatalog,
     FuelSpecificTaxRate,
     RindegastosExpenseFieldCatalog,
@@ -42,6 +45,7 @@ from .rindegastos_client import RindegastosAPIError
 from .rindegastos_sync import RindegastosCatalogSync
 from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, default_uploaded_sync_since
 from .tax_indicators_sync import SiiTaxIndicatorSync
+from .whatsapp_notifications import create_rejection_notification, enqueue_notification_send
 
 
 ALLOWED_RECEIPT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
@@ -62,6 +66,9 @@ RINDEGASTOS_POLICIES = [
     "Curimon III",
     "Autopista de Antofagasta 2026",
 ]
+
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -1117,7 +1124,7 @@ def expense_list(request):
     can_manage_expenses = _can_manage_expenses(request.user)
     gastos = list(
         Expense.objects.select_related("created_by", "wa_sender", "decision_by")
-        .prefetch_related("attachments", "audit_logs")
+        .prefetch_related("attachments", "audit_logs", "notifications")
         .order_by("-created_at")
     )
     senders_by_phone = {
@@ -1140,8 +1147,23 @@ def expense_list(request):
         logs = list(gasto.audit_logs.all())
         gasto.audit_entries = logs[:5]
         gasto.audit_entries_all = logs
+        notifications = list(gasto.notifications.all())
+        gasto.rejection_notification = next(
+            (
+                notification
+                for notification in notifications
+                if notification.notification_type == ExpenseNotification.TYPE_REJECTION
+                and notification.channel == ExpenseNotification.CHANNEL_WHATSAPP
+            ),
+            None,
+        )
         gasto.can_approve_or_reject = _can_decide_expenses(request.user) and gasto.status == "completed"
         gasto.can_revert_decision = request.user.is_superuser and _is_final_expense(gasto)
+        gasto.can_retry_rejection_notification = (
+            request.user.is_superuser
+            and gasto.rejection_notification
+            and gasto.rejection_notification.status == ExpenseNotification.STATUS_FAILED
+        )
         gasto.is_locked = _is_final_expense(gasto)
         gasto.can_manage = can_manage_expenses
         gasto.split_label = ""
@@ -1421,26 +1443,48 @@ def expense_action(request, pk: int, action: str):
         if not _can_decide_expenses(request.user):
             messages.error(request, "No tienes permisos para rechazar gastos.")
             return redirect("expense_list")
-        if expense.status != "completed":
-            messages.error(request, "Solo se puede rechazar un gasto parametrizado.")
+        if not reason:
+            messages.error(request, "Debes indicar el motivo del rechazo.")
             return redirect("expense_list")
-        old_status = expense.status
-        expense.status = "rejected"
-        expense.decision_by = request.user
-        expense.decision_at = timezone.now()
-        expense.save(update_fields=["status", "decision_by", "decision_at"])
-        _log_expense_event(
-            expense,
-            action="rejected",
-            actor=request.user,
-            reason=reason,
-            changes={
-                "status": {"before": old_status, "after": expense.status},
-                "decision_by": {"before": None, "after": request.user.email},
-                "decision_at": {"before": None, "after": expense.decision_at.isoformat()},
-            },
-        )
-        messages.warning(request, "Gasto rechazado.")
+
+        with transaction.atomic():
+            expense = Expense.objects.select_for_update().get(pk=pk)
+            if expense.status != "completed":
+                messages.error(request, "Solo se puede rechazar un gasto parametrizado.")
+                return redirect("expense_list")
+            old_status = expense.status
+            old_reason = expense.rejection_reason
+            expense.status = "rejected"
+            expense.decision_by = request.user
+            expense.decision_at = timezone.now()
+            expense.rejection_reason = reason
+            expense.save(update_fields=["status", "decision_by", "decision_at", "rejection_reason"])
+            _log_expense_event(
+                expense,
+                action="rejected",
+                actor=request.user,
+                reason=reason,
+                changes={
+                    "status": {"before": old_status, "after": expense.status},
+                    "decision_by": {"before": None, "after": request.user.email},
+                    "decision_at": {"before": None, "after": expense.decision_at.isoformat()},
+                    "rejection_reason": {"before": old_reason, "after": reason},
+                },
+            )
+
+        try:
+            notification = create_rejection_notification(expense)
+            enqueued = enqueue_notification_send(notification)
+        except Exception:
+            logger.exception("No se pudo crear notificación WhatsApp de rechazo para gasto %s.", expense.id)
+            notification = None
+            enqueued = False
+        if notification and enqueued:
+            messages.warning(request, "Gasto rechazado. La notificación WhatsApp quedó en proceso.")
+        elif notification:
+            messages.warning(request, "Gasto rechazado. La notificación WhatsApp quedó pendiente de reintento.")
+        else:
+            messages.warning(request, "Gasto rechazado. No se pudo crear la notificación WhatsApp.")
         return redirect("expense_list")
 
     if action == "revert_decision":
@@ -1453,10 +1497,12 @@ def expense_action(request, pk: int, action: str):
         old_status = expense.status
         old_decision_by = expense.decision_by.email if expense.decision_by else ""
         old_decision_at = expense.decision_at.isoformat() if expense.decision_at else None
+        old_rejection_reason = expense.rejection_reason
         expense.status = "completed"
         expense.decision_by = None
         expense.decision_at = None
-        expense.save(update_fields=["status", "decision_by", "decision_at"])
+        expense.rejection_reason = ""
+        expense.save(update_fields=["status", "decision_by", "decision_at", "rejection_reason"])
         _log_expense_event(
             expense,
             action="decision_reverted",
@@ -1466,9 +1512,34 @@ def expense_action(request, pk: int, action: str):
                 "status": {"before": old_status, "after": expense.status},
                 "decision_by": {"before": old_decision_by, "after": None},
                 "decision_at": {"before": old_decision_at, "after": None},
+                "rejection_reason": {"before": old_rejection_reason, "after": ""},
             },
         )
         messages.success(request, "La decisión fue revertida. El gasto volvió a Parametrizado.")
+        return redirect("expense_list")
+
+    if action == "retry_notification":
+        if not request.user.is_superuser:
+            messages.error(request, "Solo un superadmin puede reintentar notificaciones.")
+            return redirect("expense_list")
+        notification = (
+            expense.notifications.filter(
+                notification_type=ExpenseNotification.TYPE_REJECTION,
+                channel=ExpenseNotification.CHANNEL_WHATSAPP,
+                status=ExpenseNotification.STATUS_FAILED,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if not notification:
+            messages.error(request, "No hay una notificación fallida para reintentar.")
+            return redirect("expense_list")
+        notification.status = ExpenseNotification.STATUS_PENDING
+        notification.last_error = ""
+        notification.next_retry_at = timezone.now()
+        notification.save(update_fields=["status", "last_error", "next_retry_at", "updated_at"])
+        enqueue_notification_send(notification)
+        messages.success(request, "La notificación WhatsApp quedó pendiente de reintento.")
         return redirect("expense_list")
 
     if _is_final_expense(expense):

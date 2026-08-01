@@ -98,6 +98,8 @@ class Expense(models.Model):
         related_name="decided_expenses",
     )
     decision_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    wa_phone_number_id = models.CharField(max_length=128, blank=True, null=True)
     rindegastos_expense_id = models.CharField(max_length=255, blank=True, null=True, db_index=True)
     rindegastos_report_id = models.CharField(max_length=255, blank=True, null=True)
     rindegastos_uploaded_at = models.DateTimeField(null=True, blank=True)
@@ -387,3 +389,59 @@ class ExpenseAuditLog(models.Model):
 
     def __str__(self):
         return f"Expense #{self.expense_snapshot_id} - {self.action}"
+
+
+class ExpenseNotification(models.Model):
+    TYPE_REJECTION = "rejection"
+    CHANNEL_WHATSAPP = "whatsapp"
+
+    STATUS_PENDING = "pending"
+    STATUS_PROCESSING = "processing"
+    STATUS_SENT = "sent"
+    STATUS_FAILED = "failed"
+
+    TYPE_CHOICES = [
+        (TYPE_REJECTION, "Rechazo"),
+    ]
+    CHANNEL_CHOICES = [
+        (CHANNEL_WHATSAPP, "WhatsApp"),
+    ]
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pendiente"),
+        (STATUS_PROCESSING, "Procesando"),
+        (STATUS_SENT, "Enviada"),
+        (STATUS_FAILED, "Fallida"),
+    ]
+
+    expense = models.ForeignKey(
+        Expense,
+        related_name="notifications",
+        on_delete=models.CASCADE,
+    )
+    notification_type = models.CharField(max_length=32, choices=TYPE_CHOICES, default=TYPE_REJECTION)
+    channel = models.CharField(max_length=32, choices=CHANNEL_CHOICES, default=CHANNEL_WHATSAPP)
+    recipient = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    decision_at = models.DateTimeField()
+    template_name = models.CharField(max_length=128, blank=True)
+    template_language = models.CharField(max_length=16, blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    provider_message_id = models.CharField(max_length=255, blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    last_error = models.TextField(blank=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["expense", "notification_type", "channel", "decision_at"],
+                name="uniq_expense_notification_decision",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.get_notification_type_display()} {self.get_channel_display()} - gasto #{self.expense_id}"

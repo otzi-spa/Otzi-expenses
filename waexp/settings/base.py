@@ -170,6 +170,9 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@expenses.otz
 VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "otzi_whatsapp_secret")
 WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "").strip() or os.environ.get("WA_TEMPORARY_TOKEN", "").strip()
 WA_TEMPORARY_TOKEN = WA_ACCESS_TOKEN
+WA_REJECTION_TEMPLATE_NAME = os.environ.get("WA_REJECTION_TEMPLATE_NAME", "expense_rejection").strip()
+WA_REJECTION_TEMPLATE_LANGUAGE = os.environ.get("WA_REJECTION_TEMPLATE_LANGUAGE", "es_CL").strip()
+WA_NOTIFICATION_MAX_ATTEMPTS = int(os.environ.get("WA_NOTIFICATION_MAX_ATTEMPTS", "3"))
 
 _csrf_base = {
     "https://*.ngrok-free.dev",

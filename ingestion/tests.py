@@ -9,6 +9,7 @@ from django.test.utils import override_settings
 from django.utils import timezone
 
 from expenses.models import AllowedSender, Expense, WhatsAppExpenseConversation
+from expenses.views import _expense_export_id
 from ingestion.api.views_webhook import parse_nonnegative_decimal, user_states
 
 
@@ -81,6 +82,7 @@ class WhatsAppFuelFlowTests(TestCase):
         self.assertEqual(expense.status, "incomplete")
         self.assertIsNone(expense.created_by)
         self.assertEqual(expense.wa_sender.phone, self.phone)
+        self.assertEqual(expense.wa_phone_number_id, self.phone_number_id)
         conversation = WhatsAppExpenseConversation.objects.get(expense=expense)
         self.assertTrue(conversation.is_active)
         self.assertEqual(conversation.stage, "awaiting_doc_type")
@@ -104,6 +106,7 @@ class WhatsAppFuelFlowTests(TestCase):
         self.assertEqual(expense.fuel_liters, Decimal("45.5"))
         self.assertEqual(expense.notes, "[Juan Pérez]\nCarga para faena norte")
         self.assertEqual(expense.status, "pending")
+        self.assertIn(f"ID: {_expense_export_id(expense.pk)}", reply_mock.call_args.args[2])
         self.assertEqual(user_states[self.phone]["stage"], "done")
         conversation.refresh_from_db()
         self.assertFalse(conversation.is_active)

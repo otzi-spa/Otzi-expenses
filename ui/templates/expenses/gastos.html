@@ -502,6 +502,19 @@
                 {% endif %}
               </div>
             {% endif %}
+            {% if gasto.rejection_notification %}
+              <div class="fs-8 mt-1">
+                {% if gasto.rejection_notification.status == "sent" %}
+                  <span class="badge badge-light-success">WA enviada</span>
+                {% elif gasto.rejection_notification.status == "failed" %}
+                  <span class="badge badge-light-danger">WA fallida</span>
+                {% elif gasto.rejection_notification.status == "processing" %}
+                  <span class="badge badge-light-primary">WA procesando</span>
+                {% else %}
+                  <span class="badge badge-light-warning">WA pendiente</span>
+                {% endif %}
+              </div>
+            {% endif %}
           </td>
           <td data-order="{{ gasto.message_sent_at|date:'Y-m-d H:i:s' }}" data-filter-date="{{ gasto.message_sent_at|date:'Y-m-d' }}">{{ gasto.message_sent_at|localtime|date:"d/m/Y H:i"|default:"-" }}</td>
           <td data-filter-value="{% if gasto.attachments.all %}Sí{% else %}No{% endif %}">
@@ -517,7 +530,7 @@
               {% endif %}
             {% endwith %}
           </td>
-          <td data-filter-value="{% if gasto.can_approve_or_reject %}aprobar rechazar {% endif %}{% if gasto.can_revert_decision %}revertir {% endif %}{% if can_manage_expenses %}ver editar dividir{% else %}ver{% endif %}">
+          <td data-filter-value="{% if gasto.can_approve_or_reject %}aprobar rechazar {% endif %}{% if gasto.can_revert_decision %}revertir {% endif %}{% if gasto.can_retry_rejection_notification %}reintentar notificacion {% endif %}{% if can_manage_expenses %}ver editar dividir{% else %}ver{% endif %}">
             <div class="dropdown expenses-actions">
               <button
                 type="button"
@@ -551,16 +564,25 @@
                     Aprobar gasto
                   </button>
                 </form>
-                <form method="post" action="{% url 'expense_action' gasto.pk 'reject' %}">
-                  {% csrf_token %}
-                  <button type="submit" class="dropdown-item text-danger" {% if not gasto.can_approve_or_reject %}disabled{% endif %}>
-                    Rechazar gasto
-                  </button>
-                </form>
+                <button
+                  type="button"
+                  class="dropdown-item text-danger"
+                  data-bs-toggle="modal"
+                  data-bs-target="#rejectExpenseModal{{ gasto.pk }}"
+                  {% if not gasto.can_approve_or_reject %}disabled{% endif %}
+                >
+                  Rechazar gasto
+                </button>
               {% if gasto.can_revert_decision %}
                 <form method="post" action="{% url 'expense_action' gasto.pk 'revert_decision' %}" onsubmit="return confirm('¿Revertir esta decisión y devolver el gasto a Parametrizado?')">
                   {% csrf_token %}
                   <button type="submit" class="dropdown-item text-primary">Revertir decisión</button>
+                </form>
+              {% endif %}
+              {% if gasto.can_retry_rejection_notification %}
+                <form method="post" action="{% url 'expense_action' gasto.pk 'retry_notification' %}">
+                  {% csrf_token %}
+                  <button type="submit" class="dropdown-item text-primary">Reintentar notificación</button>
                 </form>
               {% endif %}
               {% if request.user.is_superuser %}
@@ -608,6 +630,41 @@
     {% endfor %}
 
     {% for gasto in gastos %}
+    <div class="modal fade" id="rejectExpenseModal{{ gasto.pk }}" tabindex="-1" aria-labelledby="rejectExpenseModalLabel{{ gasto.pk }}" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <form method="post" action="{% url 'expense_action' gasto.pk 'reject' %}">
+            {% csrf_token %}
+            <div class="modal-header">
+              <h5 class="modal-title" id="rejectExpenseModalLabel{{ gasto.pk }}">Rechazar gasto {{ gasto.export_id }}</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <div class="text-muted small">Proveedor: {{ gasto.supplier|default:"-" }}</div>
+                <div class="text-muted small">Monto: {% if gasto.amount %}${{ gasto.amount|cl_currency }} {{ gasto.currency|default:"CLP" }}{% else %}-{% endif %}</div>
+              </div>
+              <label class="form-label" for="rejectReason{{ gasto.pk }}">Motivo del rechazo</label>
+              <textarea
+                id="rejectReason{{ gasto.pk }}"
+                name="reason"
+                class="form-control"
+                rows="4"
+                maxlength="2000"
+                required
+                placeholder="Ejemplo: El comprobante no permite validar el monto."
+              ></textarea>
+              <div class="form-text">Este motivo se enviará al usuario que reportó el gasto por WhatsApp.</div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+              <button type="submit" class="btn btn-danger">Confirmar rechazo</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
     <div class="modal fade expense-edit-modal" id="expenseModal{{ gasto.pk }}" tabindex="-1" aria-labelledby="expenseModalLabel{{ gasto.pk }}" aria-hidden="true">
       <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
@@ -648,6 +705,9 @@
                     {% endif %}
                     {% if gasto.decision_at %}el {{ gasto.decision_at|localtime|date:'d/m/Y H:i' }}{% endif %}.
                     El gasto está bloqueado y no puede volver a parametrizarse.
+                    {% if gasto.rejection_reason %}
+                      <div class="mt-2">Motivo: {{ gasto.rejection_reason }}</div>
+                    {% endif %}
                   </div>
                 </div>
                 {% endif %}
@@ -868,6 +928,7 @@
                               <div class="fw-semibold text-secondary">WhatsApp</div>
                               <div>ID mensaje: {{ gasto.wa_message_id|default:"-" }}</div>
                               <div>Teléfono: {{ gasto.wa_sender_phone|default:"-" }}</div>
+                              <div>ID número empresa: {{ gasto.wa_phone_number_id|default:"-" }}</div>
                               <div>Fuente: {{ gasto.source|default:"-" }}</div>
                             </div>
                             <div class="col-sm-6">
@@ -882,6 +943,19 @@
                               <div>ID gasto: {{ gasto.rindegastos_expense_id|default:"-" }}</div>
                               <div>ID informe: {{ gasto.rindegastos_report_id|default:"-" }}</div>
                               <div>Última sync: {{ gasto.rindegastos_synced_at|localtime|date:'d/m/Y H:i'|default:"-" }}</div>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="fw-semibold text-secondary">Notificación WhatsApp</div>
+                              {% if gasto.rejection_notification %}
+                                <div>Estado: {{ gasto.rejection_notification.get_status_display }}</div>
+                                <div>Intentos: {{ gasto.rejection_notification.attempt_count }}</div>
+                                <div>Enviada: {{ gasto.rejection_notification.sent_at|localtime|date:'d/m/Y H:i'|default:"-" }}</div>
+                                {% if gasto.rejection_notification.last_error %}
+                                  <div>Error: {{ gasto.rejection_notification.last_error }}</div>
+                                {% endif %}
+                              {% else %}
+                                <div>Sin notificación registrada.</div>
+                              {% endif %}
                             </div>
                           </div>
                           <hr>
@@ -1019,6 +1093,23 @@
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
           </div>
           <div class="modal-body">
+            {% if gasto.rejection_notification %}
+              <div class="border rounded p-3 mb-5">
+                <div class="fw-bold mb-1">Notificación WhatsApp de rechazo</div>
+                <div class="text-muted small">Estado: {{ gasto.rejection_notification.get_status_display }}</div>
+                <div class="text-muted small">Destinatario: {{ gasto.rejection_notification.recipient|default:"-" }}</div>
+                <div class="text-muted small">Intentos: {{ gasto.rejection_notification.attempt_count }}</div>
+                {% if gasto.rejection_notification.sent_at %}
+                  <div class="text-muted small">Enviada: {{ gasto.rejection_notification.sent_at|localtime|date:'d/m/Y H:i' }}</div>
+                {% endif %}
+                {% if gasto.rejection_notification.provider_message_id %}
+                  <div class="text-muted small">ID proveedor: {{ gasto.rejection_notification.provider_message_id }}</div>
+                {% endif %}
+                {% if gasto.rejection_notification.last_error %}
+                  <div class="text-danger small mt-2">Último error: {{ gasto.rejection_notification.last_error }}</div>
+                {% endif %}
+              </div>
+            {% endif %}
             {% if gasto.audit_entries_all %}
               <div class="timeline-label">
                 {% for log in gasto.audit_entries_all %}
