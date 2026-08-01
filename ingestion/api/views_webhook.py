@@ -15,7 +15,7 @@ from expenses.models import (
     ExpenseAuditLog,
     WhatsAppExpenseConversation,
 )
-from expenses.whatsapp_notifications import expense_trace_id, format_expense_amount
+from expenses.whatsapp_notifications import expense_trace_id
 import hashlib, mimetypes
 
 GRAPH_URL = "https://graph.facebook.com/v24.0"
@@ -587,8 +587,6 @@ def whatsapp_webhook(request):
                     "",
                     f"ID: {expense_trace_id(exp)}",
                 ]
-                if exp.amount is not None:
-                    final_lines.append(f"Monto: {format_expense_amount(exp)}")
                 send_whatsapp_reply(
                     phone_number_id,
                     from_number,
