@@ -130,7 +130,8 @@ def build_whatsapp_template_request(notification: ExpenseNotification) -> dict:
 def send_whatsapp_template(notification: ExpenseNotification) -> WhatsAppTemplateResponse:
     if not notification.recipient:
         raise WhatsAppNotificationError("Falta teléfono destino.", permanent=True)
-    if not notification.expense.wa_phone_number_id:
+    phone_number_id = notification.expense.wa_phone_number_id or settings.WA_PHONE_NUMBER_ID
+    if not phone_number_id:
         raise WhatsAppNotificationError("Falta identificador del número empresarial de WhatsApp.", permanent=True)
     if not settings.WA_ACCESS_TOKEN:
         raise WhatsAppNotificationError("Falta WA_ACCESS_TOKEN.", permanent=True)
@@ -139,7 +140,7 @@ def send_whatsapp_template(notification: ExpenseNotification) -> WhatsAppTemplat
     if not notification.template_language:
         raise WhatsAppNotificationError("Falta idioma de plantilla WhatsApp.", permanent=True)
 
-    url = f"{GRAPH_URL}/{notification.expense.wa_phone_number_id}/messages"
+    url = f"{GRAPH_URL}/{phone_number_id}/messages"
     response = requests.post(
         url,
         headers={

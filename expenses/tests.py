@@ -1317,7 +1317,7 @@ class ExpenseApprovalFlowTests(TestCase):
             ).exists()
         )
 
-    @override_settings(WA_ACCESS_TOKEN="token", WA_NOTIFICATION_MAX_ATTEMPTS=2)
+    @override_settings(WA_ACCESS_TOKEN="token", WA_NOTIFICATION_MAX_ATTEMPTS=2, WA_PHONE_NUMBER_ID="")
     @patch("expenses.whatsapp_notifications.requests.post")
     def test_send_notification_task_marks_sent_and_stores_provider_id(self, post_mock):
         self.expense.status = "rejected"
@@ -1343,7 +1343,30 @@ class ExpenseApprovalFlowTests(TestCase):
         self.assertEqual(notification.provider_message_id, "wamid.123")
         self.assertEqual(notification.payload["last_provider_status_code"], 200)
 
-    @override_settings(WA_ACCESS_TOKEN="token", WA_NOTIFICATION_MAX_ATTEMPTS=2)
+    @override_settings(WA_ACCESS_TOKEN="token", WA_PHONE_NUMBER_ID="fallback-phone-number-id")
+    @patch("expenses.whatsapp_notifications.requests.post")
+    def test_send_notification_uses_configured_phone_number_id_when_expense_does_not_have_one(self, post_mock):
+        self.expense.status = "rejected"
+        self.expense.decision_at = timezone.now()
+        self.expense.rejection_reason = "Factura ilegible"
+        self.expense.wa_phone_number_id = ""
+        self.expense.save()
+        notification = ExpenseNotification.objects.create(
+            expense=self.expense,
+            recipient="56911111111",
+            decision_at=self.expense.decision_at,
+            template_name="expense_rejection",
+            template_language="es_CL",
+            payload=build_rejection_payload(self.expense),
+        )
+        post_mock.return_value.status_code = 200
+        post_mock.return_value.json.return_value = {"messages": [{"id": "wamid.123"}]}
+
+        send_expense_notification_task(notification.id)
+
+        self.assertIn("/fallback-phone-number-id/messages", post_mock.call_args.args[0])
+
+    @override_settings(WA_ACCESS_TOKEN="token", WA_NOTIFICATION_MAX_ATTEMPTS=2, WA_PHONE_NUMBER_ID="")
     @patch("expenses.whatsapp_notifications.requests.post")
     def test_send_notification_task_retries_transient_errors_and_fails_permanent_errors(self, post_mock):
         self.expense.status = "rejected"
