@@ -108,6 +108,64 @@ class Expense(models.Model):
     rindegastos_status = models.CharField(max_length=255, blank=True, null=True)
     rindegastos_raw_payload = models.JSONField(default=dict, blank=True)
 
+
+class RindegastosReconcileRun(models.Model):
+    STATUS_RUNNING = "running"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    since = models.DateField(null=True, blank=True)
+    until = models.DateField(null=True, blank=True)
+    max_pages = models.PositiveIntegerField(null=True, blank=True)
+    fetched_count = models.PositiveIntegerField(default=0)
+    matched_count = models.PositiveIntegerField(default=0)
+    changed_count = models.PositiveIntegerField(default=0)
+    diff_count = models.PositiveIntegerField(default=0)
+    error_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=16, default=STATUS_RUNNING)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-started_at",)
+        verbose_name = "Corrida reconciliación Rindegastos"
+        verbose_name_plural = "Corridas reconciliación Rindegastos"
+
+    def __str__(self):
+        return f"Reconciliación Rindegastos #{self.pk or 'nueva'} - {self.status}"
+
+
+class RindegastosExpenseSnapshot(models.Model):
+    expense = models.ForeignKey(Expense, on_delete=models.CASCADE, related_name="rindegastos_snapshots")
+    run = models.ForeignKey(
+        RindegastosReconcileRun,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="snapshots",
+    )
+    rindegastos_expense_id = models.CharField(max_length=64, db_index=True)
+    rindegastos_report_id = models.CharField(max_length=64, blank=True)
+    payload_hash = models.CharField(max_length=64, db_index=True)
+    normalized_payload = models.JSONField(default=dict)
+    raw_payload = models.JSONField(default=dict)
+    source_endpoint = models.CharField(max_length=32, default="getExpense")
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["expense", "payload_hash"]),
+            models.Index(fields=["rindegastos_expense_id", "fetched_at"]),
+        ]
+        ordering = ("-fetched_at",)
+        verbose_name = "Snapshot gasto Rindegastos"
+        verbose_name_plural = "Snapshots gastos Rindegastos"
+
+    def __str__(self):
+        return f"Snapshot Rindegastos {self.rindegastos_expense_id} - gasto #{self.expense_id}"
+
+
 class Attachment(models.Model):
     expense = models.ForeignKey(Expense, related_name="attachments", on_delete=models.CASCADE)
     file = models.FileField(upload_to="receipts/")

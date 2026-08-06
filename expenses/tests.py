@@ -21,7 +21,9 @@ from expenses.models import (
     ExpenseNotification,
     ExpenseTypeCatalog,
     FuelSpecificTaxRate,
+    RindegastosExpenseSnapshot,
     RindegastosExpenseFieldCatalog,
+    RindegastosReconcileRun,
     RindegastosTaxCatalog,
     SupplierCatalog,
     TaxIndicatorValue,
@@ -30,6 +32,11 @@ from expenses.models import (
 from expenses.tasks import send_expense_notification_task
 from expenses.invoice_tax_calculator import calculate_invoice_taxes
 from expenses.rindegastos_client import RindegastosClient
+from expenses.rindegastos_reconcile import (
+    RindegastosExpenseReconciler,
+    normalize_rindegastos_expense,
+    normalized_payload_hash,
+)
 from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
 from expenses.tax_indicators_sync import SiiTaxIndicatorSync
@@ -277,6 +284,109 @@ class RindegastosClientTests(TestCase):
             },
             timeout=20,
         )
+
+
+class RindegastosExpenseReconcilerTests(TestCase):
+    def test_normalized_payload_hash_is_stable_for_key_order(self):
+        left = normalize_rindegastos_expense(
+            {
+                "Id": 987,
+                "Supplier": " Proveedor   Uno ",
+                "Total": "5900",
+                "ExpenseExtraFields": [{"Name": "Centro de Costo / Faena", "Value": " Taller "}],
+            }
+        )
+        right = normalize_rindegastos_expense(
+            {
+                "ExpenseExtraFields": [{"Value": "Taller", "Name": "Centro de Costo / Faena"}],
+                "Total": 5900,
+                "Supplier": "Proveedor Uno",
+                "Id": 987,
+            }
+        )
+
+        self.assertEqual(left, right)
+        self.assertEqual(normalized_payload_hash(left), normalized_payload_hash(right))
+
+    def test_reconcile_dry_run_does_not_create_snapshot_or_run(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "Supplier": "Proveedor",
+                        "Total": 5900,
+                        "IntegrationCode": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "Supplier": "Proveedor",
+                    "Total": 5900,
+                    "IntegrationCode": expense.rindegastos_integration_code,
+                }
+
+        stats = RindegastosExpenseReconciler(client=FakeClient(), export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+            dry_run=True,
+        )
+
+        self.assertEqual(stats["matched"], 1)
+        self.assertEqual(stats["changed_snapshots"], 1)
+        self.assertEqual(RindegastosExpenseSnapshot.objects.count(), 0)
+        self.assertEqual(RindegastosReconcileRun.objects.count(), 0)
+
+    def test_reconcile_creates_snapshot_only_when_hash_changes(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            def __init__(self):
+                self.detail_total = 5900
+
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "Supplier": "Proveedor",
+                        "Total": self.detail_total,
+                        "IntegrationCode": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "Supplier": "Proveedor",
+                    "Total": self.detail_total,
+                    "IntegrationCode": expense.rindegastos_integration_code,
+                }
+
+        client = FakeClient()
+        reconciler = RindegastosExpenseReconciler(client=client, export_id_func=_expense_export_id)
+
+        first = reconciler.reconcile(since=date(2026, 4, 1), until=date(2026, 8, 5))
+        second = reconciler.reconcile(since=date(2026, 4, 1), until=date(2026, 8, 5))
+        client.detail_total = 7900
+        third = reconciler.reconcile(since=date(2026, 4, 1), until=date(2026, 8, 5))
+
+        self.assertEqual(first["changed_snapshots"], 1)
+        self.assertEqual(second["changed_snapshots"], 0)
+        self.assertEqual(third["changed_snapshots"], 1)
+        self.assertEqual(RindegastosExpenseSnapshot.objects.filter(expense=expense).count(), 2)
+        self.assertEqual(RindegastosReconcileRun.objects.count(), 3)
 
 
 class FuelExpenseExportTests(TestCase):
