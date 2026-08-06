@@ -21,6 +21,7 @@ from expenses.models import (
     ExpenseNotification,
     ExpenseTypeCatalog,
     FuelSpecificTaxRate,
+    RindegastosExpenseDiff,
     RindegastosExpenseSnapshot,
     RindegastosExpenseFieldCatalog,
     RindegastosReconcileRun,
@@ -387,6 +388,138 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertEqual(third["changed_snapshots"], 1)
         self.assertEqual(RindegastosExpenseSnapshot.objects.filter(expense=expense).count(), 2)
         self.assertEqual(RindegastosReconcileRun.objects.count(), 3)
+
+    def test_reconcile_opens_diff_for_remote_value_mismatch(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Local",
+            amount=Decimal("5900"),
+            currency="CLP",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "Supplier": "Proveedor Remoto",
+                        "Total": 7900,
+                        "Currency": "CLP",
+                        "IntegrationCode": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "Supplier": "Proveedor Remoto",
+                    "Total": 7900,
+                    "Currency": "CLP",
+                    "IntegrationCode": expense.rindegastos_integration_code,
+                }
+
+        stats = RindegastosExpenseReconciler(client=FakeClient(), export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+        )
+
+        self.assertEqual(stats["diffs_opened"], 2)
+        self.assertEqual(RindegastosExpenseDiff.objects.filter(expense=expense, status="open").count(), 2)
+        self.assertTrue(RindegastosExpenseDiff.objects.filter(field_name="supplier").exists())
+        self.assertTrue(RindegastosExpenseDiff.objects.filter(field_name="total").exists())
+
+    def test_reconcile_does_not_overwrite_conflicting_remote_integration_code(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            marked = False
+
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "Supplier": "Proveedor",
+                        "IntegrationCode": "SAM-456",
+                        "Note": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "Supplier": "Proveedor",
+                    "IntegrationCode": "SAM-456",
+                    "Note": expense.rindegastos_integration_code,
+                }
+
+            def set_expense_integration(self, *args, **kwargs):
+                self.marked = True
+
+        client = FakeClient()
+        stats = RindegastosExpenseReconciler(client=client, export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+            mark_integration_code=True,
+        )
+
+        self.assertFalse(client.marked)
+        self.assertEqual(stats["integration_code"]["non_otzi"], 1)
+        self.assertEqual(stats["integration_code"]["skipped_conflict"], 1)
+
+    @override_settings(RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED=True)
+    def test_reconcile_marks_empty_remote_integration_code_when_enabled(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            def __init__(self):
+                self.marked_payload = None
+
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "Supplier": "Proveedor",
+                        "Note": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "Supplier": "Proveedor",
+                    "Note": expense.rindegastos_integration_code,
+                }
+
+            def set_expense_integration(self, expense_id, integration_status, integration_code, integration_date=None):
+                self.marked_payload = {
+                    "expense_id": expense_id,
+                    "integration_status": integration_status,
+                    "integration_code": integration_code,
+                }
+
+        client = FakeClient()
+        stats = RindegastosExpenseReconciler(client=client, export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+            mark_integration_code=True,
+            integration_status=1,
+        )
+
+        self.assertEqual(stats["integration_code"]["empty"], 1)
+        self.assertEqual(stats["integration_code"]["marked"], 1)
+        self.assertEqual(
+            client.marked_payload,
+            {"expense_id": 987, "integration_status": 1, "integration_code": expense.rindegastos_integration_code},
+        )
 
 
 class FuelExpenseExportTests(TestCase):

@@ -18,6 +18,8 @@ class Command(BaseCommand):
         parser.add_argument("--max-pages", type=int, default=20)
         parser.add_argument("--dry-run", action="store_true")
         parser.add_argument("--fetch-detail", action=argparse.BooleanOptionalAction, default=True)
+        parser.add_argument("--mark-integration-code", action="store_true")
+        parser.add_argument("--integration-status", type=int, default=1)
 
     def handle(self, *args, **options):
         since = parse_date(options.get("since") or "") or rolling_uploaded_sync_since()
@@ -29,6 +31,8 @@ class Command(BaseCommand):
                 max_pages=options["max_pages"],
                 dry_run=options["dry_run"],
                 fetch_detail=options["fetch_detail"],
+                mark_integration_code=options["mark_integration_code"],
+                integration_status=options["integration_status"],
             )
         except (RindegastosAPIError, ValueError) as exc:
             raise CommandError(str(exc)) from exc
@@ -38,6 +42,8 @@ class Command(BaseCommand):
         self.stdout.write(f"Matched: {stats['matched']}")
         self.stdout.write(f"Changed snapshots: {stats['changed_snapshots']}")
         self.stdout.write(f"Unchanged snapshots: {stats['unchanged_snapshots']}")
+        self.stdout.write(f"Diffs opened: {stats['diffs_opened']}")
         self.stdout.write(f"Unmatched: {stats['unmatched']}")
         self.stdout.write(f"Errors: {stats['errors']}")
         self.stdout.write(f"Matched by: {stats['matched_by']}")
+        self.stdout.write(f"Integration code: {stats['integration_code']}")

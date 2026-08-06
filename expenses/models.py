@@ -166,6 +166,52 @@ class RindegastosExpenseSnapshot(models.Model):
         return f"Snapshot Rindegastos {self.rindegastos_expense_id} - gasto #{self.expense_id}"
 
 
+class RindegastosExpenseDiff(models.Model):
+    STATUS_OPEN = "open"
+    STATUS_APPLIED = "applied"
+    STATUS_IGNORED = "ignored"
+    STATUS_RESOLVED = "resolved"
+
+    SEVERITY_INFO = "info"
+    SEVERITY_WARNING = "warning"
+    SEVERITY_CONFLICT = "conflict"
+
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Abierta"),
+        (STATUS_APPLIED, "Aplicada"),
+        (STATUS_IGNORED, "Ignorada"),
+        (STATUS_RESOLVED, "Resuelta"),
+    ]
+    SEVERITY_CHOICES = [
+        (SEVERITY_INFO, "Info"),
+        (SEVERITY_WARNING, "Advertencia"),
+        (SEVERITY_CONFLICT, "Conflicto"),
+    ]
+
+    expense = models.ForeignKey(Expense, on_delete=models.CASCADE, related_name="rindegastos_diffs")
+    snapshot = models.ForeignKey(RindegastosExpenseSnapshot, on_delete=models.CASCADE, related_name="diffs")
+    field_name = models.CharField(max_length=128)
+    local_value = models.JSONField(null=True, blank=True)
+    remote_value = models.JSONField(null=True, blank=True)
+    severity = models.CharField(max_length=16, choices=SEVERITY_CHOICES, default=SEVERITY_INFO)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["expense", "status"]),
+            models.Index(fields=["snapshot", "field_name"]),
+        ]
+        ordering = ("-created_at",)
+        verbose_name = "Diferencia gasto Rindegastos"
+        verbose_name_plural = "Diferencias gastos Rindegastos"
+
+    def __str__(self):
+        return f"{self.field_name} - gasto #{self.expense_id} - {self.status}"
+
+
 class Attachment(models.Model):
     expense = models.ForeignKey(Expense, related_name="attachments", on_delete=models.CASCADE)
     file = models.FileField(upload_to="receipts/")

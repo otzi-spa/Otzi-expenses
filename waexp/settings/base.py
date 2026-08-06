@@ -127,6 +127,9 @@ CELERY_BEAT_SCHEDULE = {
 RINDEGASTOS_API_BASE_URL = os.environ.get("RINDEGASTOS_API_BASE_URL", "https://api.rindegastos.com/v1").rstrip("/")
 RINDEGASTOS_API_TOKEN = os.environ.get("RINDEGASTOS_API_TOKEN", "").strip()
 RINDEGASTOS_API_TIMEOUT = int(os.environ.get("RINDEGASTOS_API_TIMEOUT", "20"))
+RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED = (
+    os.environ.get("RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+)
 
 AZURE_ACCOUNT_NAME = os.environ.get("AZURE_ACCOUNT_NAME")
 AZURE_ACCOUNT_KEY = os.environ.get("AZURE_ACCOUNT_KEY")

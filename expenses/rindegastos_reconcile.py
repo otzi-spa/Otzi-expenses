@@ -2,13 +2,14 @@ import hashlib
 import json
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Expense, RindegastosExpenseSnapshot, RindegastosReconcileRun
+from .models import Expense, RindegastosExpenseDiff, RindegastosExpenseSnapshot, RindegastosReconcileRun
 from .rindegastos_client import RindegastosClient
 from .rindegastos_trace import expense_integration_code
-from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, summarize_rindegastos_expense
+from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
 
 
 CUSTOM_FIELD_COLLECTION_KEYS = (
@@ -42,9 +43,10 @@ def normalize_decimal(value):
     if value in {None, ""}:
         return None
     try:
-        return str(Decimal(str(value).replace(",", ".")))
+        value = Decimal(str(value).replace(",", "."))
     except (InvalidOperation, ValueError):
         return normalize_string(value)
+    return format(value.normalize(), "f")
 
 
 def normalize_custom_fields(payload):
@@ -97,12 +99,94 @@ def normalized_payload_hash(normalized_payload):
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def normalized_local_expense(expense):
+    return {
+        "supplier": normalize_string(expense.supplier),
+        "total": normalize_decimal(expense.amount),
+        "currency": normalize_string(expense.currency),
+        "issue_date": expense.paid_at.isoformat() if expense.paid_at else "",
+        "policy_name": normalize_string(expense.category),
+        "category_name": normalize_string(expense.expense_type),
+        "tax_name": normalize_string(expense.rindegastos_tax),
+        "tax_amount": normalize_decimal(expense.iva_amount),
+        "other_taxes": normalize_decimal(expense.specific_tax_amount),
+        "custom_fields": {
+            "Centro de Costo / Faena": normalize_string(expense.rindegastos_cost_center),
+            "Nombre quien rinde": normalize_string(expense.rindegastos_submitter),
+            "RUT proveedor": normalize_string(expense.supplier_rut),
+            "Tipo de Documento": normalize_string(expense.rindegastos_document_type or expense.document_type),
+            "Numero de Documento": normalize_string(expense.document_number),
+            "Vehiculo o Equipo": normalize_string(expense.vehicle),
+            "Km.Carguio": normalize_decimal(expense.fuel_km),
+            "Litros Combustible": normalize_decimal(expense.fuel_liters),
+            "Categoria": normalize_string(expense.expense_type),
+        },
+    }
+
+
+def compare_expense_to_remote(expense, remote_payload):
+    local = normalized_local_expense(expense)
+    diffs = []
+    field_map = [
+        ("supplier", "supplier", RindegastosExpenseDiff.SEVERITY_WARNING),
+        ("total", "total", RindegastosExpenseDiff.SEVERITY_CONFLICT),
+        ("currency", "currency", RindegastosExpenseDiff.SEVERITY_WARNING),
+        ("issue_date", "issue_date", RindegastosExpenseDiff.SEVERITY_WARNING),
+        ("policy_name", "policy_name", RindegastosExpenseDiff.SEVERITY_CONFLICT),
+        ("category_name", "category_name", RindegastosExpenseDiff.SEVERITY_WARNING),
+        ("tax_name", "tax_name", RindegastosExpenseDiff.SEVERITY_WARNING),
+        ("tax_amount", "tax_amount", RindegastosExpenseDiff.SEVERITY_WARNING),
+        ("other_taxes", "other_taxes", RindegastosExpenseDiff.SEVERITY_WARNING),
+    ]
+    for field_name, remote_key, severity in field_map:
+        local_value = local.get(field_name)
+        remote_value = remote_payload.get(remote_key)
+        if remote_value in {None, ""}:
+            continue
+        if local_value != remote_value:
+            diffs.append(
+                {
+                    "field_name": field_name,
+                    "local_value": local_value,
+                    "remote_value": remote_value,
+                    "severity": severity,
+                }
+            )
+
+    local_custom_fields = local["custom_fields"]
+    remote_custom_fields = remote_payload.get("custom_fields") or {}
+    for field_name, local_value in local_custom_fields.items():
+        remote_value = remote_custom_fields.get(field_name)
+        if remote_value in {None, ""}:
+            continue
+        if local_value != remote_value:
+            diffs.append(
+                {
+                    "field_name": f"custom_fields.{field_name}",
+                    "local_value": local_value,
+                    "remote_value": remote_value,
+                    "severity": RindegastosExpenseDiff.SEVERITY_WARNING,
+                }
+            )
+    return diffs
+
+
 class RindegastosExpenseReconciler:
     def __init__(self, client=None, export_id_func=None):
         self.client = client or RindegastosClient()
         self.export_id_func = export_id_func or expense_integration_code
 
-    def reconcile(self, since=None, until=None, max_pages=20, results_per_page=100, dry_run=False, fetch_detail=True):
+    def reconcile(
+        self,
+        since=None,
+        until=None,
+        max_pages=20,
+        results_per_page=100,
+        dry_run=False,
+        fetch_detail=True,
+        mark_integration_code=False,
+        integration_status=1,
+    ):
         matcher = RindegastosUploadedExpenseSync(client=self.client, export_id_func=self.export_id_func)
         remote_expenses, pages_read, results_per_page = matcher.fetch_remote_expenses(
             since=since,
@@ -119,9 +203,15 @@ class RindegastosExpenseReconciler:
                 since=since,
                 until=until,
                 max_pages=max_pages,
-                metadata={"dry_run": False, "fetch_detail": fetch_detail, "pages_read": pages_read},
+                metadata={
+                    "dry_run": False,
+                    "fetch_detail": fetch_detail,
+                    "pages_read": pages_read,
+                    "mark_integration_code": mark_integration_code,
+                },
             )
 
+        mark_enabled = bool(getattr(settings, "RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED", False))
         stats = {
             "since": since.isoformat() if since else "",
             "until": until.isoformat() if until else "",
@@ -135,7 +225,22 @@ class RindegastosExpenseReconciler:
             "unchanged_snapshots": 0,
             "unmatched": 0,
             "errors": 0,
+            "diffs_opened": 0,
             "matched_by": {"integration_code": 0, "note": 0, "remote_id": 0},
+            "integration_code": {
+                "empty": 0,
+                "matching_otzi": 0,
+                "conflicting_otzi": 0,
+                "non_otzi": 0,
+                "marked": 0,
+                "skipped_existing": 0,
+                "skipped_conflict": 0,
+                "skipped_disabled": 0,
+                "skipped_missing_remote_id": 0,
+                "mark_errors": 0,
+                "mark_enabled": mark_enabled,
+                "mark_requested": mark_integration_code,
+            },
         }
 
         try:
@@ -159,13 +264,28 @@ class RindegastosExpenseReconciler:
                         stats["errors"] += 1
                         snapshot_payload = payload
 
-                changed = self._process_snapshot(
+                self._record_integration_code_diagnostic(snapshot_payload, _otzi_id, stats)
+                self._maybe_mark_integration_code(
+                    summary=summary,
+                    payload=snapshot_payload,
+                    otzi_id=_otzi_id,
+                    stats=stats,
+                    dry_run=dry_run,
+                    mark_integration_code=mark_integration_code,
+                    mark_enabled=mark_enabled,
+                    integration_status=integration_status,
+                )
+
+                changed, snapshot, normalized = self._process_snapshot(
                     expense=expense,
                     payload=snapshot_payload,
                     source_endpoint=source_endpoint,
                     run=run,
                     dry_run=dry_run,
                 )
+                diff_specs = compare_expense_to_remote(expense, normalized)
+                diff_count = self._open_diffs(expense, snapshot, diff_specs, dry_run=dry_run)
+                stats["diffs_opened"] += diff_count
                 if changed:
                     stats["changed_snapshots"] += 1
                 else:
@@ -183,12 +303,12 @@ class RindegastosExpenseReconciler:
     def _process_snapshot(self, expense, payload, source_endpoint, run=None, dry_run=False):
         normalized = normalize_rindegastos_expense(payload)
         payload_hash = normalized_payload_hash(normalized)
-        exists = RindegastosExpenseSnapshot.objects.filter(expense=expense, payload_hash=payload_hash).exists()
-        if exists:
-            return False
+        existing = RindegastosExpenseSnapshot.objects.filter(expense=expense, payload_hash=payload_hash).first()
+        if existing:
+            return False, existing, normalized
         if dry_run:
-            return True
-        RindegastosExpenseSnapshot.objects.create(
+            return True, None, normalized
+        snapshot = RindegastosExpenseSnapshot.objects.create(
             expense=expense,
             run=run,
             rindegastos_expense_id=normalized["rindegastos_expense_id"] or str(payload.get("Id") or ""),
@@ -198,14 +318,98 @@ class RindegastosExpenseReconciler:
             raw_payload=payload,
             source_endpoint=source_endpoint,
         )
-        return True
+        return True, snapshot, normalized
+
+    def _open_diffs(self, expense, snapshot, diff_specs, dry_run=False):
+        opened = 0
+        for diff_spec in diff_specs:
+            if dry_run:
+                opened += 1
+                continue
+            exists = RindegastosExpenseDiff.objects.filter(
+                expense=expense,
+                field_name=diff_spec["field_name"],
+                local_value=diff_spec["local_value"],
+                remote_value=diff_spec["remote_value"],
+                status=RindegastosExpenseDiff.STATUS_OPEN,
+            ).exists()
+            if exists:
+                continue
+            RindegastosExpenseDiff.objects.create(
+                expense=expense,
+                snapshot=snapshot,
+                field_name=diff_spec["field_name"],
+                local_value=diff_spec["local_value"],
+                remote_value=diff_spec["remote_value"],
+                severity=diff_spec["severity"],
+            )
+            opened += 1
+        return opened
+
+    def _record_integration_code_diagnostic(self, payload, expected_otzi_id, stats):
+        normalized = normalize_rindegastos_expense(payload)
+        remote_code = normalized["integration_code"] or normalized["integration_external_code"]
+        if not remote_code:
+            stats["integration_code"]["empty"] += 1
+            return
+        remote_otzi_ids = extract_otzi_ids(remote_code)
+        if not remote_otzi_ids:
+            stats["integration_code"]["non_otzi"] += 1
+            return
+        if expected_otzi_id in remote_otzi_ids:
+            stats["integration_code"]["matching_otzi"] += 1
+            return
+        stats["integration_code"]["conflicting_otzi"] += 1
+
+    def _maybe_mark_integration_code(
+        self,
+        summary,
+        payload,
+        otzi_id,
+        stats,
+        dry_run,
+        mark_integration_code,
+        mark_enabled,
+        integration_status,
+    ):
+        if not mark_integration_code:
+            return
+        normalized = normalize_rindegastos_expense(payload)
+        remote_code = normalized["integration_code"] or normalized["integration_external_code"]
+        if remote_code:
+            remote_otzi_ids = extract_otzi_ids(remote_code)
+            if otzi_id in remote_otzi_ids:
+                stats["integration_code"]["skipped_existing"] += 1
+            else:
+                stats["integration_code"]["skipped_conflict"] += 1
+            return
+        if dry_run:
+            stats["integration_code"]["marked"] += 1
+            return
+        if not mark_enabled:
+            stats["integration_code"]["skipped_disabled"] += 1
+            return
+        if not summary["id"]:
+            stats["integration_code"]["skipped_missing_remote_id"] += 1
+            return
+        try:
+            self.client.set_expense_integration(
+                summary["id"],
+                integration_status=integration_status,
+                integration_code=otzi_id,
+                integration_date=timezone.now(),
+            )
+            stats["integration_code"]["marked"] += 1
+        except Exception:
+            stats["integration_code"]["mark_errors"] += 1
+            stats["errors"] += 1
 
     def _finish_run(self, run, stats, status):
         run.finished_at = timezone.now()
         run.fetched_count = stats["fetched"]
         run.matched_count = stats["matched"]
         run.changed_count = stats["changed_snapshots"]
-        run.diff_count = 0
+        run.diff_count = stats["diffs_opened"]
         run.error_count = stats["errors"]
         run.status = status
         run.metadata = {
@@ -216,6 +420,7 @@ class RindegastosExpenseReconciler:
             "unmatched": stats["unmatched"],
             "unchanged_snapshots": stats["unchanged_snapshots"],
             "matched_by": stats["matched_by"],
+            "integration_code": stats["integration_code"],
         }
         run.save(
             update_fields=[
