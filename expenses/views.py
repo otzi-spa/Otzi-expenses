@@ -14,8 +14,10 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Max, Q
 from django.http import FileResponse, HttpResponse, JsonResponse
+from django.core.paginator import Paginator
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.contrib.auth import get_user_model
 from accounts.models import UserAuditLog
 from .models import (
@@ -1122,11 +1124,290 @@ def expense_create(request):
 @login_required
 def expense_list(request):
     can_manage_expenses = _can_manage_expenses(request.user)
-    gastos = list(
+    active_statuses = {"incomplete", "not_completed", "pending", "completed"}
+    final_statuses = {"approved", "rejected"}
+    valid_scopes = active_statuses | final_statuses | {
+        "active",
+        "all",
+        "uploaded_rindegastos",
+        "not_uploaded_rindegastos",
+        "without_receipt",
+    }
+    scope = request.GET.get("scope", "active").strip() or "active"
+    if scope not in valid_scopes:
+        scope = "active"
+    search_query = request.GET.get("q", "").strip()
+    column_filter_params = {
+        "trace_id": request.GET.get("trace_id", "").strip(),
+        "created_from": request.GET.get("created_from", "").strip(),
+        "created_to": request.GET.get("created_to", "").strip(),
+        "paid_from": request.GET.get("paid_from", "").strip(),
+        "paid_to": request.GET.get("paid_to", "").strip(),
+        "reporter": request.GET.get("reporter", "").strip(),
+        "supplier": request.GET.get("supplier", "").strip(),
+        "amount_min": request.GET.get("amount_min", "").strip(),
+        "amount_max": request.GET.get("amount_max", "").strip(),
+        "category": request.GET.get("category", "").strip(),
+        "worksite": request.GET.get("worksite", "").strip(),
+        "vehicle": request.GET.get("vehicle", "").strip(),
+        "rindegastos_upload": request.GET.get("rindegastos_upload", "").strip(),
+        "status": request.GET.get("status", "").strip(),
+        "received_from": request.GET.get("received_from", "").strip(),
+        "received_to": request.GET.get("received_to", "").strip(),
+        "has_receipt": request.GET.get("has_receipt", "").strip(),
+    }
+    try:
+        page_size = int(request.GET.get("page_size", "50"))
+    except (TypeError, ValueError):
+        page_size = 50
+    if page_size not in {25, 50, 100, 200}:
+        page_size = 50
+
+    queryset = (
         Expense.objects.select_related("created_by", "wa_sender", "decision_by")
         .prefetch_related("attachments", "audit_logs", "notifications")
-        .order_by("-created_at")
     )
+    status_filter = column_filter_params["status"]
+    status_filter_is_valid = status_filter in dict(Expense.STATUS)
+    if scope == "active" and not status_filter_is_valid:
+        queryset = queryset.filter(status__in=active_statuses)
+    elif scope in active_statuses | final_statuses:
+        queryset = queryset.filter(status=scope)
+    elif scope == "uploaded_rindegastos":
+        queryset = queryset.exclude(rindegastos_expense_id__isnull=True).exclude(rindegastos_expense_id="")
+    elif scope == "not_uploaded_rindegastos":
+        queryset = queryset.filter(Q(rindegastos_expense_id__isnull=True) | Q(rindegastos_expense_id=""))
+    elif scope == "without_receipt":
+        queryset = queryset.filter(attachments__isnull=True)
+
+    trace_filter = column_filter_params["trace_id"].upper()
+    if trace_filter.startswith("OTZ-"):
+        trace_ids = []
+        for expense_id in queryset.values_list("id", flat=True):
+            if trace_filter in _expense_export_id(expense_id):
+                trace_ids.append(expense_id)
+        queryset = queryset.filter(id__in=trace_ids)
+    elif trace_filter:
+        queryset = queryset.filter(id__icontains=trace_filter)
+    created_from = parse_date(column_filter_params["created_from"])
+    created_to = parse_date(column_filter_params["created_to"])
+    paid_from = parse_date(column_filter_params["paid_from"])
+    paid_to = parse_date(column_filter_params["paid_to"])
+    received_from = parse_date(column_filter_params["received_from"])
+    received_to = parse_date(column_filter_params["received_to"])
+    if created_from:
+        queryset = queryset.filter(created_at__date__gte=created_from)
+    if created_to:
+        queryset = queryset.filter(created_at__date__lte=created_to)
+    if paid_from:
+        queryset = queryset.filter(paid_at__gte=paid_from)
+    if paid_to:
+        queryset = queryset.filter(paid_at__lte=paid_to)
+    if received_from:
+        queryset = queryset.filter(message_sent_at__date__gte=received_from)
+    if received_to:
+        queryset = queryset.filter(message_sent_at__date__lte=received_to)
+    if column_filter_params["reporter"]:
+        reporter = column_filter_params["reporter"]
+        queryset = queryset.filter(
+            Q(wa_sender_phone=reporter)
+            | Q(wa_sender__phone=reporter)
+            | Q(created_by__email=reporter)
+        )
+    if column_filter_params["supplier"]:
+        queryset = queryset.filter(supplier__icontains=column_filter_params["supplier"])
+    if column_filter_params["category"]:
+        queryset = queryset.filter(category=column_filter_params["category"])
+    if column_filter_params["worksite"]:
+        queryset = queryset.filter(worksite__icontains=column_filter_params["worksite"])
+    if column_filter_params["vehicle"]:
+        queryset = queryset.filter(vehicle__icontains=column_filter_params["vehicle"])
+    if column_filter_params["rindegastos_upload"] == "uploaded":
+        queryset = queryset.exclude(rindegastos_expense_id__isnull=True).exclude(rindegastos_expense_id="")
+    elif column_filter_params["rindegastos_upload"] == "not_uploaded":
+        queryset = queryset.filter(Q(rindegastos_expense_id__isnull=True) | Q(rindegastos_expense_id=""))
+    if status_filter_is_valid:
+        queryset = queryset.filter(status=status_filter)
+    if column_filter_params["has_receipt"] == "yes":
+        queryset = queryset.filter(attachments__isnull=False)
+    elif column_filter_params["has_receipt"] == "no":
+        queryset = queryset.filter(attachments__isnull=True)
+    try:
+        amount_min = Decimal(column_filter_params["amount_min"]) if column_filter_params["amount_min"] else None
+    except InvalidOperation:
+        amount_min = None
+    try:
+        amount_max = Decimal(column_filter_params["amount_max"]) if column_filter_params["amount_max"] else None
+    except InvalidOperation:
+        amount_max = None
+    if amount_min is not None:
+        queryset = queryset.filter(amount__gte=amount_min)
+    if amount_max is not None:
+        queryset = queryset.filter(amount__lte=amount_max)
+
+    if search_query:
+        queryset = queryset.filter(
+            Q(supplier__icontains=search_query)
+            | Q(category__icontains=search_query)
+            | Q(worksite__icontains=search_query)
+            | Q(worksite_standard__icontains=search_query)
+            | Q(vehicle__icontains=search_query)
+            | Q(notes__icontains=search_query)
+            | Q(wa_sender_phone__icontains=search_query)
+            | Q(wa_sender__first_name__icontains=search_query)
+            | Q(wa_sender__last_name__icontains=search_query)
+            | Q(created_by__email__icontains=search_query)
+            | Q(rindegastos_expense_id__icontains=search_query)
+            | Q(document_number__icontains=search_query)
+        )
+    sort_options = {
+        "trace_id": "id",
+        "created_at": "created_at",
+        "paid_at": "paid_at",
+        "reporter": "wa_sender__first_name",
+        "supplier": "supplier",
+        "amount": "amount",
+        "category": "category",
+        "worksite": "worksite",
+        "vehicle": "vehicle",
+        "rindegastos_upload": "rindegastos_expense_id",
+        "status": "status",
+        "received_at": "message_sent_at",
+    }
+    sort = request.GET.get("sort", "created_at").strip()
+    if sort not in sort_options:
+        sort = "created_at"
+    direction = request.GET.get("direction", "desc").strip()
+    if direction not in {"asc", "desc"}:
+        direction = "desc"
+    ordering = sort_options[sort]
+    if direction == "desc":
+        ordering = f"-{ordering}"
+    queryset = queryset.distinct().order_by(ordering, "-id")
+
+    paginator = Paginator(queryset, page_size)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    gastos = list(page_obj.object_list)
+
+    def query_url(**updates):
+        params = request.GET.copy()
+        for key, value in updates.items():
+            if value in {None, ""}:
+                params.pop(key, None)
+            else:
+                params[key] = str(value)
+        return f"{request.path}?{params.urlencode()}" if params else request.path
+
+    filter_query_keys = [
+        "q",
+        "trace_id",
+        "created_from",
+        "created_to",
+        "paid_from",
+        "paid_to",
+        "reporter",
+        "supplier",
+        "amount_min",
+        "amount_max",
+        "category",
+        "worksite",
+        "vehicle",
+        "rindegastos_upload",
+        "status",
+        "received_from",
+        "received_to",
+        "has_receipt",
+        "sort",
+        "direction",
+        "page",
+    ]
+    clear_filter_updates = {key: "" for key in filter_query_keys}
+    clear_filter_updates["scope"] = "active"
+
+    quick_filter_options = [
+        ("active", "Por atender"),
+        ("all", "Todos"),
+        ("incomplete", "Incompletos"),
+        ("not_completed", "No completados"),
+        ("pending", "Pendiente"),
+        ("completed", "Parametrizado"),
+        ("approved", "Aprobado"),
+        ("rejected", "Rechazado"),
+        ("uploaded_rindegastos", "Subidos RG"),
+        ("not_uploaded_rindegastos", "No subidos RG"),
+        ("without_receipt", "Sin comprobante"),
+    ]
+    quick_filters = [
+        {
+            "scope": option_scope,
+            "label": label,
+            "url": query_url(scope=option_scope, page=1),
+            "active": scope == option_scope,
+        }
+        for option_scope, label in quick_filter_options
+    ]
+    page_size_options = [
+        {"value": value, "url": query_url(page_size=value, page=1), "active": page_size == value}
+        for value in (25, 50, 100, 200)
+    ]
+    page_links = []
+    if page_obj.has_previous():
+        page_links.append({"label": "Anterior", "url": query_url(page=page_obj.previous_page_number()), "active": False})
+    start_page = max(1, page_obj.number - 2)
+    end_page = min(paginator.num_pages, page_obj.number + 2)
+    for page_number in range(start_page, end_page + 1):
+        page_links.append(
+            {
+                "label": str(page_number),
+                "url": query_url(page=page_number),
+                "active": page_number == page_obj.number,
+            }
+        )
+    if page_obj.has_next():
+        page_links.append({"label": "Siguiente", "url": query_url(page=page_obj.next_page_number()), "active": False})
+
+    column_filter_values = {
+        key: value
+        for key, value in column_filter_params.items()
+        if value
+    }
+    has_column_filters = bool(column_filter_values)
+    sort_links = {}
+    sort_columns = {
+        0: "trace_id",
+        1: "created_at",
+        2: "paid_at",
+        3: "reporter",
+        4: "supplier",
+        5: "amount",
+        6: "category",
+        7: "worksite",
+        8: "vehicle",
+        9: "rindegastos_upload",
+        10: "status",
+        11: "received_at",
+    }
+    for index, sort_name in sort_columns.items():
+        next_direction = "desc" if sort == sort_name and direction == "asc" else "asc"
+        sort_links[index] = {
+            "url": query_url(sort=sort_name, direction=next_direction, page=1),
+            "active": sort == sort_name,
+            "direction": direction if sort == sort_name else "",
+        }
+    reporter_options = []
+    for sender in AllowedSender.objects.filter(is_deleted=False).order_by("first_name", "last_name", "phone"):
+        label = str(sender)
+        reporter_options.append({"value": sender.phone, "label": label})
+    for user in get_user_model().objects.exclude(email="").order_by("email"):
+        reporter_options.append({"value": user.email, "label": user.get_full_name() or user.email})
+    category_options = list(
+        Expense.objects.exclude(category__isnull=True)
+        .exclude(category="")
+        .values_list("category", flat=True)
+        .distinct()
+        .order_by("category")
+    )
+
     senders_by_phone = {
         s.phone: s
         for s in AllowedSender.objects.filter(is_deleted=False)
@@ -1173,6 +1454,24 @@ def expense_list(request):
         gasto.similar_expenses = _find_similar_expenses(gasto, gastos)
     context = {
         "gastos": gastos,
+        "page_obj": page_obj,
+        "paginator": paginator,
+        "quick_filters": quick_filters,
+        "current_scope": scope,
+        "search_query": search_query,
+        "page_size": page_size,
+        "page_size_options": page_size_options,
+        "page_links": page_links,
+        "column_filters": column_filter_values,
+        "has_column_filters": has_column_filters,
+        "sort_links": sort_links,
+        "sort": sort,
+        "direction": direction,
+        "reporter_filter_options": reporter_options,
+        "category_filter_options": category_options,
+        "status_filter_options": Expense.STATUS,
+        "search_url": query_url(page=1, q=search_query),
+        "clear_filters_url": query_url(**clear_filter_updates),
         "can_manage_expenses": can_manage_expenses,
         "status_choices": Expense.STATUS,
         "categories_catalog": (
@@ -1404,11 +1703,21 @@ def attachment_export_serve(request, pk: int):
 
 @login_required
 def expense_action(request, pk: int, action: str):
-    if request.method != "POST":
+    def action_redirect():
+        next_url = request.POST.get("next", "").strip()
+        if next_url and url_has_allowed_host_and_scheme(
+            next_url,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return redirect(next_url)
         return redirect("expense_list")
+
+    if request.method != "POST":
+        return action_redirect()
     if not _can_manage_expenses(request.user):
         messages.error(request, "No tienes permisos para ejecutar acciones sobre gastos.")
-        return redirect("expense_list")
+        return action_redirect()
 
     expense = get_object_or_404(Expense, pk=pk)
     reason = request.POST.get("reason", "").strip()
@@ -1416,10 +1725,10 @@ def expense_action(request, pk: int, action: str):
     if action == "approve":
         if not _can_decide_expenses(request.user):
             messages.error(request, "No tienes permisos para aprobar gastos.")
-            return redirect("expense_list")
+            return action_redirect()
         if expense.status != "completed":
             messages.error(request, "Solo se puede aprobar un gasto parametrizado.")
-            return redirect("expense_list")
+            return action_redirect()
         old_status = expense.status
         expense.status = "approved"
         expense.decision_by = request.user
@@ -1437,21 +1746,21 @@ def expense_action(request, pk: int, action: str):
             },
         )
         messages.success(request, "Gasto aprobado.")
-        return redirect("expense_list")
+        return action_redirect()
 
     if action == "reject":
         if not _can_decide_expenses(request.user):
             messages.error(request, "No tienes permisos para rechazar gastos.")
-            return redirect("expense_list")
+            return action_redirect()
         if not reason:
             messages.error(request, "Debes indicar el motivo del rechazo.")
-            return redirect("expense_list")
+            return action_redirect()
 
         with transaction.atomic():
             expense = Expense.objects.select_for_update().get(pk=pk)
             if expense.status != "completed":
                 messages.error(request, "Solo se puede rechazar un gasto parametrizado.")
-                return redirect("expense_list")
+                return action_redirect()
             old_status = expense.status
             old_reason = expense.rejection_reason
             expense.status = "rejected"
@@ -1485,15 +1794,15 @@ def expense_action(request, pk: int, action: str):
             messages.warning(request, "Gasto rechazado. La notificación WhatsApp quedó pendiente de reintento.")
         else:
             messages.warning(request, "Gasto rechazado. No se pudo crear la notificación WhatsApp.")
-        return redirect("expense_list")
+        return action_redirect()
 
     if action == "revert_decision":
         if not request.user.is_superuser:
             messages.error(request, "Solo un superadmin puede revertir una aprobación o rechazo.")
-            return redirect("expense_list")
+            return action_redirect()
         if not _is_final_expense(expense):
             messages.error(request, "El gasto no tiene una decisión que pueda revertirse.")
-            return redirect("expense_list")
+            return action_redirect()
         old_status = expense.status
         old_decision_by = expense.decision_by.email if expense.decision_by else ""
         old_decision_at = expense.decision_at.isoformat() if expense.decision_at else None
@@ -1516,12 +1825,12 @@ def expense_action(request, pk: int, action: str):
             },
         )
         messages.success(request, "La decisión fue revertida. El gasto volvió a Parametrizado.")
-        return redirect("expense_list")
+        return action_redirect()
 
     if action == "retry_notification":
         if not request.user.is_superuser:
             messages.error(request, "Solo un superadmin puede reintentar notificaciones.")
-            return redirect("expense_list")
+            return action_redirect()
         notification = (
             expense.notifications.filter(
                 notification_type=ExpenseNotification.TYPE_REJECTION,
@@ -1533,26 +1842,26 @@ def expense_action(request, pk: int, action: str):
         )
         if not notification:
             messages.error(request, "No hay una notificación fallida para reintentar.")
-            return redirect("expense_list")
+            return action_redirect()
         notification.status = ExpenseNotification.STATUS_PENDING
         notification.last_error = ""
         notification.next_retry_at = timezone.now()
         notification.save(update_fields=["status", "last_error", "next_retry_at", "updated_at"])
         enqueue_notification_send(notification)
         messages.success(request, "La notificación WhatsApp quedó pendiente de reintento.")
-        return redirect("expense_list")
+        return action_redirect()
 
     if _is_final_expense(expense):
         messages.error(
             request,
             "El gasto está aprobado o rechazado y no admite más acciones. Solo un superadmin puede revertir la decisión.",
         )
-        return redirect("expense_list")
+        return action_redirect()
 
     if action == "delete":
         if not request.user.is_superuser:
             messages.error(request, "Solo un superadmin puede eliminar gastos.")
-            return redirect("expense_list")
+            return action_redirect()
         snapshot_id = expense.id
         split_group_id = expense.split_group_id
         if split_group_id:
@@ -1587,15 +1896,15 @@ def expense_action(request, pk: int, action: str):
                 deleted_expense_id=snapshot_id,
             )
         messages.warning(request, f"Gasto #{snapshot_id} eliminado.")
-        return redirect("expense_list")
+        return action_redirect()
 
     if action == "split":
         if expense.status in {"approved", "rejected"}:
             messages.error(request, "No se puede dividir un gasto aprobado o rechazado.")
-            return redirect("expense_list")
+            return action_redirect()
         if expense.split_group_id:
             messages.error(request, "Este gasto ya fue dividido y no se puede volver a dividir.")
-            return redirect("expense_list")
+            return action_redirect()
 
         raw_count = (request.POST.get("split_count") or "").strip()
         try:
@@ -1699,10 +2008,10 @@ def expense_action(request, pk: int, action: str):
             request,
             f"Gasto #{expense.id} dividido en {split_count} gastos (grupo {group_id[:8]}).",
         )
-        return redirect("expense_list")
+        return action_redirect()
 
     messages.error(request, "Acción no soportada.")
-    return redirect("expense_list")
+    return action_redirect()
 
 
 @login_required

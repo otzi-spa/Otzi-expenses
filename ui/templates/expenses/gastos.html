@@ -121,6 +121,7 @@
       </div>
       <form method="post" id="splitExpenseForm">
         {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
         <div class="modal-body">
           <label class="form-label">¿En cuántos gastos deseas dividirlo?</label>
           <div class="input-group">
@@ -375,17 +376,18 @@
   <div class="card-body">
     <div class="expenses-table-toolbar d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
       <div class="expenses-quick-filter-group d-flex flex-wrap align-items-center gap-2">
-        <button type="button" class="btn btn-sm expenses-quick-filter active" data-expenses-filter="all">Todos</button>
-        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="incomplete">Incompletos</button>
-        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="not_completed">No completados</button>
-        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="pending">Pendiente</button>
-        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="completed">Parametrizado</button>
-        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="approved">Aprobado</button>
-        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="uploaded_rindegastos">Subidos RG</button>
-        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="not_uploaded_rindegastos">No subidos RG</button>
-        <button type="button" class="btn btn-sm expenses-quick-filter" data-expenses-filter="without_receipt">Sin comprobante</button>
+        {% for filter in quick_filters %}
+          <a class="btn btn-sm expenses-quick-filter {% if filter.active %}active{% endif %}" href="{{ filter.url }}" data-expenses-filter="{{ filter.scope }}">{{ filter.label }}</a>
+        {% endfor %}
       </div>
-      <div class="expenses-search-box d-flex flex-wrap align-items-center justify-content-end gap-2">
+      <form method="get" action="{% url 'expense_list' %}" class="expenses-search-box d-flex flex-wrap align-items-center justify-content-end gap-2">
+        <input type="hidden" name="scope" value="{{ current_scope }}">
+        <input type="hidden" name="page_size" value="{{ page_size }}">
+        {% for key, value in column_filters.items %}
+          <input type="hidden" name="{{ key }}" value="{{ value }}">
+        {% endfor %}
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="direction" value="{{ direction }}">
         <span id="expensesFiltersActiveIndicator" class="badge badge-light-primary expenses-active-filter-badge" hidden>
           <span class="svg-icon svg-icon-6" aria-hidden="true">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -394,8 +396,23 @@
           </span>
           Filtros activos
         </span>
-        <button type="button" id="expensesClearFiltersBtn" class="btn btn-sm btn-light" hidden>Limpiar filtros</button>
-        <input type="text" id="expensesTableSearch" class="form-control form-control-sm" placeholder="Buscar gastos...">
+        <a id="expensesClearFiltersBtn" class="btn btn-sm btn-light" href="{{ clear_filters_url }}" {% if current_scope == "active" and not search_query and not has_column_filters and sort == "created_at" and direction == "desc" %}hidden{% endif %}>Limpiar filtros</a>
+        <input type="text" id="expensesTableSearch" name="q" class="form-control form-control-sm" value="{{ search_query }}" placeholder="Buscar gastos...">
+        <button type="submit" class="btn btn-sm btn-primary">Buscar</button>
+      </form>
+    </div>
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+      <div class="text-muted small">
+        Mostrando {{ page_obj.start_index }}-{{ page_obj.end_index }} de {{ paginator.count }} gastos filtrados.
+        Los filtros superiores y de columna buscan en todos los gastos.
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small">Filas por página</span>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Filas por página">
+          {% for option in page_size_options %}
+            <a class="btn {% if option.active %}btn-primary{% else %}btn-light{% endif %}" href="{{ option.url }}">{{ option.value }}</a>
+          {% endfor %}
+        </div>
       </div>
     </div>
 
@@ -560,6 +577,7 @@
                 <div class="dropdown-divider"></div>
                 <form method="post" action="{% url 'expense_action' gasto.pk 'approve' %}">
                   {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <button type="submit" class="dropdown-item text-success" {% if not gasto.can_approve_or_reject %}disabled{% endif %}>
                     Aprobar gasto
                   </button>
@@ -576,12 +594,14 @@
               {% if gasto.can_revert_decision %}
                 <form method="post" action="{% url 'expense_action' gasto.pk 'revert_decision' %}" onsubmit="return confirm('¿Revertir esta decisión y devolver el gasto a Parametrizado?')">
                   {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <button type="submit" class="dropdown-item text-primary">Revertir decisión</button>
                 </form>
               {% endif %}
               {% if gasto.can_retry_rejection_notification %}
                 <form method="post" action="{% url 'expense_action' gasto.pk 'retry_notification' %}">
                   {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <button type="submit" class="dropdown-item text-primary">Reintentar notificación</button>
                 </form>
               {% endif %}
@@ -589,6 +609,7 @@
                 <div class="dropdown-divider"></div>
                 <form method="post" action="{% url 'expense_action' gasto.pk 'delete' %}" onsubmit="return confirm('¿Eliminar gasto #{{ gasto.pk }}?')">
                   {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <button type="submit" class="dropdown-item text-muted" {% if gasto.is_locked %}disabled{% endif %}>Eliminar gasto</button>
                 </form>
               {% endif %}
@@ -599,11 +620,38 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="13" class="text-center py-10 text-muted">No hay gastos registrados aún.</td>
+          <td colspan="14" class="text-center py-10 text-muted">No hay gastos para los filtros seleccionados.</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-4">
+      <div class="text-muted small">
+        Mostrando {{ page_obj.start_index }}-{{ page_obj.end_index }} de {{ paginator.count }} gastos filtrados.
+        {% if paginator.num_pages > 1 %}Página {{ page_obj.number }} de {{ paginator.num_pages }}.{% endif %}
+      </div>
+      <div class="d-flex flex-wrap align-items-center justify-content-end gap-3">
+        <div class="d-flex align-items-center gap-2">
+          <span class="text-muted small">Filas por página</span>
+          <div class="btn-group btn-group-sm" role="group" aria-label="Filas por página al final de la tabla">
+            {% for option in page_size_options %}
+              <a class="btn {% if option.active %}btn-primary{% else %}btn-light{% endif %}" href="{{ option.url }}">{{ option.value }}</a>
+            {% endfor %}
+          </div>
+        </div>
+        {% if paginator.num_pages > 1 %}
+        <nav aria-label="Paginación de gastos al final de la tabla">
+          <ul class="pagination pagination-sm mb-0">
+            {% for link in page_links %}
+              <li class="page-item {% if link.active %}active{% endif %}">
+                <a class="page-link" href="{{ link.url }}">{{ link.label }}</a>
+              </li>
+            {% endfor %}
+          </ul>
+        </nav>
+        {% endif %}
+      </div>
     </div>
 
     {% for gasto in gastos %}
@@ -635,6 +683,7 @@
         <div class="modal-content">
           <form method="post" action="{% url 'expense_action' gasto.pk 'reject' %}">
             {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
             <div class="modal-header">
               <h5 class="modal-title" id="rejectExpenseModalLabel{{ gasto.pk }}">Rechazar gasto {{ gasto.export_id }}</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
@@ -1594,14 +1643,20 @@
     }
 
     .expenses-quick-filter {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       background: #f1f3f9;
       border: 1px solid #eef1f6;
       color: #6b7280;
       font-weight: 600;
       min-height: 32px;
-      padding: 0.35rem 0.75rem;
+      padding: 0 0.75rem;
       font-size: 0.78rem;
-      line-height: 1;
+      line-height: 1.2;
+      text-align: center;
+      text-decoration: none;
+      white-space: nowrap;
     }
 
     .expenses-quick-filter:hover,
@@ -1609,6 +1664,7 @@
       background: #fff9dc;
       border-color: #d6bf60;
       color: #4f4411;
+      text-decoration: none;
     }
 
     .expenses-quick-filter.active {
@@ -1926,15 +1982,7 @@
     document.addEventListener("DOMContentLoaded", function () {
       var taxCalculationData = JSON.parse(document.getElementById('tax-calculation-data').textContent || '{}');
       var expensesTable = document.getElementById("expensesTable");
-      var expensesTbody = expensesTable ? expensesTable.querySelector("tbody") : null;
-      var allExpenseRows = expensesTbody ? Array.from(expensesTbody.querySelectorAll("tr")) : [];
-      var activeQuickFilter = "all";
-      var searchTerm = "";
-      var sortState = { columnIndex: 1, direction: "desc" };
-      var columnFilters = {};
-      var FILTER_STORAGE_VERSION = 1;
-      var FILTER_STORAGE_KEY = "expenses.tableFilters.v" + FILTER_STORAGE_VERSION + ":" + window.location.pathname;
-      var filterStateRestoring = false;
+      var serverFilterActive = "{{ current_scope|escapejs }}" !== "active" || Boolean("{{ search_query|escapejs }}");
       var clearFiltersBtn = document.getElementById("expensesClearFiltersBtn");
       var filtersActiveIndicator = document.getElementById("expensesFiltersActiveIndicator");
       var rindegastosFieldOptionsEl = document.getElementById("rindegastos-field-options-data");
@@ -2001,188 +2049,84 @@
         });
       }
 
-      function getCellSortValue(row, index) {
-        var cell = row.cells[index];
-        if (!cell) return "";
-        var dataOrder = cell.getAttribute("data-order");
-        if (dataOrder !== null && dataOrder !== "") return dataOrder;
-        return (cell.textContent || "").trim().toLowerCase();
-      }
-
-      function normalizeFilterText(value) {
-        return String(value || "")
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .replace(/\s+/g, " ")
-          .trim();
-      }
-
-      function getCellFilterValue(row, index) {
-        var cell = row.cells[index];
-        if (!cell) return "";
-        var value = cell.getAttribute("data-filter-value");
-        if (value !== null && value !== "") return value;
-        return (cell.textContent || "").trim();
-      }
-
-      function getCellDateValue(row, index) {
-        var cell = row.cells[index];
-        if (!cell) return "";
-        return cell.getAttribute("data-filter-date") || String(getCellSortValue(row, index)).slice(0, 10);
-      }
-
-      function getCellNumericValue(row, index) {
-        var value = getCellSortValue(row, index);
-        var number = parseFloat(String(value || "").replace(",", "."));
-        return Number.isNaN(number) ? null : number;
-      }
-
-      function getFilterStatePayload() {
-        return {
-          version: FILTER_STORAGE_VERSION,
-          quickFilter: activeQuickFilter,
-          searchTerm: searchTerm,
-          sortState: {
-            columnIndex: sortState.columnIndex,
-            direction: sortState.direction,
-          },
-          columnFilters: columnFilters,
-        };
-      }
-
-      function hasActiveFilters() {
-        return (
-          activeQuickFilter !== "all" ||
-          Boolean(searchTerm) ||
-          sortState.columnIndex !== 1 ||
-          sortState.direction !== "desc" ||
-          Object.keys(columnFilters).length > 0
-        );
-      }
+      var currentSort = "{{ sort|escapejs }}";
+      var currentDirection = "{{ direction|escapejs }}";
+      var columnFilterValues = {
+        trace_id: "{{ column_filters.trace_id|default:''|escapejs }}",
+        created_from: "{{ column_filters.created_from|default:''|escapejs }}",
+        created_to: "{{ column_filters.created_to|default:''|escapejs }}",
+        paid_from: "{{ column_filters.paid_from|default:''|escapejs }}",
+        paid_to: "{{ column_filters.paid_to|default:''|escapejs }}",
+        reporter: "{{ column_filters.reporter|default:''|escapejs }}",
+        supplier: "{{ column_filters.supplier|default:''|escapejs }}",
+        amount_min: "{{ column_filters.amount_min|default:''|escapejs }}",
+        amount_max: "{{ column_filters.amount_max|default:''|escapejs }}",
+        category: "{{ column_filters.category|default:''|escapejs }}",
+        worksite: "{{ column_filters.worksite|default:''|escapejs }}",
+        vehicle: "{{ column_filters.vehicle|default:''|escapejs }}",
+        rindegastos_upload: "{{ column_filters.rindegastos_upload|default:''|escapejs }}",
+        status: "{{ column_filters.status|default:''|escapejs }}",
+        received_from: "{{ column_filters.received_from|default:''|escapejs }}",
+        received_to: "{{ column_filters.received_to|default:''|escapejs }}",
+        has_receipt: "{{ column_filters.has_receipt|default:''|escapejs }}",
+      };
+      var reporterFilterOptions = [
+        { value: "", label: "Todos" }
+        {% for option in reporter_filter_options %}
+          , { value: "{{ option.value|escapejs }}", label: "{{ option.label|escapejs }}" }
+        {% endfor %}
+      ];
+      var categoryFilterOptions = [
+        { value: "", label: "Todas" }
+        {% for option in category_filter_options %}
+          , { value: "{{ option|escapejs }}", label: "{{ option|escapejs }}" }
+        {% endfor %}
+      ];
+      var statusFilterOptions = [
+        { value: "", label: "Todos" }
+        {% for value, label in status_filter_options %}
+          , { value: "{{ value|escapejs }}", label: "{{ label|escapejs }}" }
+        {% endfor %}
+      ];
 
       function updateFilterStateUi() {
-        var active = hasActiveFilters();
+        var active = serverFilterActive || {{ has_column_filters|yesno:"true,false" }} || currentSort !== "created_at" || currentDirection !== "desc";
         if (filtersActiveIndicator) filtersActiveIndicator.hidden = !active;
         if (clearFiltersBtn) clearFiltersBtn.hidden = !active;
       }
 
-      function persistFilterState() {
-        if (filterStateRestoring) return;
-        updateFilterStateUi();
-        try {
-          window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(getFilterStatePayload()));
-        } catch (error) {
-          // localStorage can be unavailable in restricted browsing modes.
-        }
-      }
-
-      function readStoredFilterState() {
-        try {
-          var raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
-          if (!raw) return null;
-          var parsed = JSON.parse(raw);
-          if (!parsed || parsed.version !== FILTER_STORAGE_VERSION) {
-            window.localStorage.removeItem(FILTER_STORAGE_KEY);
-            return null;
+      function navigateWithParams(updates) {
+        var params = new URLSearchParams(window.location.search);
+        Object.keys(updates).forEach(function (key) {
+          var value = updates[key];
+          if (value === null || value === undefined || value === "") {
+            params.delete(key);
+          } else {
+            params.set(key, value);
           }
-          return parsed;
-        } catch (error) {
-          return null;
-        }
+        });
+        params.set("page", "1");
+        var query = params.toString();
+        window.location.href = window.location.pathname + (query ? "?" + query : "");
       }
 
-      function applyStoredFilterControls() {
-        if (searchInput) {
-          searchInput.value = searchTerm;
-        }
-        document.querySelectorAll(".expenses-quick-filter").forEach(function (button) {
-          var filter = button.getAttribute("data-expenses-filter") || "all";
-          button.classList.toggle("active", filter === activeQuickFilter);
-        });
-        document.querySelectorAll(".expenses-column-filter[data-filter-index][data-filter-key]").forEach(function (control) {
-          var index = control.dataset.filterIndex;
-          var key = control.dataset.filterKey;
-          var value = columnFilters[index] && columnFilters[index][key] ? columnFilters[index][key] : "";
-          control.value = value;
-        });
-      }
-
-      function restoreFilterState() {
-        var stored = readStoredFilterState();
-        if (!stored) return;
-        filterStateRestoring = true;
-        activeQuickFilter = stored.quickFilter || "all";
-        searchTerm = stored.searchTerm || "";
-        if (
-          stored.sortState &&
-          Number.isInteger(stored.sortState.columnIndex) &&
-          ["asc", "desc"].indexOf(stored.sortState.direction) !== -1
-        ) {
-          sortState = {
-            columnIndex: stored.sortState.columnIndex,
-            direction: stored.sortState.direction,
-          };
-        }
-        columnFilters = stored.columnFilters && typeof stored.columnFilters === "object" ? stored.columnFilters : {};
-        applyStoredFilterControls();
-        filterStateRestoring = false;
-        updateFilterStateUi();
-      }
-
-      function clearFilterState() {
-        activeQuickFilter = "all";
-        searchTerm = "";
-        sortState = { columnIndex: 1, direction: "desc" };
-        columnFilters = {};
-        try {
-          window.localStorage.removeItem(FILTER_STORAGE_KEY);
-        } catch (error) {
-          // Ignore storage cleanup failures.
-        }
-        applyStoredFilterControls();
-        updateFilterStateUi();
-        renderExpenseRows();
-      }
-
-      function uniqueColumnOptions(index) {
-        var seen = {};
-        var values = [];
-        allExpenseRows.forEach(function (row) {
-          var value = getCellFilterValue(row, index);
-          var normalized = normalizeFilterText(value);
-          if (!normalized || seen[normalized]) return;
-          seen[normalized] = true;
-          values.push(value);
-        });
-        return values.sort(function (a, b) {
-          return String(a).localeCompare(String(b), "es", { sensitivity: "base" });
-        });
-      }
-
-      function setColumnFilter(index, key, value) {
-        if (!columnFilters[index]) columnFilters[index] = {};
-        columnFilters[index][key] = value;
-        Object.keys(columnFilters[index]).forEach(function (filterKey) {
-          if (!columnFilters[index][filterKey]) delete columnFilters[index][filterKey];
-        });
-        if (!Object.keys(columnFilters[index]).length) delete columnFilters[index];
-        persistFilterState();
-        renderExpenseRows();
+      function applyFilterValue(param, value) {
+        var updates = {};
+        updates[param] = value;
+        navigateWithParams(updates);
       }
 
       function createFilterControl(config) {
         if (config.type === "select") {
           var select = document.createElement("select");
           select.className = "form-select expenses-column-filter";
-          select.dataset.filterIndex = String(config.index);
-          select.dataset.filterKey = "exact";
           select.appendChild(new Option(config.placeholder || "Todos", ""));
-          (config.options || uniqueColumnOptions(config.index)).forEach(function (value) {
-            select.appendChild(new Option(value, value));
+          (config.options || []).forEach(function (option) {
+            select.appendChild(new Option(option.label, option.value));
           });
+          select.value = columnFilterValues[config.param] || "";
           select.addEventListener("change", function () {
-            setColumnFilter(config.index, "exact", select.value);
+            applyFilterValue(config.param, select.value);
           });
           return select;
         }
@@ -2194,19 +2138,17 @@
           min.type = "number";
           min.className = "form-control expenses-column-filter compact";
           min.placeholder = "Min";
-          min.dataset.filterIndex = String(config.index);
-          min.dataset.filterKey = "min";
+          min.value = columnFilterValues[config.minParam] || "";
           var max = document.createElement("input");
           max.type = "number";
           max.className = "form-control expenses-column-filter compact";
           max.placeholder = "Max";
-          max.dataset.filterIndex = String(config.index);
-          max.dataset.filterKey = "max";
-          min.addEventListener("input", function () {
-            setColumnFilter(config.index, "min", min.value);
+          max.value = columnFilterValues[config.maxParam] || "";
+          min.addEventListener("change", function () {
+            applyFilterValue(config.minParam, min.value);
           });
-          max.addEventListener("input", function () {
-            setColumnFilter(config.index, "max", max.value);
+          max.addEventListener("change", function () {
+            applyFilterValue(config.maxParam, max.value);
           });
           rangeWrap.append(min, max);
           return rangeWrap;
@@ -2219,19 +2161,17 @@
           from.type = "date";
           from.className = "form-control expenses-column-filter compact";
           from.title = "Desde";
-          from.dataset.filterIndex = String(config.index);
-          from.dataset.filterKey = "from";
+          from.value = columnFilterValues[config.fromParam] || "";
           var to = document.createElement("input");
           to.type = "date";
           to.className = "form-control expenses-column-filter compact";
           to.title = "Hasta";
-          to.dataset.filterIndex = String(config.index);
-          to.dataset.filterKey = "to";
-          from.addEventListener("input", function () {
-            setColumnFilter(config.index, "from", from.value);
+          to.value = columnFilterValues[config.toParam] || "";
+          from.addEventListener("change", function () {
+            applyFilterValue(config.fromParam, from.value);
           });
-          to.addEventListener("input", function () {
-            setColumnFilter(config.index, "to", to.value);
+          to.addEventListener("change", function () {
+            applyFilterValue(config.toParam, to.value);
           });
           dateWrap.append(from, to);
           return dateWrap;
@@ -2241,10 +2181,15 @@
         input.type = "text";
         input.className = "form-control expenses-column-filter";
         input.placeholder = config.placeholder || "Filtrar";
-        input.dataset.filterIndex = String(config.index);
-        input.dataset.filterKey = "value";
-        input.addEventListener("input", function () {
-          setColumnFilter(config.index, "value", input.value);
+        input.value = columnFilterValues[config.param] || "";
+        input.addEventListener("keydown", function (event) {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            applyFilterValue(config.param, input.value);
+          }
+        });
+        input.addEventListener("change", function () {
+          applyFilterValue(config.param, input.value);
         });
         return input;
       }
@@ -2256,19 +2201,19 @@
         if (!thead || !headerRow || thead.querySelector(".expenses-column-filters")) return;
 
         var filterConfigs = [
-          { index: 0, type: "text", placeholder: "ID" },
-          { index: 1, type: "date-range" },
-          { index: 2, type: "date-range" },
-          { index: 3, type: "select", placeholder: "Todos" },
-          { index: 4, type: "text", placeholder: "Proveedor" },
-          { index: 5, type: "range" },
-          { index: 6, type: "select", placeholder: "Todas" },
-          { index: 7, type: "text", placeholder: "Obra" },
-          { index: 8, type: "text", placeholder: "Vehículo" },
-          { index: 9, type: "select", placeholder: "Todos", options: ["Subido", "No subido"] },
-          { index: 10, type: "select", placeholder: "Todos" },
-          { index: 11, type: "date-range" },
-          { index: 12, type: "select", placeholder: "Todos", options: ["Sí", "No"] },
+          { index: 0, type: "text", param: "trace_id", placeholder: "ID" },
+          { index: 1, type: "date-range", fromParam: "created_from", toParam: "created_to" },
+          { index: 2, type: "date-range", fromParam: "paid_from", toParam: "paid_to" },
+          { index: 3, type: "select", param: "reporter", placeholder: "Todos", options: reporterFilterOptions },
+          { index: 4, type: "text", param: "supplier", placeholder: "Proveedor" },
+          { index: 5, type: "range", minParam: "amount_min", maxParam: "amount_max" },
+          { index: 6, type: "select", param: "category", placeholder: "Todas", options: categoryFilterOptions },
+          { index: 7, type: "text", param: "worksite", placeholder: "Obra" },
+          { index: 8, type: "text", param: "vehicle", placeholder: "Vehículo" },
+          { index: 9, type: "select", param: "rindegastos_upload", placeholder: "Todos", options: [{ value: "", label: "Todos" }, { value: "uploaded", label: "Subido" }, { value: "not_uploaded", label: "No subido" }] },
+          { index: 10, type: "select", param: "status", placeholder: "Todos", options: statusFilterOptions },
+          { index: 11, type: "date-range", fromParam: "received_from", toParam: "received_to" },
+          { index: 12, type: "select", param: "has_receipt", placeholder: "Todos", options: [{ value: "", label: "Todos" }, { value: "yes", label: "Sí" }, { value: "no", label: "No" }] },
         ];
         var configsByIndex = {};
         filterConfigs.forEach(function (config) {
@@ -2297,121 +2242,29 @@
         thead.appendChild(filterRow);
       }
 
-      function sortRows(rows) {
-        var index = sortState.columnIndex;
-        var direction = sortState.direction === "asc" ? 1 : -1;
-        rows.sort(function (a, b) {
-          var aValue = getCellSortValue(a, index);
-          var bValue = getCellSortValue(b, index);
-          var aNum = parseFloat(aValue);
-          var bNum = parseFloat(bValue);
-          var bothNumeric = !Number.isNaN(aNum) && !Number.isNaN(bNum);
-          if (bothNumeric) {
-            if (aNum < bNum) return -1 * direction;
-            if (aNum > bNum) return 1 * direction;
-            return 0;
-          }
-          if (aValue < bValue) return -1 * direction;
-          if (aValue > bValue) return 1 * direction;
-          return 0;
-        });
-        return rows;
-      }
-
-      function rowMatches(row) {
-        var status = row.getAttribute("data-status") || "";
-        var hasAttachment = row.getAttribute("data-has-attachment") === "1";
-        var uploadedRindegastos = row.getAttribute("data-rindegastos-uploaded") === "1";
-        var text = (row.textContent || "").toLowerCase();
-
-        if (activeQuickFilter === "pending" && status !== "pending") return false;
-        if (activeQuickFilter === "incomplete" && status !== "incomplete") return false;
-        if (activeQuickFilter === "not_completed" && status !== "not_completed") return false;
-        if (activeQuickFilter === "completed" && status !== "completed") return false;
-        if (activeQuickFilter === "approved" && status !== "approved") return false;
-        if (activeQuickFilter === "uploaded_rindegastos" && !uploadedRindegastos) return false;
-        if (activeQuickFilter === "not_uploaded_rindegastos" && uploadedRindegastos) return false;
-        if (activeQuickFilter === "without_receipt" && hasAttachment) return false;
-        if (searchTerm && text.indexOf(searchTerm) === -1) return false;
-
-        for (var indexKey in columnFilters) {
-          if (!Object.prototype.hasOwnProperty.call(columnFilters, indexKey)) continue;
-          var index = parseInt(indexKey, 10);
-          var filter = columnFilters[indexKey] || {};
-          if (filter.value) {
-            var target = normalizeFilterText(getCellFilterValue(row, index));
-            var expected = normalizeFilterText(filter.value);
-            if (target.indexOf(expected) === -1) return false;
-          }
-          if (filter.exact) {
-            var exactTarget = normalizeFilterText(getCellFilterValue(row, index));
-            var exactExpected = normalizeFilterText(filter.exact);
-            if (exactTarget !== exactExpected) return false;
-          }
-          if (filter.min || filter.max) {
-            var numericValue = getCellNumericValue(row, index);
-            if (numericValue === null) return false;
-            if (filter.min && numericValue < parseFloat(filter.min)) return false;
-            if (filter.max && numericValue > parseFloat(filter.max)) return false;
-          }
-          if (filter.from || filter.to) {
-            var dateValue = getCellDateValue(row, index);
-            if (!dateValue) return false;
-            if (filter.from && dateValue < filter.from) return false;
-            if (filter.to && dateValue > filter.to) return false;
-          }
-        }
-        return true;
-      }
-
-      function renderExpenseRows() {
-        if (!expensesTbody) return;
-        var filtered = allExpenseRows.filter(rowMatches);
-        sortRows(filtered);
-        allExpenseRows.forEach(function (row) {
-          row.style.display = "none";
-        });
-        filtered.forEach(function (row) {
-          row.style.display = "";
-          expensesTbody.appendChild(row);
-        });
-        updateSortIndicators();
-      }
-
       function updateSortIndicators() {
         if (!expensesTable) return;
+        var sortByIndex = {
+          0: "trace_id",
+          1: "created_at",
+          2: "paid_at",
+          3: "reporter",
+          4: "supplier",
+          5: "amount",
+          6: "category",
+          7: "worksite",
+          8: "vehicle",
+          9: "rindegastos_upload",
+          10: "status",
+          11: "received_at",
+        };
         expensesTable.querySelectorAll("thead tr:first-child th").forEach(function (th, index) {
           var indicator = th.querySelector(".expenses-sort-indicator");
           if (!indicator) return;
-          indicator.textContent = sortState.columnIndex === index ?
-            (sortState.direction === "asc" ? "▲" : "▼") :
+          indicator.textContent = sortByIndex[index] === currentSort ?
+            (currentDirection === "asc" ? "▲" : "▼") :
             "";
         });
-      }
-
-      var searchInput = document.getElementById("expensesTableSearch");
-      if (searchInput) {
-        searchInput.addEventListener("input", function () {
-          searchTerm = (searchInput.value || "").trim().toLowerCase();
-          persistFilterState();
-          renderExpenseRows();
-        });
-      }
-
-      document.querySelectorAll(".expenses-quick-filter").forEach(function (button) {
-        button.addEventListener("click", function () {
-          activeQuickFilter = button.getAttribute("data-expenses-filter") || "all";
-          document.querySelectorAll(".expenses-quick-filter").forEach(function (btn) {
-            btn.classList.remove("active");
-          });
-          button.classList.add("active");
-          persistFilterState();
-          renderExpenseRows();
-        });
-      });
-
-      if (clearFiltersBtn) {
-        clearFiltersBtn.addEventListener("click", clearFilterState);
       }
 
       if (expensesTable) {
@@ -2423,19 +2276,29 @@
           th.innerHTML = '<span>' + label + '</span> <span class="expenses-sort-indicator" aria-hidden="true"></span>';
           th.style.cursor = "pointer";
           th.addEventListener("click", function () {
-            if (sortState.columnIndex === index) {
-              sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
-            } else {
-              sortState.columnIndex = index;
-              sortState.direction = "asc";
-            }
-            persistFilterState();
-            renderExpenseRows();
+            var sortByIndex = {
+              0: "trace_id",
+              1: "created_at",
+              2: "paid_at",
+              3: "reporter",
+              4: "supplier",
+              5: "amount",
+              6: "category",
+              7: "worksite",
+              8: "vehicle",
+              9: "rindegastos_upload",
+              10: "status",
+              11: "received_at",
+            };
+            var sortParam = sortByIndex[index];
+            if (!sortParam) return;
+            var nextDirection = currentSort === sortParam && currentDirection === "asc" ? "desc" : "asc";
+            navigateWithParams({ sort: sortParam, direction: nextDirection });
           });
         });
       }
-      restoreFilterState();
-      renderExpenseRows();
+      updateSortIndicators();
+      updateFilterStateUi();
 
       var rindegastosExportModal = document.getElementById("rindegastosExportModal");
       var rindegastosExportForm = rindegastosExportModal ? rindegastosExportModal.querySelector("form") : null;

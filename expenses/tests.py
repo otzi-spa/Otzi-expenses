@@ -884,11 +884,12 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "Tipo de documento Rindegastos")
         self.assertContains(response, "findReportedDocumentTypeMatch")
         self.assertContains(response, "expenses-column-filters")
-        self.assertContains(response, "data-filter-date")
-        self.assertContains(response, "data-filter-value")
+        self.assertContains(response, "columnFilterValues")
+        self.assertContains(response, "created_from")
+        self.assertContains(response, "supplier")
         self.assertContains(response, "expensesClearFiltersBtn")
         self.assertContains(response, "expensesFiltersActiveIndicator")
-        self.assertContains(response, "expenses.tableFilters.v")
+        self.assertContains(response, "navigateWithParams")
         self.assertContains(response, 'class="modal fade supplier-quick-modal"')
         self.assertContains(response, "supplier-quick-backdrop")
         self.assertContains(response, "Impuestos")
@@ -1066,7 +1067,90 @@ class SupplierCatalogFlowTests(TestCase):
 
         self.assertContains(response, "ID Rindegastos")
         self.assertContains(response, _expense_export_id(expense.pk))
-        self.assertContains(response, 'var sortState = { columnIndex: 1, direction: "desc" };')
+        self.assertContains(response, 'var currentSort = "created_at";')
+
+    def test_expense_list_defaults_to_active_statuses_and_paginates(self):
+        for index in range(55):
+            Expense.objects.create(status="pending", supplier=f"Proveedor Activo {index:02d}")
+        approved = Expense.objects.create(status="approved", supplier="Proveedor Aprobado")
+
+        response = self.client.get(reverse("expense_list"))
+
+        self.assertEqual(response.context["current_scope"], "active")
+        self.assertEqual(response.context["page_size"], 50)
+        self.assertEqual(len(response.context["gastos"]), 50)
+        self.assertEqual(response.context["paginator"].count, 55)
+        self.assertNotContains(response, _expense_export_id(approved.pk))
+        self.assertContains(response, "Mostrando 1-50 de 55 gastos filtrados.")
+
+    def test_expense_list_status_scope_reaches_final_expenses(self):
+        rejected = Expense.objects.create(status="rejected", supplier="Proveedor Rechazado")
+        Expense.objects.create(status="pending", supplier="Proveedor Pendiente")
+
+        response = self.client.get(reverse("expense_list"), {"scope": "rejected"})
+
+        self.assertEqual(response.context["current_scope"], "rejected")
+        self.assertContains(response, _expense_export_id(rejected.pk))
+        self.assertNotContains(response, "Proveedor Pendiente")
+
+    def test_expense_list_search_filters_before_pagination(self):
+        for index in range(60):
+            Expense.objects.create(status="pending", supplier=f"Proveedor Comun {index:02d}")
+        target = Expense.objects.create(status="approved", supplier="Transporte Especial Norte")
+
+        response = self.client.get(reverse("expense_list"), {"scope": "all", "q": "Especial", "page_size": "25"})
+
+        self.assertEqual(response.context["paginator"].count, 1)
+        self.assertEqual(response.context["page_size"], 25)
+        self.assertContains(response, _expense_export_id(target.pk))
+        self.assertContains(response, "Transporte Especial Norte")
+        self.assertNotContains(response, "Proveedor Comun 00")
+
+    def test_expense_list_column_filters_run_before_pagination(self):
+        for index in range(60):
+            Expense.objects.create(
+                status="pending",
+                supplier=f"Proveedor Comun {index:02d}",
+                category="Combustibles",
+            )
+        target = Expense.objects.create(
+            status="rejected",
+            supplier="Proveedor Rechazado Especial",
+            category="Peajes",
+            amount=Decimal("12345"),
+        )
+
+        response = self.client.get(
+            reverse("expense_list"),
+            {
+                "status": "rejected",
+                "supplier": "Especial",
+                "category": "Peajes",
+                "amount_min": "10000",
+                "page_size": "25",
+            },
+        )
+
+        self.assertEqual(response.context["current_scope"], "active")
+        self.assertEqual(response.context["paginator"].count, 1)
+        self.assertContains(response, _expense_export_id(target.pk))
+        self.assertContains(response, "Proveedor Rechazado Especial")
+        self.assertNotContains(response, "Proveedor Comun 00")
+
+    def test_expense_list_sorts_in_backend_before_pagination(self):
+        low = Expense.objects.create(status="pending", supplier="Monto Bajo", amount=Decimal("1000"))
+        high = Expense.objects.create(status="pending", supplier="Monto Alto", amount=Decimal("999999"))
+        for index in range(60):
+            Expense.objects.create(status="pending", supplier=f"Monto Medio {index:02d}", amount=Decimal("50000"))
+
+        response = self.client.get(
+            reverse("expense_list"),
+            {"sort": "amount", "direction": "desc", "page_size": "25"},
+        )
+
+        gastos = list(response.context["gastos"])
+        self.assertEqual(gastos[0].pk, high.pk)
+        self.assertNotIn(low.pk, [expense.pk for expense in gastos])
 
 
 class IncompleteExpenseStatusTests(TestCase):
@@ -1276,7 +1360,7 @@ class ExpenseApprovalFlowTests(TestCase):
         self.expense.save()
         self.client.force_login(self.superadmin)
 
-        page = self.client.get(reverse("expense_list"))
+        page = self.client.get(reverse("expense_list"), {"scope": "all"})
 
         self.assertContains(
             page,
