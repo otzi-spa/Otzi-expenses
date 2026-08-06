@@ -1502,9 +1502,24 @@ class SupplierCatalogFlowTests(TestCase):
 
         response = self.client.get(reverse("expense_list"))
 
-        self.assertContains(response, "ID Rindegastos")
+        self.assertContains(response, "ID OTZ")
         self.assertContains(response, _expense_export_id(expense.pk))
         self.assertContains(response, 'var currentSort = "created_at";')
+
+    def test_expense_list_trace_filter_uses_persisted_rindegastos_integration_code(self):
+        Expense.objects.create(status="pending", supplier="Proveedor Comun")
+        target = Expense.objects.create(
+            status="pending",
+            supplier="Proveedor Target",
+            rindegastos_integration_code="OTZ-PERSISTED",
+        )
+
+        response = self.client.get(reverse("expense_list"), {"trace_id": "OTZ-PERSISTED"})
+
+        self.assertEqual(response.context["paginator"].count, 1)
+        self.assertContains(response, "Proveedor Target")
+        self.assertContains(response, target.rindegastos_integration_code)
+        self.assertNotContains(response, "Proveedor Comun")
 
     def test_expense_list_defaults_to_active_statuses_and_paginates(self):
         for index in range(55):

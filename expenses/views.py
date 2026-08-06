@@ -1186,7 +1186,7 @@ def expense_list(request):
         for expense_id in queryset.values_list("id", flat=True):
             if trace_filter in _expense_export_id(expense_id):
                 trace_ids.append(expense_id)
-        queryset = queryset.filter(id__in=trace_ids)
+        queryset = queryset.filter(Q(id__in=trace_ids) | Q(rindegastos_integration_code__icontains=trace_filter))
     elif trace_filter:
         queryset = queryset.filter(id__icontains=trace_filter)
     created_from = parse_date(column_filter_params["created_from"])
@@ -1258,6 +1258,7 @@ def expense_list(request):
             | Q(wa_sender__last_name__icontains=search_query)
             | Q(created_by__email__icontains=search_query)
             | Q(rindegastos_expense_id__icontains=search_query)
+            | Q(rindegastos_integration_code__icontains=search_query)
             | Q(document_number__icontains=search_query)
         )
     sort_options = {
