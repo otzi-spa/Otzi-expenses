@@ -2,8 +2,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils.dateparse import parse_date
 
 from expenses.rindegastos_client import RindegastosAPIError
+from expenses.rindegastos_trace import expense_integration_code
 from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, rolling_uploaded_sync_since
-from expenses.views import _expense_export_id
 
 
 class Command(BaseCommand):
@@ -18,7 +18,7 @@ class Command(BaseCommand):
         since = parse_date(options.get("since") or "") or rolling_uploaded_sync_since()
         until = parse_date(options.get("until") or "")
         try:
-            stats = RindegastosUploadedExpenseSync(export_id_func=_expense_export_id).sync(
+            stats = RindegastosUploadedExpenseSync(export_id_func=expense_integration_code).sync(
                 since=since,
                 until=until,
                 max_pages=options["max_pages"],

@@ -29,6 +29,7 @@ from expenses.models import (
 )
 from expenses.tasks import send_expense_notification_task
 from expenses.invoice_tax_calculator import calculate_invoice_taxes
+from expenses.rindegastos_client import RindegastosClient
 from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
 from expenses.tax_indicators_sync import SiiTaxIndicatorSync
@@ -106,6 +107,17 @@ class RindegastosUploadedExpenseSyncTests(TestCase):
         self.assertEqual(summary["id"], 123)
         self.assertEqual(summary["otzi_ids"], ["OTZ-YKQL54N2"])
 
+    def test_summarize_rindegastos_expense_includes_integration_otzi_ids(self):
+        summary = summarize_rindegastos_expense(
+            {
+                "Id": 123,
+                "IntegrationCode": "OTZ-YKQL54N2",
+                "IntegrationExternalCode": "legacy OTZ-S5FAEKWM",
+            }
+        )
+
+        self.assertEqual(summary["integration_otzi_ids"], ["OTZ-S5FAEKWM", "OTZ-YKQL54N2"])
+
     def test_sync_marks_local_expense_from_rindegastos_note(self):
         expense = Expense.objects.create(
             status="completed",
@@ -138,7 +150,133 @@ class RindegastosUploadedExpenseSyncTests(TestCase):
         expense.refresh_from_db()
         self.assertEqual(stats["matched"], 1)
         self.assertEqual(expense.rindegastos_expense_id, "987")
+        self.assertEqual(expense.rindegastos_integration_code, export_id)
         self.assertEqual(expense.rindegastos_report_id, "654")
+
+    def test_sync_matches_local_expense_from_integration_code(self):
+        expense = Expense.objects.create(
+            status="completed",
+            amount=Decimal("5900"),
+            currency="CLP",
+            category="Oficina Central",
+            supplier="Proveedor",
+            paid_at="2026-06-11",
+        )
+        export_id = _expense_export_id(expense.id)
+        expense.rindegastos_integration_code = export_id
+        expense.save(update_fields=["rindegastos_integration_code"])
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "ReportId": 654,
+                        "Status": "Aprobado",
+                        "IssueDate": "2026-06-11",
+                        "Total": 5900,
+                        "IntegrationCode": export_id,
+                        "Note": "Nota sin identificador",
+                    }
+                ], {"Pages": 1}
+
+        stats = RindegastosUploadedExpenseSync(client=FakeClient(), export_id_func=_expense_export_id).sync(
+            since=timezone.datetime(2026, 4, 1).date(),
+            until=timezone.datetime(2026, 7, 15).date(),
+        )
+
+        expense.refresh_from_db()
+        self.assertEqual(stats["matched"], 1)
+        self.assertEqual(stats["matched_by"]["integration_code"], 1)
+        self.assertEqual(expense.rindegastos_expense_id, "987")
+        self.assertEqual(expense.rindegastos_integration_code, export_id)
+
+    def test_sync_matches_local_expense_from_existing_remote_id_when_note_lost_otzi(self):
+        expense = Expense.objects.create(
+            status="completed",
+            amount=Decimal("5900"),
+            currency="CLP",
+            category="Oficina Central",
+            supplier="Proveedor",
+            paid_at="2026-06-11",
+            rindegastos_expense_id="987",
+        )
+        export_id = _expense_export_id(expense.id)
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "ReportId": 654,
+                        "Status": "Aprobado",
+                        "IssueDate": "2026-06-11",
+                        "Total": 5900,
+                        "Note": "Nota editada en Rindegastos",
+                    }
+                ], {"Pages": 1}
+
+        stats = RindegastosUploadedExpenseSync(client=FakeClient(), export_id_func=_expense_export_id).sync(
+            since=timezone.datetime(2026, 4, 1).date(),
+            until=timezone.datetime(2026, 7, 15).date(),
+        )
+
+        expense.refresh_from_db()
+        self.assertEqual(stats["matched"], 1)
+        self.assertEqual(stats["matched_by"]["remote_id"], 1)
+        self.assertEqual(expense.rindegastos_integration_code, export_id)
+
+
+class RindegastosClientTests(TestCase):
+    class FakeResponse:
+        def __init__(self, payload, status_code=200, text=""):
+            self.payload = payload
+            self.status_code = status_code
+            self.text = text
+
+        def json(self):
+            return self.payload
+
+    @patch("expenses.rindegastos_client.requests.get")
+    def test_get_expense_fetches_detail_by_id(self, get_mock):
+        get_mock.return_value = self.FakeResponse({"Expense": {"Id": 987, "Supplier": "Proveedor"}})
+
+        result = RindegastosClient(base_url="https://api.example.test/v1", token="token", timeout=7).get_expense(987)
+
+        self.assertEqual(result, {"Id": 987, "Supplier": "Proveedor"})
+        get_mock.assert_called_once_with(
+            "https://api.example.test/v1/getExpense",
+            params={"Id": 987},
+            headers={"Authorization": "Bearer token"},
+            timeout=7,
+        )
+
+    @patch("expenses.rindegastos_client.requests.put")
+    def test_set_expense_integration_sends_json_body(self, put_mock):
+        put_mock.return_value = self.FakeResponse({"Id": 987, "IntegrationCode": "OTZ-ABC123"})
+
+        result = RindegastosClient(base_url="https://api.example.test/v1", token="token").set_expense_integration(
+            987,
+            1,
+            "OTZ-ABC123",
+            "2026-08-05 10:30:00",
+        )
+
+        self.assertEqual(result["IntegrationCode"], "OTZ-ABC123")
+        put_mock.assert_called_once_with(
+            "https://api.example.test/v1/setExpenseIntegration",
+            json={
+                "Id": 987,
+                "IntegrationStatus": 1,
+                "IntegrationCode": "OTZ-ABC123",
+                "IntegrationDate": "2026-08-05 10:30:00",
+            },
+            headers={
+                "Authorization": "Bearer token",
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+        )
 
 
 class FuelExpenseExportTests(TestCase):
@@ -151,7 +289,7 @@ class FuelExpenseExportTests(TestCase):
         self.client.force_login(self.user)
 
     def test_export_includes_combustible_columns_and_values(self):
-        Expense.objects.create(
+        expense = Expense.objects.create(
             status="completed",
             amount=Decimal("50000"),
             currency="CLP",
@@ -174,6 +312,8 @@ class FuelExpenseExportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("vehiculo_equipo,km_carguio,litros_combustible,categoria_rindegastos", content)
         self.assertIn("Camion 12,154320,45.500,Diesel", content)
+        expense.refresh_from_db()
+        self.assertEqual(expense.rindegastos_integration_code, _expense_export_id(expense.id))
 
         page = self.client.get(reverse("expense_list"))
         self.assertContains(page, 'name="fuel_km"')

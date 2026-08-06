@@ -1,5 +1,6 @@
 import requests
 from django.conf import settings
+from django.utils import timezone
 
 
 class RindegastosAPIError(Exception):
@@ -20,6 +21,25 @@ class RindegastosClient:
             url,
             params=params or {},
             headers={"Authorization": f"Bearer {self.token}"},
+            timeout=self.timeout,
+        )
+        if response.status_code >= 400:
+            raise RindegastosAPIError(f"{endpoint}: HTTP {response.status_code} - {response.text[:500]}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RindegastosAPIError(f"{endpoint}: respuesta no es JSON") from exc
+        return payload
+
+    def _put(self, endpoint, data=None):
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        response = requests.put(
+            url,
+            json=data or {},
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            },
             timeout=self.timeout,
         )
         if response.status_code >= 400:
@@ -87,3 +107,30 @@ class RindegastosClient:
         if isinstance(expenses, dict):
             expenses = [expenses]
         return expenses or [], payload.get("Records") or {}
+
+    def get_expense(self, expense_id):
+        payload = self._get("getExpense", params={"Id": expense_id})
+        return payload.get("Expense") or payload.get("expense") or payload
+
+    def set_expense_integration(self, expense_id, integration_status, integration_code, integration_date=None):
+        data = {
+            "Id": expense_id,
+            "IntegrationStatus": int(integration_status),
+            "IntegrationCode": integration_code or "",
+        }
+        formatted_date = _format_integration_date(integration_date)
+        if formatted_date:
+            data["IntegrationDate"] = formatted_date
+        return self._put("setExpenseIntegration", data=data)
+
+
+def _format_integration_date(value):
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    if hasattr(value, "date") and timezone.is_aware(value):
+        value = timezone.localtime(value)
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value)

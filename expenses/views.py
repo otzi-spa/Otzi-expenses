@@ -1,5 +1,4 @@
 from functools import wraps
-import base64
 import csv
 import hashlib
 import hmac
@@ -44,6 +43,7 @@ from django.utils import timezone
 from requests import RequestException
 from .invoice_tax_calculator import calculate_invoice_taxes
 from .rindegastos_client import RindegastosAPIError
+from .rindegastos_trace import ensure_expense_integration_code, expense_integration_code, expense_integration_code_for_expense
 from .rindegastos_sync import RindegastosCatalogSync
 from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, default_uploaded_sync_since
 from .tax_indicators_sync import SiiTaxIndicatorSync
@@ -1413,7 +1413,7 @@ def expense_list(request):
         for s in AllowedSender.objects.filter(is_deleted=False)
     }
     for gasto in gastos:
-        gasto.export_id = _expense_export_id(gasto.id)
+        gasto.export_id = expense_integration_code_for_expense(gasto)
         gasto.policy_catalog_id = None
         if gasto.category:
             policy_catalog = CategoryCatalog.objects.filter(name=gasto.category).only("id").first()
@@ -1512,11 +1512,7 @@ def _export_amount(amount):
 
 
 def _expense_export_id(expense_id):
-    key = str(settings.SECRET_KEY).encode("utf-8")
-    message = f"expense:{expense_id}".encode("utf-8")
-    digest = hmac.new(key, message, hashlib.sha256).digest()
-    token = base64.b32encode(digest[:5]).decode("ascii").rstrip("=")
-    return f"OTZ-{token}"
+    return expense_integration_code(expense_id)
 
 
 def _rindegastos_note(note, export_id):
@@ -1644,7 +1640,7 @@ def expense_rindegastos_export(request):
     )
 
     for expense in expenses:
-        export_id = _expense_export_id(expense.id)
+        export_id = ensure_expense_integration_code(expense)
         policy = policy_by_name.get(expense.category)
         attachments = list(expense.attachments.all())
         writer.writerow(

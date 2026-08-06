@@ -49,9 +49,9 @@ def format_rejection_expense_summary(expense: Expense) -> str:
 
 
 def expense_trace_id(expense: Expense) -> str:
-    from expenses.views import _expense_export_id
+    from expenses.rindegastos_trace import expense_integration_code_for_expense
 
-    return _expense_export_id(expense.id)
+    return expense_integration_code_for_expense(expense)
 
 
 def build_rejection_payload(expense: Expense) -> dict:

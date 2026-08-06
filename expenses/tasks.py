@@ -11,9 +11,9 @@ from requests import RequestException
 from expenses.models import ExpenseNotification
 from expenses.rindegastos_client import RindegastosAPIError
 from expenses.rindegastos_sync import RindegastosCatalogSync
+from expenses.rindegastos_trace import expense_integration_code
 from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, rolling_uploaded_sync_since
 from expenses.tax_indicators_sync import SiiTaxIndicatorSync
-from expenses.views import _expense_export_id
 from expenses.whatsapp_notifications import WhatsAppNotificationError, send_whatsapp_template
 
 
@@ -34,7 +34,7 @@ def sync_rindegastos_catalogs_task():
 @shared_task(name="expenses.sync_rindegastos_uploaded_expenses")
 def sync_rindegastos_uploaded_expenses_task():
     try:
-        stats = RindegastosUploadedExpenseSync(export_id_func=_expense_export_id).sync(
+        stats = RindegastosUploadedExpenseSync(export_id_func=expense_integration_code).sync(
             since=rolling_uploaded_sync_since(),
             max_pages=20,
         )

@@ -24,6 +24,25 @@ def extract_otzi_ids(value):
     return sorted(set(OTZI_EXPENSE_ID_RE.findall(str(value or "").upper())))
 
 
+def first_present_value(payload, *keys):
+    for key in keys:
+        value = payload.get(key)
+        if value not in {None, ""}:
+            return value
+    return None
+
+
+def extract_integration_codes(payload):
+    values = [
+        first_present_value(payload, "IntegrationCode", "integrationCode", "integration_code"),
+        first_present_value(payload, "IntegrationExternalCode", "integrationExternalCode", "integration_external_code"),
+    ]
+    codes = []
+    for value in values:
+        codes.extend(extract_otzi_ids(value))
+    return sorted(set(codes))
+
+
 def expense_export_id(expense_id, export_id_func):
     return export_id_func(expense_id)
 
@@ -44,7 +63,14 @@ def summarize_rindegastos_expense(payload):
         "note": note,
         "otzi_ids": extract_otzi_ids(note),
         "integration_date": payload.get("IntegrationDate"),
-        "integration_external_code": payload.get("IntegrationExternalCode"),
+        "integration_code": first_present_value(payload, "IntegrationCode", "integrationCode", "integration_code"),
+        "integration_external_code": first_present_value(
+            payload,
+            "IntegrationExternalCode",
+            "integrationExternalCode",
+            "integration_external_code",
+        ),
+        "integration_otzi_ids": extract_integration_codes(payload),
         "raw_keys": sorted(payload.keys()),
     }
 
@@ -84,9 +110,18 @@ class RindegastosUploadedExpenseSync:
     def build_local_export_map(self):
         if not self.export_id_func:
             raise ValueError("export_id_func es obligatorio para vincular gastos locales.")
+        local_by_export_id = {}
+        for expense in Expense.objects.all():
+            generated_id = expense_export_id(expense.id, self.export_id_func)
+            local_by_export_id[generated_id] = expense
+            if expense.rindegastos_integration_code:
+                local_by_export_id[expense.rindegastos_integration_code] = expense
+        return local_by_export_id
+
+    def build_local_remote_id_map(self):
         return {
-            expense_export_id(expense.id, self.export_id_func): expense
-            for expense in Expense.objects.all()
+            str(expense.rindegastos_expense_id): expense
+            for expense in Expense.objects.exclude(rindegastos_expense_id__isnull=True).exclude(rindegastos_expense_id="")
         }
 
     @transaction.atomic
@@ -99,32 +134,41 @@ class RindegastosUploadedExpenseSync:
             results_per_page=results_per_page,
         )
         local_by_export_id = self.build_local_export_map()
+        local_by_remote_id = self.build_local_remote_id_map()
 
         matched = 0
         remote_with_otzi = 0
+        remote_with_integration_code = 0
+        matched_by = {"integration_code": 0, "note": 0, "remote_id": 0}
         unmatched_ids = set()
         matched_ids = set()
         for payload in remote_expenses:
             summary = summarize_rindegastos_expense(payload)
-            if not summary["otzi_ids"]:
-                continue
-            remote_with_otzi += 1
-            for otzi_id in summary["otzi_ids"]:
-                expense = local_by_export_id.get(otzi_id)
-                if not expense:
+            if summary["integration_otzi_ids"]:
+                remote_with_integration_code += 1
+            if summary["otzi_ids"]:
+                remote_with_otzi += 1
+
+            match = self.match_remote_expense(summary, local_by_export_id, local_by_remote_id)
+            if not match:
+                for otzi_id in summary["integration_otzi_ids"] or summary["otzi_ids"]:
                     unmatched_ids.add(otzi_id)
-                    continue
-                matched_ids.add(otzi_id)
-                uploaded_at = _parse_rindegastos_datetime(summary["issue_date"]) or now
-                Expense.objects.filter(pk=expense.pk).update(
-                    rindegastos_expense_id=str(summary["id"] or otzi_id),
-                    rindegastos_report_id=str(summary["report_id"] or "") or None,
-                    rindegastos_uploaded_at=uploaded_at,
-                    rindegastos_synced_at=now,
-                    rindegastos_status=str(summary["status"] or "") or None,
-                    rindegastos_raw_payload=payload,
-                )
-                matched += 1
+                continue
+
+            expense, otzi_id, match_source = match
+            matched_ids.add(otzi_id)
+            uploaded_at = _parse_rindegastos_datetime(summary["issue_date"]) or now
+            Expense.objects.filter(pk=expense.pk).update(
+                rindegastos_expense_id=str(summary["id"] or otzi_id),
+                rindegastos_integration_code=otzi_id,
+                rindegastos_report_id=str(summary["report_id"] or "") or None,
+                rindegastos_uploaded_at=uploaded_at,
+                rindegastos_synced_at=now,
+                rindegastos_status=str(summary["status"] or "") or None,
+                rindegastos_raw_payload=payload,
+            )
+            matched_by[match_source] += 1
+            matched += 1
 
         return {
             "since": (since or default_uploaded_sync_since()).isoformat(),
@@ -133,10 +177,30 @@ class RindegastosUploadedExpenseSync:
             "results_per_page": results_per_page,
             "remote_fetched": len(remote_expenses),
             "remote_with_otzi_id": remote_with_otzi,
+            "remote_with_integration_code": remote_with_integration_code,
             "matched": matched,
+            "matched_by": matched_by,
             "matched_ids": sorted(matched_ids),
             "unmatched_ids": sorted(unmatched_ids),
         }
+
+    def match_remote_expense(self, summary, local_by_export_id, local_by_remote_id):
+        for otzi_id in summary["integration_otzi_ids"]:
+            expense = local_by_export_id.get(otzi_id)
+            if expense:
+                return expense, otzi_id, "integration_code"
+
+        for otzi_id in summary["otzi_ids"]:
+            expense = local_by_export_id.get(otzi_id)
+            if expense:
+                return expense, otzi_id, "note"
+
+        remote_id = str(summary["id"] or "")
+        expense = local_by_remote_id.get(remote_id)
+        if expense:
+            return expense, expense_export_id(expense.id, self.export_id_func), "remote_id"
+
+        return None
 
 
 def _parse_rindegastos_datetime(value):
