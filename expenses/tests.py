@@ -6,6 +6,7 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -520,6 +521,59 @@ class RindegastosExpenseReconcilerTests(TestCase):
             client.marked_payload,
             {"expense_id": 987, "integration_status": 1, "integration_code": expense.rindegastos_integration_code},
         )
+
+    def test_review_rindegastos_diffs_outputs_trace_remote_ids_and_flags(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            amount=Decimal("18679"),
+            category="Departamento Maquinaria",
+            paid_at=date(2026, 7, 15),
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+        first_snapshot = RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            rindegastos_expense_id="74973111",
+            rindegastos_report_id="100",
+            payload_hash="a" * 64,
+            normalized_payload={"total": "8962"},
+            raw_payload={"Id": "74973111"},
+        )
+        second_snapshot = RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            rindegastos_expense_id="74973112",
+            rindegastos_report_id="100",
+            payload_hash="b" * 64,
+            normalized_payload={"total": "9521"},
+            raw_payload={"Id": "74973112"},
+        )
+        RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=first_snapshot,
+            field_name="total",
+            local_value="18679",
+            remote_value="8962",
+            severity=RindegastosExpenseDiff.SEVERITY_CONFLICT,
+        )
+        RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=second_snapshot,
+            field_name="total",
+            local_value="18679",
+            remote_value="9521",
+            severity=RindegastosExpenseDiff.SEVERITY_CONFLICT,
+        )
+
+        out = io.StringIO()
+        call_command("review_rindegastos_diffs", "--expense-id", str(expense.id), stdout=out)
+        content = out.getvalue()
+
+        self.assertIn("OTZ-ABC123", content)
+        self.assertIn("74973111", content)
+        self.assertIn("74973112", content)
+        self.assertIn("multiple_remote_expenses", content)
+        self.assertIn("multiple_remote_totals", content)
+        self.assertIn("manual_review", content)
 
 
 class FuelExpenseExportTests(TestCase):
