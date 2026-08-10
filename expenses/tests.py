@@ -529,6 +529,7 @@ class RindegastosExpenseReconcilerTests(TestCase):
             amount=Decimal("18679"),
             category="Departamento Maquinaria",
             paid_at=date(2026, 7, 15),
+            rindegastos_expense_id="74973111",
             rindegastos_integration_code="OTZ-ABC123",
         )
         first_snapshot = RindegastosExpenseSnapshot.objects.create(
@@ -544,7 +545,7 @@ class RindegastosExpenseReconcilerTests(TestCase):
             rindegastos_expense_id="74973112",
             rindegastos_report_id="100",
             payload_hash="b" * 64,
-            normalized_payload={"total": "9521"},
+            normalized_payload={"total": "9521", "rindegastos_status": "Eliminado"},
             raw_payload={"Id": "74973112"},
         )
         RindegastosExpenseDiff.objects.create(
@@ -573,7 +574,56 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertIn("74973112", content)
         self.assertIn("multiple_remote_expenses", content)
         self.assertIn("multiple_remote_totals", content)
+        self.assertIn("remote_id_mismatch", content)
+        self.assertIn("remote_deleted_like_status", content)
         self.assertIn("manual_review", content)
+
+    @patch("expenses.management.commands.inspect_rindegastos_expenses.RindegastosClient")
+    def test_inspect_rindegastos_expenses_flags_detail_not_listed(self, client_class):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            amount=Decimal("18679"),
+            category="Departamento Maquinaria",
+            paid_at=date(2026, 7, 15),
+            rindegastos_expense_id="75528397",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+        RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            rindegastos_expense_id="75528979",
+            rindegastos_report_id="13421804",
+            payload_hash="c" * 64,
+            normalized_payload={"total": "9521", "rindegastos_status": "Aprobado"},
+            raw_payload={"Id": "75528979"},
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "ReportId": "13421804",
+                    "Status": "Aprobado",
+                    "IssueDate": "2026-07-07",
+                    "Supplier": "Proveedor remoto",
+                    "Total": 9521,
+                    "IntegrationCode": "OTZ-ABC123",
+                }
+
+        client_class.return_value = FakeClient()
+
+        out = io.StringIO()
+        call_command("inspect_rindegastos_expenses", "--expense-id", str(expense.id), stdout=out)
+        content = out.getvalue()
+
+        self.assertIn("75528397", content)
+        self.assertIn("75528979", content)
+        self.assertIn("detail_ok_but_not_listed", content)
+        self.assertIn("not_found_in_getExpenses_window", content)
+        self.assertIn("OTZ-ABC123", content)
 
 
 class FuelExpenseExportTests(TestCase):
@@ -1325,7 +1375,8 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "created_from")
         self.assertContains(response, "supplier")
         self.assertContains(response, "expensesClearFiltersBtn")
-        self.assertContains(response, "expensesFiltersActiveIndicator")
+        self.assertContains(response, 'aria-label="Filtros activos"')
+        self.assertContains(response, "Vista:")
         self.assertContains(response, "navigateWithParams")
         self.assertContains(response, 'class="modal fade supplier-quick-modal"')
         self.assertContains(response, "supplier-quick-backdrop")
@@ -1509,7 +1560,7 @@ class SupplierCatalogFlowTests(TestCase):
     def test_expense_list_trace_filter_uses_persisted_rindegastos_integration_code(self):
         Expense.objects.create(status="pending", supplier="Proveedor Comun")
         target = Expense.objects.create(
-            status="pending",
+            status="approved",
             supplier="Proveedor Target",
             rindegastos_integration_code="OTZ-PERSISTED",
         )
@@ -1519,7 +1570,37 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertEqual(response.context["paginator"].count, 1)
         self.assertContains(response, "Proveedor Target")
         self.assertContains(response, target.rindegastos_integration_code)
+        self.assertEqual(
+            [pill["label"] for pill in response.context["active_filter_pills"]],
+            ["ID OTZ"],
+        )
         self.assertNotContains(response, "Proveedor Comun")
+
+    def test_expense_list_displays_active_filter_pills(self):
+        Expense.objects.create(
+            status="approved",
+            supplier="Proveedor Target",
+            rindegastos_integration_code="OTZ-PERSISTED",
+        )
+
+        response = self.client.get(
+            reverse("expense_list"),
+            {
+                "scope": "approved",
+                "trace_id": "OTZ-PERSISTED",
+                "q": "Target",
+                "page_size": "25",
+            },
+        )
+
+        self.assertContains(response, "Vista:")
+        self.assertContains(response, "Aprobado")
+        self.assertContains(response, "ID OTZ:")
+        self.assertContains(response, "OTZ-PERSISTED")
+        self.assertContains(response, "Búsqueda:")
+        self.assertContains(response, "Target")
+        self.assertContains(response, "trace_id=")
+        self.assertContains(response, "scope=active")
 
     def test_expense_list_defaults_to_active_statuses_and_paginates(self):
         for index in range(55):

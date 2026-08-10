@@ -388,19 +388,22 @@
         {% endfor %}
         <input type="hidden" name="sort" value="{{ sort }}">
         <input type="hidden" name="direction" value="{{ direction }}">
-        <span id="expensesFiltersActiveIndicator" class="badge badge-light-primary expenses-active-filter-badge" hidden>
-          <span class="svg-icon svg-icon-6" aria-hidden="true">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M2 3.5H14L9.25 8.5V12.25L6.75 13.5V8.5L2 3.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-            </svg>
-          </span>
-          Filtros activos
-        </span>
         <a id="expensesClearFiltersBtn" class="btn btn-sm btn-light" href="{{ clear_filters_url }}" {% if current_scope == "active" and not search_query and not has_column_filters and sort == "created_at" and direction == "desc" %}hidden{% endif %}>Limpiar filtros</a>
         <input type="text" id="expensesTableSearch" name="q" class="form-control form-control-sm" value="{{ search_query }}" placeholder="Buscar gastos...">
         <button type="submit" class="btn btn-sm btn-primary">Buscar</button>
       </form>
     </div>
+    {% if active_filter_pills %}
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-3" aria-label="Filtros activos">
+        {% for filter in active_filter_pills %}
+          <a class="badge badge-light-primary d-inline-flex align-items-center gap-2 py-2 px-3" href="{{ filter.url }}" title="Quitar filtro {{ filter.label }}">
+            <span class="fw-semibold">{{ filter.label }}:</span>
+            <span>{{ filter.value }}</span>
+            <span class="fw-bold" aria-hidden="true">&times;</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
       <div class="text-muted small">
         Mostrando {{ page_obj.start_index }}-{{ page_obj.end_index }} de {{ paginator.count }} gastos filtrados.
@@ -1984,7 +1987,6 @@
       var expensesTable = document.getElementById("expensesTable");
       var serverFilterActive = "{{ current_scope|escapejs }}" !== "active" || Boolean("{{ search_query|escapejs }}");
       var clearFiltersBtn = document.getElementById("expensesClearFiltersBtn");
-      var filtersActiveIndicator = document.getElementById("expensesFiltersActiveIndicator");
       var rindegastosFieldOptionsEl = document.getElementById("rindegastos-field-options-data");
       var rindegastosFieldOptions = [];
       var activeSupplierForm = null;
@@ -2091,7 +2093,6 @@
 
       function updateFilterStateUi() {
         var active = serverFilterActive || {{ has_column_filters|yesno:"true,false" }} || currentSort !== "created_at" || currentDirection !== "desc";
-        if (filtersActiveIndicator) filtersActiveIndicator.hidden = !active;
         if (clearFiltersBtn) clearFiltersBtn.hidden = !active;
       }
 

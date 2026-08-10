@@ -1169,7 +1169,10 @@ def expense_list(request):
     )
     status_filter = column_filter_params["status"]
     status_filter_is_valid = status_filter in dict(Expense.STATUS)
-    if scope == "active" and not status_filter_is_valid:
+    trace_filter = column_filter_params["trace_id"].upper()
+    trace_filter_is_otz = trace_filter.startswith("OTZ-")
+    default_scope_bypassed_by_trace = scope == "active" and trace_filter_is_otz and not status_filter_is_valid
+    if scope == "active" and not status_filter_is_valid and not trace_filter_is_otz:
         queryset = queryset.filter(status__in=active_statuses)
     elif scope in active_statuses | final_statuses:
         queryset = queryset.filter(status=scope)
@@ -1180,10 +1183,9 @@ def expense_list(request):
     elif scope == "without_receipt":
         queryset = queryset.filter(attachments__isnull=True)
 
-    trace_filter = column_filter_params["trace_id"].upper()
-    if trace_filter.startswith("OTZ-"):
+    if trace_filter_is_otz:
         trace_ids = []
-        for expense_id in queryset.values_list("id", flat=True):
+        for expense_id in Expense.objects.values_list("id", flat=True):
             if trace_filter in _expense_export_id(expense_id):
                 trace_ids.append(expense_id)
         queryset = queryset.filter(Q(id__in=trace_ids) | Q(rindegastos_integration_code__icontains=trace_filter))
@@ -1338,15 +1340,75 @@ def expense_list(request):
         ("not_uploaded_rindegastos", "No subidos RG"),
         ("without_receipt", "Sin comprobante"),
     ]
+    quick_filter_labels = dict(quick_filter_options)
     quick_filters = [
         {
             "scope": option_scope,
             "label": label,
             "url": query_url(scope=option_scope, page=1),
-            "active": scope == option_scope,
+            "active": scope == option_scope and not default_scope_bypassed_by_trace,
         }
         for option_scope, label in quick_filter_options
     ]
+    column_filter_labels = {
+        "trace_id": "ID OTZ",
+        "created_from": "Fecha reporte desde",
+        "created_to": "Fecha reporte hasta",
+        "paid_from": "Fecha gasto desde",
+        "paid_to": "Fecha gasto hasta",
+        "reporter": "Usuario",
+        "supplier": "Proveedor",
+        "amount_min": "Monto mínimo",
+        "amount_max": "Monto máximo",
+        "category": "Política",
+        "worksite": "Obra",
+        "vehicle": "Vehículo",
+        "rindegastos_upload": "Rindegastos",
+        "status": "Status",
+        "received_from": "Recibido desde",
+        "received_to": "Recibido hasta",
+        "has_receipt": "Comprobante",
+    }
+    value_labels = {
+        "rindegastos_upload": {"uploaded": "Subido", "not_uploaded": "No subido"},
+        "has_receipt": {"yes": "Con comprobante", "no": "Sin comprobante"},
+        "status": dict(Expense.STATUS),
+    }
+    column_filter_values = {
+        key: value
+        for key, value in column_filter_params.items()
+        if value
+    }
+    has_column_filters = bool(column_filter_values)
+    active_filter_pills = []
+    if not default_scope_bypassed_by_trace:
+        active_filter_pills.append(
+            {
+                "label": "Vista",
+                "value": quick_filter_labels.get(scope, scope),
+                "url": query_url(scope="all", page=1),
+            }
+        )
+    if search_query:
+        active_filter_pills.append({"label": "Búsqueda", "value": search_query, "url": query_url(q="", page=1)})
+    for key, value in column_filter_values.items():
+        display_value = value_labels.get(key, {}).get(value, value)
+        active_filter_pills.append(
+            {
+                "label": column_filter_labels.get(key, key),
+                "value": display_value,
+                "url": query_url(**{key: "", "page": 1}),
+            }
+        )
+    if sort != "created_at" or direction != "desc":
+        sort_label = next((name for name, field in sort_options.items() if name == sort), sort)
+        active_filter_pills.append(
+            {
+                "label": "Orden",
+                "value": f"{sort_label} {'desc' if direction == 'desc' else 'asc'}",
+                "url": query_url(sort="created_at", direction="desc", page=1),
+            }
+        )
     page_size_options = [
         {"value": value, "url": query_url(page_size=value, page=1), "active": page_size == value}
         for value in (25, 50, 100, 200)
@@ -1367,12 +1429,6 @@ def expense_list(request):
     if page_obj.has_next():
         page_links.append({"label": "Siguiente", "url": query_url(page=page_obj.next_page_number()), "active": False})
 
-    column_filter_values = {
-        key: value
-        for key, value in column_filter_params.items()
-        if value
-    }
-    has_column_filters = bool(column_filter_values)
     sort_links = {}
     sort_columns = {
         0: "trace_id",
@@ -1465,6 +1521,7 @@ def expense_list(request):
         "page_links": page_links,
         "column_filters": column_filter_values,
         "has_column_filters": has_column_filters,
+        "active_filter_pills": active_filter_pills,
         "sort_links": sort_links,
         "sort": sort,
         "direction": direction,

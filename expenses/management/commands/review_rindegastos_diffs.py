@@ -70,14 +70,25 @@ class Command(BaseCommand):
             flags.append("multiple_remote_totals")
         if diff.field_name in SENSITIVE_FIELDS:
             flags.append("sensitive")
+        local_remote_id = str(expense.rindegastos_expense_id or "")
+        snapshot_remote_id = str(diff.snapshot.rindegastos_expense_id or "")
+        if local_remote_id and snapshot_remote_id and local_remote_id != snapshot_remote_id:
+            flags.append("remote_id_mismatch")
+        remote_status = _format_value((diff.snapshot.normalized_payload or {}).get("rindegastos_status"))
+        if _looks_deleted(remote_status):
+            flags.append("remote_deleted_like_status")
         if "multiple_remote_expenses" in flags or "multiple_remote_totals" in flags:
+            flags.append("manual_review")
+        if "remote_id_mismatch" in flags or "remote_deleted_like_status" in flags:
             flags.append("manual_review")
 
         return {
             "expense_id": expense.id,
             "otz_id": expense_integration_code_for_expense(expense),
+            "expense_rindegastos_expense_id": expense.rindegastos_expense_id or "",
             "rindegastos_expense_id": diff.snapshot.rindegastos_expense_id,
             "rindegastos_report_id": diff.snapshot.rindegastos_report_id,
+            "rindegastos_status": remote_status,
             "expense_paid_at": expense.paid_at.isoformat() if expense.paid_at else "",
             "expense_supplier": expense.supplier or "",
             "expense_total": _format_value(expense.amount),
@@ -106,8 +117,10 @@ class Command(BaseCommand):
 FIELD_NAMES = [
     "expense_id",
     "otz_id",
+    "expense_rindegastos_expense_id",
     "rindegastos_expense_id",
     "rindegastos_report_id",
+    "rindegastos_status",
     "expense_paid_at",
     "expense_supplier",
     "expense_total",
@@ -128,3 +141,8 @@ def _format_value(value):
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
     return str(value)
+
+
+def _looks_deleted(value):
+    normalized = str(value or "").strip().casefold()
+    return any(term in normalized for term in ("deleted", "elimin", "borrad", "anulad", "cancel"))
