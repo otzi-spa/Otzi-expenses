@@ -29,7 +29,9 @@ from .models import (
     ExpenseAuditLog,
     ExpenseNotification,
     ExpenseTypeCatalog,
+    EmployeeFundMapping,
     FuelSpecificTaxRate,
+    NotionFundSyncLog,
     RindegastosExpenseFieldCatalog,
     RindegastosExpenseDiff,
     RindegastosReconcileRun,
@@ -46,6 +48,8 @@ from django.contrib import messages
 from django.utils import timezone
 from requests import RequestException
 from .invoice_tax_calculator import calculate_invoice_taxes
+from .funds_sync import NotionFundsSync
+from .notion_client import NotionAPIError
 from .rindegastos_client import RindegastosAPIError
 from .rindegastos_diff_rules import (
     AUTO_APPLY_RULES,
@@ -156,6 +160,11 @@ def _is_admin_user(user):
     return bool(user.is_authenticated and (user.is_superuser or getattr(user, "role", "") == "admin"))
 
 
+def _can_access_funds(user):
+    allowed_emails = {email.strip().lower() for email in getattr(settings, "FUNDS_ALLOWED_USER_EMAILS", []) if email}
+    return bool(user.is_authenticated and (user.email or "").strip().lower() in allowed_emails)
+
+
 def _can_manage_expenses(user):
     return bool(
         user.is_authenticated
@@ -203,6 +212,66 @@ def expense_manager_required(view_func):
         return view_func(request, *args, **kwargs)
 
     return _wrapped
+
+
+@login_required
+@expense_manager_required
+def funds_dashboard(request):
+    if not _can_access_funds(request.user):
+        messages.error(request, "La vista Fondos todavía está restringida.")
+        return redirect("dashboard")
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "sync_notion_funds":
+            try:
+                stats = NotionFundsSync().sync(dry_run=False)
+                messages.success(
+                    request,
+                    "Sincronización Notion completada: "
+                    f"{stats['fetched']} leídos, {stats['created']} nuevos, "
+                    f"{stats['updated']} actualizados, {stats['errors']} con error.",
+                )
+            except (NotionAPIError, ValueError) as exc:
+                messages.error(request, f"No se pudo sincronizar Notion: {exc}")
+        return redirect("funds_dashboard")
+
+    logs = (
+        NotionFundSyncLog.objects.select_related("mapping", "rindegastos_user")
+        .order_by("-updated_at")
+    )
+    status_filter = request.GET.get("status", "").strip()
+    search_query = request.GET.get("q", "").strip()
+    if status_filter:
+        logs = logs.filter(local_status=status_filter)
+    if search_query:
+        logs = logs.filter(
+            Q(beneficiary_name__icontains=search_query)
+            | Q(beneficiary_rut__icontains=search_query)
+            | Q(notion_record_id__icontains=search_query)
+            | Q(cost_center__icontains=search_query)
+        )
+
+    paginator = Paginator(logs, 50)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    status_counts = dict(
+        NotionFundSyncLog.objects.values_list("local_status").annotate(total=Count("id"))
+    )
+    context = {
+        "page_obj": page_obj,
+        "status_filter": status_filter,
+        "search_query": search_query,
+        "status_choices": NotionFundSyncLog.STATUS_CHOICES,
+        "status_counts": status_counts,
+        "mapping_count": EmployeeFundMapping.objects.filter(is_active=True).count(),
+        "notion_configured": bool(
+            settings.NOTION_API_KEY and (settings.NOTION_DATA_SOURCE_ID or settings.NOTION_DATABASE_ID)
+        ),
+        "notion_uses_data_source": bool(settings.NOTION_DATA_SOURCE_ID),
+        "notion_work_key_property": settings.NOTION_FUNDS_WORK_KEY_PROPERTY,
+        "notion_work_key_value": settings.NOTION_FUNDS_WORK_KEY_VALUE,
+    }
+    return render(request, "expenses/fondos.html", context)
 
 
 def _normalize_empty(value):

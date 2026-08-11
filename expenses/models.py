@@ -460,6 +460,118 @@ class RindegastosUserCatalog(models.Model):
         return self.full_name or self.email or self.external_id
 
 
+class EmployeeFundMapping(models.Model):
+    notion_beneficiary_name = models.CharField(max_length=255)
+    rut = models.CharField(max_length=32, blank=True)
+    rindegastos_user = models.ForeignKey(
+        RindegastosUserCatalog,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="fund_mappings",
+    )
+    rindegastos_fund_id = models.CharField(max_length=255, blank=True)
+    rindegastos_admin_id = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Mapeo fondo trabajador"
+        verbose_name_plural = "Mapeos fondos trabajadores"
+        indexes = [
+            models.Index(fields=["rut", "is_active"]),
+            models.Index(fields=["notion_beneficiary_name", "is_active"]),
+        ]
+
+    def __str__(self):
+        return f"{self.notion_beneficiary_name} -> {self.rindegastos_user or self.rindegastos_fund_id or 'sin mapping'}"
+
+    def save(self, *args, **kwargs):
+        self.rut = normalize_rut(self.rut)
+        super().save(*args, **kwargs)
+
+
+class NotionFundSyncLog(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_VALIDATED = "validated"
+    STATUS_READY = "ready"
+    STATUS_ERROR = "error"
+    STATUS_IGNORED = "ignored"
+    STATUS_RINDEGASTOS_OK = "rindegastos_ok"
+    STATUS_NOTION_OK = "notion_ok"
+    STATUS_RINDEGASTOS_OK_NOTION_ERROR = "rindegastos_ok_notion_error"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pendiente"),
+        (STATUS_VALIDATED, "Validado"),
+        (STATUS_READY, "Listo para abono"),
+        (STATUS_ERROR, "Error"),
+        (STATUS_IGNORED, "Ignorado"),
+        (STATUS_RINDEGASTOS_OK, "Rindegastos OK"),
+        (STATUS_NOTION_OK, "Notion actualizado"),
+        (STATUS_RINDEGASTOS_OK_NOTION_ERROR, "Rindegastos OK / Notion error"),
+    ]
+
+    notion_page_id = models.CharField(max_length=255, unique=True)
+    notion_url = models.URLField(max_length=1000, blank=True)
+    notion_status = models.CharField(max_length=255, blank=True)
+    notion_work_key = models.CharField(max_length=255, blank=True)
+    notion_record_id = models.CharField(max_length=255, blank=True)
+    beneficiary_name = models.CharField(max_length=255, blank=True)
+    beneficiary_rut = models.CharField(max_length=32, blank=True)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=8, default="CLP")
+    payment_date = models.DateField(null=True, blank=True)
+    cost_center = models.CharField(max_length=255, blank=True)
+    local_status = models.CharField(max_length=40, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    idempotency_key = models.CharField(max_length=64, db_index=True)
+    mapping = models.ForeignKey(
+        EmployeeFundMapping,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="notion_sync_logs",
+    )
+    rindegastos_user = models.ForeignKey(
+        RindegastosUserCatalog,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="notion_fund_sync_logs",
+    )
+    rindegastos_fund_id = models.CharField(max_length=255, blank=True)
+    rindegastos_deposit_id = models.CharField(max_length=255, blank=True)
+    notion_raw_payload = models.JSONField(default=dict, blank=True)
+    normalized_payload = models.JSONField(default=dict, blank=True)
+    rindegastos_request_payload = models.JSONField(default=dict, blank=True)
+    rindegastos_response_payload = models.JSONField(default=dict, blank=True)
+    notion_update_payload = models.JSONField(default=dict, blank=True)
+    notion_update_response = models.JSONField(default=dict, blank=True)
+    last_error = models.TextField(blank=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+        indexes = [
+            models.Index(fields=["local_status", "updated_at"]),
+            models.Index(fields=["beneficiary_rut", "local_status"]),
+            models.Index(fields=["idempotency_key", "local_status"]),
+        ]
+        verbose_name = "Log sync fondo Notion"
+        verbose_name_plural = "Logs sync fondos Notion"
+
+    def __str__(self):
+        return f"{self.beneficiary_name or self.notion_page_id} - {self.local_status}"
+
+    def save(self, *args, **kwargs):
+        self.beneficiary_rut = normalize_rut(self.beneficiary_rut)
+        super().save(*args, **kwargs)
+
+
 class ExpenseAuditLog(models.Model):
     ACTION_CHOICES = [
         ("created", "Creado"),

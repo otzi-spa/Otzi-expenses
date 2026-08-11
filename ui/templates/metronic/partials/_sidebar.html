@@ -43,6 +43,17 @@
           </a>
         </div>
 
+        {% if can_access_funds %}
+        <div class="menu-item {% if request.resolver_match.url_name == 'funds_dashboard' %}here show{% endif %}">
+          <a class="menu-link" href="{% url 'funds_dashboard' %}">
+            <span class="menu-icon">
+              <i class="ki-duotone ki-bank fs-2"></i>
+            </span>
+            <span class="menu-title">Fondos</span>
+          </a>
+        </div>
+        {% endif %}
+
         {% if request.user.is_superuser or request.user.role == "admin" or request.user.role == "reviewer" %}
         <div class="menu-item {% if request.resolver_match.url_name == 'settings_rindegastos_rules' %}here show{% endif %}">
           <a class="menu-link" href="{% url 'settings_rindegastos_rules' %}">

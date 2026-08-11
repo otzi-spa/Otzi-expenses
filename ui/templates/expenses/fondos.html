@@ -1,0 +1,162 @@
+{% extends "metronic/base_app.html" %}
+{% load l10n %}
+{% block page_title %}Fondos{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Fondos</h1>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_notion_funds">
+        <button type="submit" class="btn btn-primary" {% if not notion_configured %}disabled{% endif %}>
+          Sincronizar desde Notion
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if messages %}
+<div class="mb-5">
+  {% for message in messages %}
+  <div class="alert alert-{{ message.tags|default:'info' }} mb-3">{{ message }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if not notion_configured %}
+<div class="alert alert-warning">
+  Configura <strong>NOTION_API_KEY</strong> y <strong>NOTION_DATA_SOURCE_ID</strong> o <strong>NOTION_DATABASE_ID</strong> para habilitar la sincronización.
+</div>
+{% endif %}
+
+<div class="row g-4 mb-6">
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body py-4">
+        <div class="text-muted fw-semibold">Configuración</div>
+        <div class="fs-5 fw-bold">{% if notion_configured %}Lista{% else %}Pendiente{% endif %}</div>
+        <div class="text-muted fs-8">{% if notion_uses_data_source %}Data source API{% else %}Database API legado{% endif %}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body py-4">
+        <div class="text-muted fw-semibold">Filtro Notion</div>
+        <div class="fs-7 fw-bold">{{ notion_work_key_property }}</div>
+        <div class="text-muted fs-8">{{ notion_work_key_value }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body py-4">
+        <div class="text-muted fw-semibold">Mapeos activos</div>
+        <div class="fs-3 fw-bold">{{ mapping_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body py-4">
+        <div class="text-muted fw-semibold">Registros locales</div>
+        <div class="fs-3 fw-bold">{{ page_obj.paginator.count }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-5">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label">Buscar</label>
+        <input type="search" name="q" value="{{ search_query }}" class="form-control" placeholder="Beneficiario, RUT, remesa u obra">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Estado</label>
+        <select name="status" class="form-select">
+          <option value="">Todos</option>
+          {% for value,label in status_choices %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <button type="submit" class="btn btn-light-primary w-100">Filtrar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-row-bordered table-row-gray-200 align-middle mb-0">
+        <thead>
+          <tr class="fw-bold text-muted">
+            <th class="ps-6">Remesa</th>
+            <th>Beneficiario</th>
+            <th>RUT</th>
+            <th>Monto</th>
+            <th>Fecha</th>
+            <th>Obra/Centro</th>
+            <th>Estado</th>
+            <th>Error</th>
+            <th class="text-end pe-6">Notion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in page_obj.object_list %}
+          <tr>
+            <td class="ps-6 fw-semibold">{{ log.notion_record_id|default:"-" }}</td>
+            <td>{{ log.beneficiary_name|default:"-" }}</td>
+            <td>{{ log.beneficiary_rut|default:"-" }}</td>
+            <td>
+              {% if log.amount %}
+                {{ log.currency }} {{ log.amount|floatformat:0|localize }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>{{ log.payment_date|date:"d/m/Y"|default:"-" }}</td>
+            <td>{{ log.cost_center|default:"-" }}</td>
+            <td><span class="badge badge-light-primary">{{ log.get_local_status_display }}</span></td>
+            <td class="text-muted fs-8" style="max-width: 360px;">{{ log.last_error|default:"" }}</td>
+            <td class="text-end pe-6">
+              {% if log.notion_url %}
+              <a href="{{ log.notion_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-light">Abrir</a>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="9" class="text-center text-muted py-10">Todavía no hay registros sincronizados.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="card-footer d-flex justify-content-between align-items-center">
+    <span class="text-muted fs-8">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    <div class="d-flex gap-2">
+      {% if page_obj.has_previous %}
+      <a class="btn btn-sm btn-light" href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}&q={{ search_query }}">Anterior</a>
+      {% endif %}
+      {% if page_obj.has_next %}
+      <a class="btn btn-sm btn-light" href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}&q={{ search_query }}">Siguiente</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
