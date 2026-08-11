@@ -44,6 +44,76 @@ MANUAL_REVIEW_FIELDS = {
     "custom_fields.Litros Combustible",
 }
 
+AUTO_APPLY_RULES = [
+    {
+        "field": "Proveedor",
+        "condition": "Se aplica si Rindegastos trae un proveedor no vacío y el gasto local no está aprobado ni rechazado.",
+    },
+    {
+        "field": "Política",
+        "condition": "Se aplica si Rindegastos trae una política distinta y el gasto local no está aprobado ni rechazado.",
+    },
+    {
+        "field": "Categoría / tipo de gasto",
+        "condition": "Se aplica si Rindegastos trae una categoría distinta y el gasto local no está aprobado ni rechazado.",
+    },
+    {
+        "field": "Impuesto",
+        "condition": "Se aplica el nombre de impuesto cuando viene informado desde Rindegastos.",
+    },
+    {
+        "field": "RUT proveedor",
+        "condition": "Se aplica si Rindegastos trae RUT proveedor no vacío.",
+    },
+    {
+        "field": "Centro de Costo / Faena",
+        "condition": "Se aplica si Rindegastos trae centro de costo no vacío.",
+    },
+    {
+        "field": "Monto menor",
+        "condition": "Solo se aplica si la diferencia es menor o igual a $500 CLP y menor o igual a 1%.",
+    },
+]
+
+MANUAL_REVIEW_RULES = [
+    {
+        "field": "Monto relevante",
+        "condition": "Queda pendiente si supera $500 CLP, supera 1%, cambia moneda o hay más de un gasto Rindegastos asociado.",
+    },
+    {
+        "field": "Moneda",
+        "condition": "Siempre requiere revisión manual.",
+    },
+    {
+        "field": "Fecha del gasto",
+        "condition": "Siempre requiere revisión manual.",
+    },
+    {
+        "field": "Vehículo o Equipo",
+        "condition": "Siempre requiere revisión manual por impacto operacional.",
+    },
+    {
+        "field": "Rendidor",
+        "condition": "Siempre requiere revisión manual.",
+    },
+    {
+        "field": "Documento",
+        "condition": "Tipo y número de documento requieren revisión manual.",
+    },
+    {
+        "field": "Km / litros",
+        "condition": "Campos de combustible requieren revisión manual.",
+    },
+    {
+        "field": "Gasto aprobado o rechazado",
+        "condition": "No se autoactualiza ningún campo si el gasto local ya tiene decisión final.",
+    },
+    {
+        "field": "Múltiples gastos remotos",
+        "condition": "Si un OTZ local aparece asociado a más de un gasto Rindegastos, todo queda en revisión manual.",
+    },
+]
+
 
 def classify_diff(diff_spec, expense, remote_ids_count=1):
     field_name = diff_spec["field_name"]

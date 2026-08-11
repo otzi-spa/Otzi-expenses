@@ -1771,6 +1771,65 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "apply_rindegastos_diff")
         self.assertContains(response, "ignore_rindegastos_diff")
 
+    def test_viewer_does_not_see_rindegastos_diff_badge(self):
+        viewer = get_user_model().objects.create_user(
+            username="viewer@example.com",
+            email="viewer@example.com",
+            password="test",
+            role="viewer",
+        )
+        self.client.force_login(viewer)
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Local",
+            amount=Decimal("5900"),
+            rindegastos_integration_code="OTZ-PERSISTED",
+        )
+        snapshot = RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            rindegastos_expense_id="75528397",
+            rindegastos_report_id="13421804",
+            payload_hash="f" * 64,
+            normalized_payload={"supplier": "Proveedor Remoto"},
+            raw_payload={"Id": "75528397"},
+        )
+        RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=snapshot,
+            field_name="supplier",
+            local_value="Proveedor Local",
+            remote_value="Proveedor Remoto",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
+
+        response = self.client.get(reverse("expense_list"), {"trace_id": "OTZ-PERSISTED"})
+
+        self.assertNotContains(response, "Cambios RG 1")
+        self.assertNotContains(response, "Cambios detectados en Rindegastos")
+
+    def test_reviewer_can_view_rindegastos_rules(self):
+        response = self.client.get(reverse("settings_rindegastos_rules"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reglas Rindegastos")
+        self.assertContains(response, "Autoactualización")
+        self.assertContains(response, "Revisión manual")
+        self.assertContains(response, "Proveedor")
+        self.assertContains(response, "Múltiples gastos remotos")
+
+    def test_viewer_cannot_view_rindegastos_rules(self):
+        viewer = get_user_model().objects.create_user(
+            username="viewer-rules@example.com",
+            email="viewer-rules@example.com",
+            password="test",
+            role="viewer",
+        )
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse("settings_rindegastos_rules"))
+
+        self.assertRedirects(response, reverse("expense_list"))
+
     def test_apply_rindegastos_diff_action_updates_sensitive_field(self):
         expense = Expense.objects.create(
             status="completed",

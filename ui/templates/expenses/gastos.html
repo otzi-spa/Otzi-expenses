@@ -493,7 +493,7 @@
             {% else %}
               <span class="badge badge-light">No subido</span>
             {% endif %}
-            {% if gasto.open_rindegastos_diff_count %}
+            {% if can_manage_expenses and gasto.open_rindegastos_diff_count %}
               <button
                 type="button"
                 class="badge badge-light-warning border-0 mt-1"
@@ -794,7 +794,7 @@
                   </div>
                 </div>
                 {% endif %}
-                {% if gasto.open_rindegastos_diffs %}
+                {% if can_manage_expenses and gasto.open_rindegastos_diffs %}
                 <div class="col-12">
                   <div class="alert alert-light-warning border border-warning border-dashed mb-0">
                     <div class="fw-semibold mb-2">Cambios detectados en Rindegastos</div>

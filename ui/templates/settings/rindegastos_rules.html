@@ -1,0 +1,104 @@
+{% extends "metronic/base_app.html" %}
+{% block page_title %}Reglas Rindegastos{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Reglas Rindegastos</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-6">
+  <div class="col-12">
+    <div class="alert alert-light-info mb-0">
+      Estas reglas definen qué cambios detectados en Rindegastos se aplican automáticamente en Expenses y cuáles quedan pendientes para revisión manual.
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Autoactualización</h3>
+          <div class="text-muted">Se ejecuta solo cuando el comando corre con autoaplicación habilitada.</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Campo</th>
+                <th>Regla actual</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for rule in auto_apply_rules %}
+              <tr>
+                <td class="fw-semibold">{{ rule.field }}</td>
+                <td class="text-muted">{{ rule.condition }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Revisión manual</h3>
+          <div class="text-muted">Quedan como cambios RG visibles en el gasto.</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Campo o caso</th>
+                <th>Regla actual</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for rule in manual_review_rules %}
+              <tr>
+                <td class="fw-semibold">{{ rule.field }}</td>
+                <td class="text-muted">{{ rule.condition }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Cómo se ve en gastos</h3>
+      </div>
+      <div class="card-body">
+        <div class="d-flex flex-column gap-3">
+          <div>
+            <span class="badge badge-light-warning">Cambios RG N</span>
+            <span class="text-muted ms-2">Aparece cuando un gasto mantiene diferencias abiertas con Rindegastos.</span>
+          </div>
+          <div class="text-muted">
+            Al abrir el gasto, el detalle muestra valor actual en Expenses, valor detectado en Rindegastos, id de gasto Rindegastos y acciones para aplicar o ignorar.
+          </div>
+          <div class="text-muted">
+            Cada aplicación automática o manual queda registrada en la auditoría del gasto con valor anterior, valor nuevo, id gasto Rindegastos e id informe Rindegastos.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

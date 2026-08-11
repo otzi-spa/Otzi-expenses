@@ -45,7 +45,12 @@ from django.utils import timezone
 from requests import RequestException
 from .invoice_tax_calculator import calculate_invoice_taxes
 from .rindegastos_client import RindegastosAPIError
-from .rindegastos_diff_rules import apply_rindegastos_diff, ignore_rindegastos_diff
+from .rindegastos_diff_rules import (
+    AUTO_APPLY_RULES,
+    MANUAL_REVIEW_RULES,
+    apply_rindegastos_diff,
+    ignore_rindegastos_diff,
+)
 from .rindegastos_trace import ensure_expense_integration_code, expense_integration_code, expense_integration_code_for_expense
 from .rindegastos_sync import RindegastosCatalogSync
 from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, default_uploaded_sync_since
@@ -130,6 +135,7 @@ def _settings_menu_urls():
         "settings_categories",
         "settings_expense_types",
         "settings_rindegastos_fields",
+        "settings_rindegastos_rules",
         "settings_rindegastos_submitters",
         "settings_tax_indicators",
     }
@@ -181,6 +187,17 @@ def admin_required(view_func):
         if not _is_admin_user(request.user):
             messages.error(request, "No tienes permisos para acceder a Configuración.")
             return redirect("dashboard")
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
+
+
+def expense_manager_required(view_func):
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        if not _can_manage_expenses(request.user):
+            messages.error(request, "No tienes permisos para acceder a esta sección.")
+            return redirect("expense_list")
         return view_func(request, *args, **kwargs)
 
     return _wrapped
@@ -2610,6 +2627,17 @@ def settings_rindegastos_fields(request):
         **_catalog_sync_status(RindegastosExpenseFieldCatalog),
     }
     return render(request, "settings/rindegastos_fields.html", context)
+
+
+@login_required
+@expense_manager_required
+def settings_rindegastos_rules(request):
+    context = {
+        "auto_apply_rules": AUTO_APPLY_RULES,
+        "manual_review_rules": MANUAL_REVIEW_RULES,
+        "settings_menu_urls": _settings_menu_urls(),
+    }
+    return render(request, "settings/rindegastos_rules.html", context)
 
 
 @login_required
