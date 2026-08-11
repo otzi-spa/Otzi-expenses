@@ -828,18 +828,8 @@
                             <td class="text-end">
                               {% if can_manage_expenses %}
                               <div class="d-flex justify-content-end gap-2">
-                                <form method="post" action="{% url 'expense_action' gasto.pk 'apply_rindegastos_diff' %}">
-                                  {% csrf_token %}
-                                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                  <input type="hidden" name="diff_id" value="{{ diff.pk }}">
-                                  <button type="submit" class="btn btn-sm btn-light-primary">Aplicar</button>
-                                </form>
-                                <form method="post" action="{% url 'expense_action' gasto.pk 'ignore_rindegastos_diff' %}">
-                                  {% csrf_token %}
-                                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                  <input type="hidden" name="diff_id" value="{{ diff.pk }}">
-                                  <button type="submit" class="btn btn-sm btn-light">Ignorar</button>
-                                </form>
+                                <button type="submit" class="btn btn-sm btn-light-primary" form="applyRindegastosDiff{{ diff.pk }}">Aplicar</button>
+                                <button type="submit" class="btn btn-sm btn-light" form="ignoreRindegastosDiff{{ diff.pk }}">Ignorar</button>
                               </div>
                               {% else %}
                               <span class="text-muted">Solo lectura</span>
@@ -1225,6 +1215,20 @@
               {% endif %}
             </div>
           </form>
+          {% if can_manage_expenses and gasto.open_rindegastos_diffs %}
+            {% for diff in gasto.open_rindegastos_diffs %}
+            <form id="applyRindegastosDiff{{ diff.pk }}" method="post" action="{% url 'expense_action' gasto.pk 'apply_rindegastos_diff' %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <input type="hidden" name="diff_id" value="{{ diff.pk }}">
+            </form>
+            <form id="ignoreRindegastosDiff{{ diff.pk }}" method="post" action="{% url 'expense_action' gasto.pk 'ignore_rindegastos_diff' %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <input type="hidden" name="diff_id" value="{{ diff.pk }}">
+            </form>
+            {% endfor %}
+          {% endif %}
         </div>
       </div>
     </div>
@@ -1607,15 +1611,14 @@
     }
 
     .expense-edit-modal .expense-receipt-canvas iframe {
+      display: block;
       width: 100%;
       height: 100%;
       min-height: 520px;
+      max-width: none;
       border: 0;
       background: #fff;
-    }
-
-    .expense-edit-modal .expense-receipt-panel[data-receipt-kind="pdf"] .receipt-viewer-controls {
-      opacity: 0.6;
+      transform-origin: top center;
     }
 
     .expense-edit-modal .expense-receipt-empty {
@@ -2522,26 +2525,21 @@
           });
         }
 
-        if (viewerType !== 'image') {
-          label.textContent = 'PDF';
-          controls.forEach(function (control) {
-            control.disabled = true;
-            control.title = 'Zoom disponible cuando activemos el visor PDF';
-          });
-          return {
-            fit: function () {}
-          };
-        }
-
         var state = {
           zoom: 1,
-          minZoom: 0.25,
-          maxZoom: 4,
+          minZoom: viewerType === 'pdf' ? 0.5 : 0.25,
+          maxZoom: viewerType === 'pdf' ? 3 : 4,
           step: 0.25,
           fitted: true
         };
 
         function getNaturalSize() {
+          if (viewerType === 'pdf') {
+            return {
+              width: Math.max(viewer.clientWidth - 2, 640),
+              height: Math.max(viewer.clientHeight - 2, 760)
+            };
+          }
           return {
             width: media.naturalWidth || media.clientWidth || 1,
             height: media.naturalHeight || media.clientHeight || 1
@@ -2569,8 +2567,15 @@
 
           content.style.width = renderedWidth + 'px';
           content.style.height = renderedHeight + 'px';
-          media.style.width = (size.width * state.zoom) + 'px';
-          media.style.height = 'auto';
+          if (viewerType === 'pdf') {
+            media.style.width = size.width + 'px';
+            media.style.height = size.height + 'px';
+            media.style.transform = 'scale(' + state.zoom + ')';
+          } else {
+            media.style.width = (size.width * state.zoom) + 'px';
+            media.style.height = 'auto';
+            media.style.transform = 'none';
+          }
           label.textContent = Math.round(state.zoom * 100) + '%';
 
           if (keepScrollRatio) {
@@ -2614,7 +2619,7 @@
           applyZoom(1, false);
         });
 
-        if (media.complete) {
+        if (viewerType === 'pdf' || media.complete) {
           fitViewer();
         }
 

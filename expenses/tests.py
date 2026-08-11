@@ -2118,6 +2118,10 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, str(diff.pk))
         self.assertContains(response, "apply_rindegastos_diff")
         self.assertContains(response, "ignore_rindegastos_diff")
+        self.assertContains(response, f'form="applyRindegastosDiff{diff.pk}"')
+        self.assertContains(response, f'id="applyRindegastosDiff{diff.pk}"')
+        self.assertContains(response, f'form="ignoreRindegastosDiff{diff.pk}"')
+        self.assertContains(response, f'id="ignoreRindegastosDiff{diff.pk}"')
 
     def test_viewer_does_not_see_rindegastos_diff_badge(self):
         viewer = get_user_model().objects.create_user(

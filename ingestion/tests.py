@@ -60,6 +60,19 @@ class WhatsAppFuelFlowTests(TestCase):
             "text": {"body": body},
         }
 
+    def pdf_message(self, message_id, media_id="pdf-media-1", filename="comprobante.pdf"):
+        return {
+            "from": self.phone,
+            "id": message_id,
+            "timestamp": "1770000000",
+            "type": "document",
+            "document": {
+                "id": media_id,
+                "mime_type": "application/pdf",
+                "filename": filename,
+            },
+        }
+
     def post_message(self, message):
         return self.client.post(
             "/webhook/whatsapp/",
@@ -114,6 +127,44 @@ class WhatsAppFuelFlowTests(TestCase):
         self.assertIsNotNone(conversation.completed_at)
         download_mock.assert_called_once()
         self.assertGreaterEqual(reply_mock.call_count, 8)
+
+    @patch("ingestion.api.views_webhook.send_whatsapp_reply")
+    @patch("ingestion.api.views_webhook.download_media_attachment")
+    def test_pdf_document_starts_expense_flow(self, download_mock, reply_mock):
+        pdf = self.pdf_message("pdf-message-1", media_id="pdf-media-1")
+
+        self.assertEqual(self.post_message(pdf).status_code, 200)
+
+        expense = Expense.objects.get(wa_message_id="pdf-message-1")
+        self.assertEqual(expense.status, "incomplete")
+        self.assertEqual(expense.wa_media_id, "pdf-media-1")
+        self.assertEqual(expense.wa_sender.phone, self.phone)
+        conversation = WhatsAppExpenseConversation.objects.get(expense=expense)
+        self.assertTrue(conversation.is_active)
+        self.assertEqual(conversation.stage, "awaiting_doc_type")
+        download_mock.assert_called_once_with("pdf-media-1", expense)
+        self.assertIn("tipo de documento", reply_mock.call_args.args[2].lower())
+
+    @patch("ingestion.api.views_webhook.send_whatsapp_reply")
+    @patch("ingestion.api.views_webhook.download_media_attachment")
+    def test_non_pdf_document_is_rejected(self, download_mock, reply_mock):
+        document = {
+            "from": self.phone,
+            "id": "word-message-1",
+            "timestamp": "1770000000",
+            "type": "document",
+            "document": {
+                "id": "word-media-1",
+                "mime_type": "application/msword",
+                "filename": "documento.doc",
+            },
+        }
+
+        self.assertEqual(self.post_message(document).status_code, 200)
+
+        self.assertFalse(Expense.objects.filter(wa_message_id="word-message-1").exists())
+        download_mock.assert_not_called()
+        self.assertIn("fotos o pdf", reply_mock.call_args.args[2].lower())
 
     @patch("ingestion.api.views_webhook.send_whatsapp_reply")
     @patch("ingestion.api.views_webhook.download_media_attachment")
@@ -206,6 +257,30 @@ class WhatsAppFuelFlowTests(TestCase):
         self.assertIn("obra/proyecto", reply_mock.call_args.args[2].lower())
         download_mock.assert_called_once()
 
+    @patch("ingestion.api.views_webhook.send_whatsapp_reply")
+    @patch("ingestion.api.views_webhook.download_media_attachment")
+    def test_new_pdf_offers_to_resume_incomplete_conversation(self, download_mock, reply_mock):
+        image = {
+            "from": self.phone,
+            "id": "resume-pdf-image-1",
+            "timestamp": "1770000000",
+            "type": "image",
+            "image": {"id": "resume-pdf-media-1"},
+        }
+        pdf = self.pdf_message("resume-pdf-2", media_id="resume-pdf-media-2")
+
+        self.post_message(image)
+        self.post_message(self.text_message("1", "resume-pdf-doc-type"))
+        self.post_message(pdf)
+
+        expense = Expense.objects.get(wa_message_id="resume-pdf-image-1")
+        conversation = WhatsAppExpenseConversation.objects.get(expense=expense)
+        self.assertEqual(Expense.objects.count(), 1)
+        self.assertEqual(conversation.stage, "awaiting_resume")
+        self.assertEqual(conversation.context["resume_stage"], "awaiting_worksite")
+        self.assertIn("obra/proyecto", reply_mock.call_args.args[2].lower())
+        download_mock.assert_called_once()
+
     @override_settings(WHATSAPP_RESUME_AFTER_MINUTES=30)
     @patch("ingestion.api.views_webhook.send_whatsapp_reply")
     @patch("ingestion.api.views_webhook.download_media_attachment")
@@ -274,7 +349,7 @@ class WhatsAppFuelFlowTests(TestCase):
         self.assertEqual(expense.status, "not_completed")
         self.assertFalse(conversation.is_active)
         self.assertEqual(conversation.stage, "not_completed")
-        self.assertIn("envía nuevamente la foto", reply_mock.call_args.args[2])
+        self.assertIn("envía nuevamente el comprobante", reply_mock.call_args.args[2])
         download_mock.assert_called_once()
 
     def test_decimal_parser_accepts_units_and_comma(self):

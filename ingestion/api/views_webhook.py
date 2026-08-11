@@ -195,6 +195,38 @@ def log_whatsapp_event(expense: Expense, action: str, changes=None, reason: str 
         changes=changes or {},
     )
 
+
+def extract_supported_whatsapp_media(message):
+    msg_type = message.get("type")
+    if msg_type == "image":
+        image = message.get("image") or {}
+        media_id = image.get("id")
+        if not media_id:
+            return None
+        return {
+            "id": media_id,
+            "kind": "imagen",
+            "content_type": image.get("mime_type") or "",
+            "filename": "",
+        }
+    if msg_type == "document":
+        document = message.get("document") or {}
+        media_id = document.get("id")
+        mime_type = (document.get("mime_type") or "").split(";")[0].strip().lower()
+        filename = document.get("filename") or ""
+        if not media_id:
+            return None
+        if mime_type != "application/pdf" and not filename.lower().endswith(".pdf"):
+            return {"unsupported": True, "kind": "documento"}
+        return {
+            "id": media_id,
+            "kind": "PDF",
+            "content_type": document.get("mime_type") or "application/pdf",
+            "filename": filename,
+        }
+    return None
+
+
 @csrf_exempt
 def whatsapp_webhook(request):
     print('entro aca')
@@ -240,13 +272,22 @@ def whatsapp_webhook(request):
             .first()
         )
 
-        # 1) Llega imagen: crear Expense y preguntar tipo documento
-        if msg_type == "image":
+        media = extract_supported_whatsapp_media(message)
+        if media and media.get("unsupported"):
+            send_whatsapp_reply(
+                phone_number_id,
+                from_number,
+                "Por ahora puedo recibir fotos o PDF del comprobante. Envía el comprobante nuevamente en uno de esos formatos.",
+            )
+            return HttpResponse(status=200)
+
+        # 1) Llega comprobante: crear Expense y preguntar tipo documento
+        if media:
             if active_conversation:
                 request_resume_confirmation(phone_number_id, from_number, active_conversation)
                 return HttpResponse(status=200)
 
-            image_id = message["image"]["id"]
+            media_id = media["id"]
             timestamp = int(message["timestamp"])
             msg_dt = datetime.fromtimestamp(timestamp, tz=dt_timezone.utc)
 
@@ -254,7 +295,7 @@ def whatsapp_webhook(request):
                 wa_message_id=message["id"],
                 wa_sender_phone=from_number,
                 wa_sender=sender,
-                wa_media_id=image_id,
+                wa_media_id=media_id,
                 wa_phone_number_id=phone_number_id,
                 message_sent_at=msg_dt,
                 status="incomplete",
@@ -268,9 +309,9 @@ def whatsapp_webhook(request):
                     "source": {"before": None, "after": exp.source},
                     "worksite": {"before": None, "after": exp.worksite},
                 },
-                reason="Gasto creado desde imagen WhatsApp",
+                reason=f"Gasto creado desde {media['kind']} WhatsApp",
             )
-            download_media_attachment(image_id, exp)
+            download_media_attachment(media_id, exp)
 
             start_conversation(sender, from_number, exp)
 
@@ -293,7 +334,7 @@ def whatsapp_webhook(request):
 
             if not state:
                 send_whatsapp_reply(phone_number_id, from_number,
-                    "👋 Para ingresar un gasto, envíame primero una foto (boleta/factura/vale)."
+                    "👋 Para ingresar un gasto, envíame primero una foto o PDF del comprobante (boleta/factura/vale)."
                 )
                 return HttpResponse(status=200)
 
@@ -306,7 +347,7 @@ def whatsapp_webhook(request):
                 )
                 user_states.pop(from_number, None)
                 send_whatsapp_reply(phone_number_id, from_number,
-                    "⚠️ No encontré el gasto en curso. Por favor envía la foto nuevamente."
+                    "⚠️ No encontré el gasto en curso. Por favor envía el comprobante nuevamente."
                 )
                 return HttpResponse(status=200)
 
@@ -356,7 +397,7 @@ def whatsapp_webhook(request):
                 send_whatsapp_reply(
                     phone_number_id,
                     from_number,
-                    "El gasto quedó como No completado. Para registrar uno nuevo, envía nuevamente la foto.",
+                    "El gasto quedó como No completado. Para registrar uno nuevo, envía nuevamente el comprobante.",
                 )
                 return HttpResponse(status=200)
 
@@ -596,7 +637,7 @@ def whatsapp_webhook(request):
 
             # fallback
             send_whatsapp_reply(phone_number_id, from_number,
-                "👋 Si quieres ingresar un gasto nuevo, envíame una foto."
+                "👋 Si quieres ingresar un gasto nuevo, envíame una foto o PDF del comprobante."
             )
             return HttpResponse(status=200)
 
