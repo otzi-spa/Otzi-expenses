@@ -1144,10 +1144,11 @@
                         </div>
                       </div>
                       <div class="receipt-viewer-frame">
-                        <div class="expense-receipt-canvas js-receipt-viewer" data-viewer-type="{% if 'pdf' in attachment.content_type|lower %}pdf{% else %}image{% endif %}">
+                        <div class="expense-receipt-canvas js-receipt-viewer" data-viewer-type="{% if 'pdf' in attachment.content_type|lower %}pdf-preview{% else %}image{% endif %}">
                           {% if "pdf" in attachment.content_type|lower %}
-                            <div class="receipt-viewer-content receipt-pdf-content">
-                              <div class="receipt-pdf-card receipt-viewer-media">
+                            <div class="receipt-viewer-content">
+                              <img class="receipt-viewer-media receipt-pdf-preview" src="{% url 'attachment_serve' attachment.pk %}" alt="Vista previa PDF #{{ forloop.counter }}" data-pdf-preview="true">
+                              <div class="receipt-pdf-card receipt-pdf-fallback d-none" data-pdf-fallback>
                                 <div class="receipt-pdf-icon">PDF</div>
                                 <div class="fw-bold text-gray-900">Comprobante PDF</div>
                                 <div class="text-muted fs-8 text-center">Abre el documento para revisarlo completo.</div>
@@ -1620,20 +1621,6 @@
       background: #fff;
     }
 
-    .expense-edit-modal .expense-receipt-panel[data-receipt-kind="pdf"] .receipt-viewer-controls {
-      display: none;
-    }
-
-    .expense-edit-modal .expense-receipt-panel[data-receipt-kind="pdf"] .expense-receipt-canvas {
-      overflow: hidden;
-    }
-
-    .expense-edit-modal .receipt-pdf-content {
-      align-items: center;
-      justify-content: center;
-      padding: 1.25rem;
-    }
-
     .expense-edit-modal .receipt-pdf-card {
       width: min(100%, 260px);
       min-height: 230px;
@@ -1642,6 +1629,7 @@
       align-items: center;
       justify-content: center;
       gap: 0.7rem;
+      margin: 2rem auto;
       padding: 1.35rem;
       border: 1px solid #e5e7eb;
       border-radius: 8px;
@@ -2500,6 +2488,7 @@
         var horizontalThumb = panel.querySelector('[data-receipt-scrollbar-thumb="horizontal"]');
         var verticalThumb = panel.querySelector('[data-receipt-scrollbar-thumb="vertical"]');
         var viewerType = viewer ? viewer.getAttribute('data-viewer-type') : '';
+        var pdfFallback = panel.querySelector('[data-pdf-fallback]');
 
         if (!viewer || !content || !media || !label) return null;
 
@@ -2578,6 +2567,19 @@
           };
         }
 
+        function showPdfFallback() {
+          if (viewerType !== 'pdf-preview' || !pdfFallback) return;
+          media.classList.add('d-none');
+          pdfFallback.classList.remove('d-none');
+          content.style.width = '';
+          content.style.height = '';
+          label.textContent = 'PDF';
+          controls.forEach(function (control) {
+            control.disabled = true;
+          });
+          updateCustomScrollbars();
+        }
+
         var state = {
           zoom: 1,
           minZoom: 0.25,
@@ -2648,6 +2650,7 @@
         });
 
         media.addEventListener('load', fitViewer);
+        media.addEventListener('error', showPdfFallback);
         viewer.addEventListener('scroll', updateCustomScrollbars);
         bindCustomScrollbar(horizontalBar, 'x');
         bindCustomScrollbar(verticalBar, 'y');
