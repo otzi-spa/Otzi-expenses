@@ -468,10 +468,19 @@ class RindegastosExpenseReconcilerTests(TestCase):
             def get_expense(self, expense_id):
                 return {
                     "Id": expense_id,
+                    "ReportId": "13421804",
                     "Supplier": "Proveedor Remoto",
                     "Total": 5900,
                     "Currency": "CLP",
                     "IntegrationCode": expense.rindegastos_integration_code,
+                }
+
+            def get_expense_report(self, report_id):
+                return {
+                    "Id": report_id,
+                    "ReportNumber": "6571",
+                    "Title": "Informe usuario",
+                    "EmployeeName": "Rendidor Otzi",
                 }
 
         stats = RindegastosExpenseReconciler(client=FakeClient(), export_id_func=_expense_export_id).reconcile(
@@ -494,6 +503,8 @@ class RindegastosExpenseReconcilerTests(TestCase):
         audit = ExpenseAuditLog.objects.get(expense=expense, source="rindegastos_reconcile")
         self.assertEqual(audit.changes["supplier"]["before"], "Proveedor Local")
         self.assertEqual(audit.changes["supplier"]["after"], "Proveedor Remoto")
+        self.assertEqual(audit.changes["supplier"]["rindegastos_report_number"], "6571")
+        self.assertEqual(audit.changes["supplier"]["rindegastos_report_title"], "Informe usuario")
 
     def test_reconcile_keeps_sensitive_diff_open_for_manual_review(self):
         expense = Expense.objects.create(
@@ -650,7 +661,11 @@ class RindegastosExpenseReconcilerTests(TestCase):
             rindegastos_expense_id="74973111",
             rindegastos_report_id="100",
             payload_hash="a" * 64,
-            normalized_payload={"total": "8962"},
+            normalized_payload={
+                "total": "8962",
+                "rindegastos_report_number": "6571",
+                "rindegastos_report_title": "Informe visible",
+            },
             raw_payload={"Id": "74973111"},
         )
         second_snapshot = RindegastosExpenseSnapshot.objects.create(
@@ -685,6 +700,8 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertIn("OTZ-ABC123", content)
         self.assertIn("74973111", content)
         self.assertIn("74973112", content)
+        self.assertIn("6571", content)
+        self.assertIn("Informe visible", content)
         self.assertIn("multiple_remote_expenses", content)
         self.assertIn("multiple_remote_totals", content)
         self.assertIn("remote_id_mismatch", content)
@@ -1750,7 +1767,11 @@ class SupplierCatalogFlowTests(TestCase):
             rindegastos_expense_id="75528397",
             rindegastos_report_id="13421804",
             payload_hash="d" * 64,
-            normalized_payload={"supplier": "Proveedor Remoto"},
+            normalized_payload={
+                "supplier": "Proveedor Remoto",
+                "rindegastos_report_number": "6571",
+                "rindegastos_report_title": "Informe usuario",
+            },
             raw_payload={"Id": "75528397"},
         )
         diff = RindegastosExpenseDiff.objects.create(
@@ -1767,6 +1788,8 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "Cambios RG 1")
         self.assertContains(response, "Cambios detectados en Rindegastos")
         self.assertContains(response, "Proveedor Remoto")
+        self.assertContains(response, "6571")
+        self.assertContains(response, "Informe usuario")
         self.assertContains(response, str(diff.pk))
         self.assertContains(response, "apply_rindegastos_diff")
         self.assertContains(response, "ignore_rindegastos_diff")
@@ -1879,6 +1902,18 @@ class SupplierCatalogFlowTests(TestCase):
             amount=Decimal("5900"),
             rindegastos_integration_code="OTZ-PERSISTED",
         )
+        RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            rindegastos_expense_id="75528397",
+            rindegastos_report_id="13421804",
+            payload_hash="g" * 64,
+            normalized_payload={
+                "rindegastos_report_id": "13421804",
+                "rindegastos_report_number": "6571",
+                "rindegastos_report_title": "Informe usuario",
+            },
+            raw_payload={"Id": "75528397"},
+        )
         ExpenseAuditLog.objects.create(
             expense=expense,
             expense_snapshot_id=expense.id,
@@ -1902,7 +1937,8 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "Proveedor Local")
         self.assertContains(response, "Proveedor Remoto")
         self.assertContains(response, "RG 75528397")
-        self.assertContains(response, "Informe 13421804")
+        self.assertContains(response, "Informe 6571")
+        self.assertNotContains(response, "Informe API 13421804")
 
     def test_expense_list_defaults_to_active_statuses_and_paginates(self):
         for index in range(55):

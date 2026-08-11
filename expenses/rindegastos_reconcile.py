@@ -69,9 +69,17 @@ def normalize_custom_fields(payload):
 def normalize_rindegastos_expense(payload):
     custom_fields = normalize_custom_fields(payload)
     note = first_present_value(payload, "Note", "Comment", "Description", "note", "comment", "description")
+    report_context = payload.get("_otzi_report_context") if isinstance(payload.get("_otzi_report_context"), dict) else {}
     return {
         "rindegastos_expense_id": normalize_string(first_present_value(payload, "Id", "id")),
         "rindegastos_report_id": normalize_string(first_present_value(payload, "ReportId", "reportId", "report_id")),
+        "rindegastos_report_number": normalize_string(
+            first_present_value(report_context, "ReportNumber", "reportNumber", "Folio", "folio")
+        ),
+        "rindegastos_report_title": normalize_string(first_present_value(report_context, "Title", "title")),
+        "rindegastos_report_employee": normalize_string(
+            first_present_value(report_context, "EmployeeName", "UserName", "employeeName", "userName")
+        ),
         "rindegastos_status": normalize_string(first_present_value(payload, "Status", "status")),
         "integration_code": normalize_string(
             first_present_value(payload, "IntegrationCode", "integrationCode", "integration_code")
@@ -221,6 +229,7 @@ class RindegastosExpenseReconciler:
             )
 
         mark_enabled = bool(getattr(settings, "RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED", False))
+        report_cache = {}
         stats = {
             "since": since.isoformat() if since else "",
             "until": until.isoformat() if until else "",
@@ -274,6 +283,7 @@ class RindegastosExpenseReconciler:
                     except Exception:
                         stats["errors"] += 1
                         snapshot_payload = payload
+                self._attach_report_context(snapshot_payload, report_cache)
 
                 self._record_integration_code_diagnostic(snapshot_payload, _otzi_id, stats)
                 self._maybe_mark_integration_code(
@@ -333,6 +343,20 @@ class RindegastosExpenseReconciler:
             remote_ids_by_expense.setdefault(expense.id, set()).add(remote_id)
         return {expense_id: len(remote_ids) for expense_id, remote_ids in remote_ids_by_expense.items()}
 
+    def _attach_report_context(self, payload, report_cache):
+        if not isinstance(payload, dict):
+            return
+        report_id = normalize_string(first_present_value(payload, "ReportId", "reportId", "report_id"))
+        if not report_id:
+            return
+        if report_id not in report_cache:
+            try:
+                report_cache[report_id] = self.client.get_expense_report(report_id)
+            except Exception:
+                report_cache[report_id] = {}
+        if report_cache[report_id]:
+            payload["_otzi_report_context"] = report_cache[report_id]
+
     @transaction.atomic
     def _process_snapshot(self, expense, payload, source_endpoint, run=None, dry_run=False):
         normalized = normalize_rindegastos_expense(payload)
@@ -373,6 +397,9 @@ class RindegastosExpenseReconciler:
                 status=RindegastosExpenseDiff.STATUS_OPEN,
             ).first()
             if exists:
+                if snapshot and exists.snapshot_id != snapshot.id:
+                    exists.snapshot = snapshot
+                    exists.save(update_fields=["snapshot"])
                 if apply_safe_diffs and classification == "auto_apply":
                     if apply_rindegastos_diff(exists):
                         result["auto_applied"] += 1

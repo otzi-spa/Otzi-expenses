@@ -419,7 +419,8 @@ def _format_audit_value(value):
     return str(value)
 
 
-def _display_changes_for_audit(changes):
+def _display_changes_for_audit(changes, report_context_by_id=None):
+    report_context_by_id = report_context_by_id or {}
     rows = []
     for field_name, payload in (changes or {}).items():
         if not isinstance(payload, dict) or "before" not in payload or "after" not in payload:
@@ -430,16 +431,26 @@ def _display_changes_for_audit(changes):
                     "after": _format_audit_value(payload),
                     "rindegastos_expense_id": "",
                     "rindegastos_report_id": "",
+                    "rindegastos_report_number": "",
+                    "rindegastos_report_title": "",
                 }
             )
             continue
+        report_id = payload.get("rindegastos_report_id") or ""
+        report_context = report_context_by_id.get(report_id, {})
         rows.append(
             {
                 "label": _audit_change_label(field_name),
                 "before": _format_audit_value(payload.get("before")),
                 "after": _format_audit_value(payload.get("after")),
                 "rindegastos_expense_id": payload.get("rindegastos_expense_id") or "",
-                "rindegastos_report_id": payload.get("rindegastos_report_id") or "",
+                "rindegastos_report_id": report_id,
+                "rindegastos_report_number": payload.get("rindegastos_report_number")
+                or report_context.get("rindegastos_report_number")
+                or "",
+                "rindegastos_report_title": payload.get("rindegastos_report_title")
+                or report_context.get("rindegastos_report_title")
+                or "",
             }
         )
     return rows
@@ -1279,6 +1290,7 @@ def expense_list(request):
                 .order_by("field_name", "id"),
                 to_attr="open_rindegastos_diffs",
             ),
+            "rindegastos_snapshots",
         )
     )
     status_filter = column_filter_params["status"]
@@ -1596,9 +1608,19 @@ def expense_list(request):
                 name = f"{sender.first_name} {sender.last_name}".strip()
                 gasto.wa_sender_name = name or sender.phone
         gasto.reporter_label = _reporter_label(gasto)
+        report_context_by_id = {}
+        for snapshot in gasto.rindegastos_snapshots.all():
+            normalized = snapshot.normalized_payload or {}
+            report_id = snapshot.rindegastos_report_id or normalized.get("rindegastos_report_id") or ""
+            report_number = normalized.get("rindegastos_report_number") or ""
+            if report_id and report_number and report_id not in report_context_by_id:
+                report_context_by_id[report_id] = {
+                    "rindegastos_report_number": report_number,
+                    "rindegastos_report_title": normalized.get("rindegastos_report_title") or "",
+                }
         logs = list(gasto.audit_logs.all())
         for log in logs:
-            log.display_changes = _display_changes_for_audit(log.changes)
+            log.display_changes = _display_changes_for_audit(log.changes, report_context_by_id=report_context_by_id)
         gasto.audit_entries = logs[:5]
         gasto.audit_entries_all = logs
         notifications = list(gasto.notifications.all())
@@ -1620,6 +1642,8 @@ def expense_list(request):
         )
         for diff in getattr(gasto, "open_rindegastos_diffs", []):
             diff.field_label = RINDEGASTOS_DIFF_FIELD_LABELS.get(diff.field_name, diff.field_name)
+            diff.report_number = (diff.snapshot.normalized_payload or {}).get("rindegastos_report_number") or ""
+            diff.report_title = (diff.snapshot.normalized_payload or {}).get("rindegastos_report_title") or ""
         gasto.open_rindegastos_diff_count = len(getattr(gasto, "open_rindegastos_diffs", []))
         gasto.is_locked = _is_final_expense(gasto)
         gasto.can_manage = can_manage_expenses

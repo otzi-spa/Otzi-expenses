@@ -135,6 +135,7 @@ def apply_rindegastos_diff(diff, actor=None, source="rindegastos_reconcile"):
 
     with transaction.atomic():
         expense = diff.expense.__class__.objects.select_for_update().get(pk=diff.expense_id)
+        report_context = _snapshot_report_context(diff)
         before = getattr(expense, target_field)
         after = _coerce_remote_value(target_field, diff.remote_value)
         if _values_equal(before, after):
@@ -156,6 +157,7 @@ def apply_rindegastos_diff(diff, actor=None, source="rindegastos_reconcile"):
                 "after": True,
                 "rindegastos_expense_id": diff.snapshot.rindegastos_expense_id,
                 "rindegastos_report_id": diff.snapshot.rindegastos_report_id,
+                **report_context,
                 "rindegastos_field": diff.field_name,
             }
         expense.save(update_fields=update_fields)
@@ -177,6 +179,7 @@ def apply_rindegastos_diff(diff, actor=None, source="rindegastos_reconcile"):
                     "after": _serialize_value(after),
                     "rindegastos_expense_id": diff.snapshot.rindegastos_expense_id,
                     "rindegastos_report_id": diff.snapshot.rindegastos_report_id,
+                    **report_context,
                     "rindegastos_field": diff.field_name,
                 },
                 **extra_changes,
@@ -233,3 +236,12 @@ def _serialize_value(value):
     if isinstance(value, Decimal):
         return str(value)
     return value
+
+
+def _snapshot_report_context(diff):
+    normalized = diff.snapshot.normalized_payload or {}
+    return {
+        "rindegastos_report_number": normalized.get("rindegastos_report_number") or "",
+        "rindegastos_report_title": normalized.get("rindegastos_report_title") or "",
+        "rindegastos_report_employee": normalized.get("rindegastos_report_employee") or "",
+    }

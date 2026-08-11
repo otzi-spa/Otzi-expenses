@@ -806,6 +806,7 @@
                             <th>Expenses</th>
                             <th>Rindegastos</th>
                             <th>Gasto RG</th>
+                            <th>Informe</th>
                             <th class="text-end">Acción</th>
                           </tr>
                         </thead>
@@ -816,6 +817,14 @@
                             <td>{{ diff.local_value|default:"-" }}</td>
                             <td>{{ diff.remote_value|default:"-" }}</td>
                             <td>{{ diff.snapshot.rindegastos_expense_id }}</td>
+                            <td>
+                              {% if diff.report_number %}
+                                {{ diff.report_number }}
+                                {% if diff.report_title %}<div class="text-muted fs-8">{{ diff.report_title }}</div>{% endif %}
+                              {% else %}
+                                {{ diff.snapshot.rindegastos_report_id|default:"-" }}
+                              {% endif %}
+                            </td>
                             <td class="text-end">
                               {% if can_manage_expenses %}
                               <div class="d-flex justify-content-end gap-2">
@@ -1093,6 +1102,11 @@
                                     {% if change.rindegastos_expense_id %}
                                       <span class="text-muted">· RG {{ change.rindegastos_expense_id }}</span>
                                     {% endif %}
+                                    {% if change.rindegastos_report_number %}
+                                      <span class="text-muted">· Informe {{ change.rindegastos_report_number }}</span>
+                                    {% elif change.rindegastos_report_id %}
+                                      <span class="text-muted">· Informe API {{ change.rindegastos_report_id }}</span>
+                                    {% endif %}
                                   </div>
                                   {% endfor %}
                                 </div>
@@ -1265,8 +1279,10 @@
                           {% if change.rindegastos_expense_id %}
                             <span class="text-muted">· RG {{ change.rindegastos_expense_id }}</span>
                           {% endif %}
-                          {% if change.rindegastos_report_id %}
-                            <span class="text-muted">· Informe {{ change.rindegastos_report_id }}</span>
+                          {% if change.rindegastos_report_number %}
+                            <span class="text-muted">· Informe {{ change.rindegastos_report_number }}</span>
+                          {% elif change.rindegastos_report_id %}
+                            <span class="text-muted">· Informe API {{ change.rindegastos_report_id }}</span>
                           {% endif %}
                         </div>
                         {% endfor %}

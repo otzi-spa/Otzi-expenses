@@ -75,6 +75,8 @@ class Command(BaseCommand):
         if local_remote_id and snapshot_remote_id and local_remote_id != snapshot_remote_id:
             flags.append("remote_id_mismatch")
         remote_status = _format_value((diff.snapshot.normalized_payload or {}).get("rindegastos_status"))
+        report_number = _format_value((diff.snapshot.normalized_payload or {}).get("rindegastos_report_number"))
+        report_title = _format_value((diff.snapshot.normalized_payload or {}).get("rindegastos_report_title"))
         if _looks_deleted(remote_status):
             flags.append("remote_deleted_like_status")
         if "multiple_remote_expenses" in flags or "multiple_remote_totals" in flags:
@@ -88,6 +90,8 @@ class Command(BaseCommand):
             "expense_rindegastos_expense_id": expense.rindegastos_expense_id or "",
             "rindegastos_expense_id": diff.snapshot.rindegastos_expense_id,
             "rindegastos_report_id": diff.snapshot.rindegastos_report_id,
+            "rindegastos_report_number": report_number,
+            "rindegastos_report_title": report_title,
             "rindegastos_status": remote_status,
             "rindegastos_status_label": _status_label(remote_status),
             "expense_paid_at": expense.paid_at.isoformat() if expense.paid_at else "",
@@ -121,6 +125,8 @@ FIELD_NAMES = [
     "expense_rindegastos_expense_id",
     "rindegastos_expense_id",
     "rindegastos_report_id",
+    "rindegastos_report_number",
+    "rindegastos_report_title",
     "rindegastos_status",
     "rindegastos_status_label",
     "expense_paid_at",
