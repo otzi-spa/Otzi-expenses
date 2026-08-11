@@ -383,6 +383,68 @@ def _log_expense_event(expense, action, actor=None, source="web", reason="", cha
     )
 
 
+def _audit_change_label(field_name):
+    labels = {
+        "amount": "Monto",
+        "category": "Política",
+        "currency": "Moneda",
+        "document_number": "Número de documento",
+        "expense_type": "Categoría Rindegastos",
+        "fuel_km": "Km carguío",
+        "fuel_liters": "Litros combustible",
+        "iva_amount": "IVA",
+        "paid_at": "Fecha del gasto",
+        "rindegastos_cost_center": "Centro de Costo / Faena",
+        "rindegastos_document_type": "Tipo de Documento",
+        "rindegastos_submitter": "Nombre quien rinde",
+        "rindegastos_tax": "Impuesto",
+        "specific_tax_amount": "Impuesto específico",
+        "supplier": "Proveedor",
+        "supplier_rut": "RUT proveedor",
+        "vehicle": "Vehículo o Equipo",
+        "is_vehicle": "Es para vehículo",
+    }
+    return labels.get(field_name, RINDEGASTOS_DIFF_FIELD_LABELS.get(field_name, field_name.replace("_", " ").title()))
+
+
+def _format_audit_value(value):
+    if value in {None, ""}:
+        return "-"
+    if isinstance(value, bool):
+        return "Sí" if value else "No"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(item) for item in value) or "-"
+    if isinstance(value, dict):
+        return str(value)
+    return str(value)
+
+
+def _display_changes_for_audit(changes):
+    rows = []
+    for field_name, payload in (changes or {}).items():
+        if not isinstance(payload, dict) or "before" not in payload or "after" not in payload:
+            rows.append(
+                {
+                    "label": _audit_change_label(field_name),
+                    "before": "",
+                    "after": _format_audit_value(payload),
+                    "rindegastos_expense_id": "",
+                    "rindegastos_report_id": "",
+                }
+            )
+            continue
+        rows.append(
+            {
+                "label": _audit_change_label(field_name),
+                "before": _format_audit_value(payload.get("before")),
+                "after": _format_audit_value(payload.get("after")),
+                "rindegastos_expense_id": payload.get("rindegastos_expense_id") or "",
+                "rindegastos_report_id": payload.get("rindegastos_report_id") or "",
+            }
+        )
+    return rows
+
+
 def _normalized_duplicate_text(value):
     return re.sub(
         r"[^a-z0-9]+",
@@ -1535,6 +1597,8 @@ def expense_list(request):
                 gasto.wa_sender_name = name or sender.phone
         gasto.reporter_label = _reporter_label(gasto)
         logs = list(gasto.audit_logs.all())
+        for log in logs:
+            log.display_changes = _display_changes_for_audit(log.changes)
         gasto.audit_entries = logs[:5]
         gasto.audit_entries_all = logs
         notifications = list(gasto.notifications.all())

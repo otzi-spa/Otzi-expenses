@@ -1080,6 +1080,23 @@
                                 <div><strong>{{ log.get_action_display }}</strong> · {{ log.created_at|localtime|date:'d/m/Y H:i' }}</div>
                                 <div>Usuario: {{ log.actor_name|default:'Sistema' }}</div>
                                 {% if log.reason %}<div>Motivo: {{ log.reason }}</div>{% endif %}
+                                {% if log.display_changes %}
+                                <div class="mt-2 d-flex flex-column gap-1">
+                                  {% for change in log.display_changes %}
+                                  <div class="bg-light rounded px-2 py-1">
+                                    <span class="fw-semibold">{{ change.label }}:</span>
+                                    {% if change.before %}
+                                      <span>{{ change.before }}</span>
+                                      <span class="text-muted">→</span>
+                                    {% endif %}
+                                    <span>{{ change.after }}</span>
+                                    {% if change.rindegastos_expense_id %}
+                                      <span class="text-muted">· RG {{ change.rindegastos_expense_id }}</span>
+                                    {% endif %}
+                                  </div>
+                                  {% endfor %}
+                                </div>
+                                {% endif %}
                               </div>
                               {% endfor %}
                             </div>
@@ -1235,8 +1252,25 @@
                     <div class="fw-bold">{{ log.get_action_display }}</div>
                     <div class="text-muted">Usuario: {{ log.actor_name|default:'Sistema' }} · Origen: {{ log.source }}</div>
                     {% if log.reason %}<div class="text-muted">Motivo: {{ log.reason }}</div>{% endif %}
-                    {% if log.changes %}
-                      <pre class="bg-light rounded p-2 mt-2 mb-0 small">{{ log.changes }}</pre>
+                    {% if log.display_changes %}
+                      <div class="mt-2 d-flex flex-column gap-1">
+                        {% for change in log.display_changes %}
+                        <div class="bg-light rounded px-2 py-1 small">
+                          <span class="fw-semibold">{{ change.label }}:</span>
+                          {% if change.before %}
+                            <span>{{ change.before }}</span>
+                            <span class="text-muted">→</span>
+                          {% endif %}
+                          <span>{{ change.after }}</span>
+                          {% if change.rindegastos_expense_id %}
+                            <span class="text-muted">· RG {{ change.rindegastos_expense_id }}</span>
+                          {% endif %}
+                          {% if change.rindegastos_report_id %}
+                            <span class="text-muted">· Informe {{ change.rindegastos_report_id }}</span>
+                          {% endif %}
+                        </div>
+                        {% endfor %}
+                      </div>
                     {% endif %}
                   </div>
                 </div>

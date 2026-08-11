@@ -1872,6 +1872,38 @@ class SupplierCatalogFlowTests(TestCase):
             ).exists()
         )
 
+    def test_expense_list_displays_audit_change_details(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Remoto",
+            amount=Decimal("5900"),
+            rindegastos_integration_code="OTZ-PERSISTED",
+        )
+        ExpenseAuditLog.objects.create(
+            expense=expense,
+            expense_snapshot_id=expense.id,
+            action="updated",
+            source="rindegastos_reconcile",
+            reason="Cambio aplicado desde diferencias detectadas en Rindegastos.",
+            changes={
+                "supplier": {
+                    "before": "Proveedor Local",
+                    "after": "Proveedor Remoto",
+                    "rindegastos_expense_id": "75528397",
+                    "rindegastos_report_id": "13421804",
+                    "rindegastos_field": "supplier",
+                }
+            },
+        )
+
+        response = self.client.get(reverse("expense_list"), {"trace_id": "OTZ-PERSISTED"})
+
+        self.assertContains(response, "Proveedor:")
+        self.assertContains(response, "Proveedor Local")
+        self.assertContains(response, "Proveedor Remoto")
+        self.assertContains(response, "RG 75528397")
+        self.assertContains(response, "Informe 13421804")
+
     def test_expense_list_defaults_to_active_statuses_and_paginates(self):
         for index in range(55):
             Expense.objects.create(status="pending", supplier=f"Proveedor Activo {index:02d}")
