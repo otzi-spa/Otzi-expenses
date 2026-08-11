@@ -2,6 +2,7 @@ from functools import wraps
 import csv
 import hashlib
 import hmac
+import json
 import logging
 import re
 import secrets
@@ -408,14 +409,16 @@ def _audit_change_label(field_name):
 
 
 def _format_audit_value(value):
-    if value in {None, ""}:
+    if value is None:
         return "-"
     if isinstance(value, bool):
         return "Sí" if value else "No"
     if isinstance(value, (list, tuple)):
         return ", ".join(str(item) for item in value) or "-"
     if isinstance(value, dict):
-        return str(value)
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if value == "":
+        return "-"
     return str(value)
 
 

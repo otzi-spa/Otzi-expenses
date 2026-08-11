@@ -2109,6 +2109,33 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "Informe 6571")
         self.assertNotContains(response, "Informe API 13421804")
 
+    def test_expense_list_renders_audit_change_with_dict_value(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            amount=Decimal("5900"),
+            rindegastos_integration_code="OTZ-PERSISTED",
+        )
+        ExpenseAuditLog.objects.create(
+            expense=expense,
+            expense_snapshot_id=expense.id,
+            action="updated",
+            source="system",
+            changes={
+                "metadata": {
+                    "before": {"old": "valor"},
+                    "after": {"new": "valor"},
+                }
+            },
+        )
+
+        response = self.client.get(reverse("expense_list"), {"trace_id": "OTZ-PERSISTED"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "old")
+        self.assertContains(response, "new")
+        self.assertContains(response, "valor")
+
     def test_expense_list_defaults_to_active_statuses_and_paginates(self):
         for index in range(55):
             Expense.objects.create(status="pending", supplier=f"Proveedor Activo {index:02d}")
