@@ -33,6 +33,8 @@ class NotionFundsSync:
 
     def sync(self, dry_run=False):
         stats = {
+            "queried": 0,
+            "matched": 0,
             "fetched": 0,
             "created": 0,
             "updated": 0,
@@ -41,32 +43,67 @@ class NotionFundsSync:
             "ignored": 0,
             "dry_run": dry_run,
         }
-        records = self.fetch_records()
-        stats["fetched"] = len(records)
+        pages = self.fetch_pages()
+        records = [self.normalize_page(page) for page in pages]
+        matched_records = self.matching_records(records)
+        stats["queried"] = len(records)
+        stats["matched"] = len(matched_records)
+        stats["fetched"] = len(matched_records)
+        stats["work_key_values"] = self.work_key_values(records)
         if dry_run:
-            stats["preview"] = [record.normalized_payload for record in records[:20]]
+            stats["preview"] = [record.normalized_payload for record in matched_records[:20]]
             return stats
 
-        for record in records:
+        for record in matched_records:
             result = self.upsert_record(record)
             stats[result] += 1
             if result == "ready":
                 stats["updated"] += 1
         return stats
 
-    def fetch_records(self):
+    def fetch_pages(self):
         source_id = settings.NOTION_DATA_SOURCE_ID
         database_id = settings.NOTION_DATABASE_ID
         filter_payload = self._work_key_filter()
         if source_id:
-            pages = self.client.query_data_source(source_id, filter_payload=filter_payload)
+            return self.client.query_data_source(source_id, filter_payload=filter_payload)
         elif database_id:
-            pages = self.client.query_database(database_id, filter_payload=filter_payload)
-        else:
-            raise ValueError("Configura NOTION_DATA_SOURCE_ID o NOTION_DATABASE_ID.")
+            return self.client.query_database(database_id, filter_payload=filter_payload)
+        raise ValueError("Configura NOTION_DATA_SOURCE_ID o NOTION_DATABASE_ID.")
+
+    def fetch_records(self):
+        pages = self.fetch_pages()
         records = [self.normalize_page(page) for page in pages]
+        return self.matching_records(records)
+
+    def matching_records(self, records):
         expected = settings.NOTION_FUNDS_WORK_KEY_VALUE.casefold()
         return [record for record in records if record.work_key.casefold() == expected]
+
+    def work_key_values(self, records):
+        counts = {}
+        for record in records:
+            value = record.work_key or "(vacío)"
+            counts[value] = counts.get(value, 0) + 1
+        return counts
+
+    def inspect(self, limit=10):
+        pages = self.fetch_pages()
+        records = [self.normalize_page(page) for page in pages[:limit]]
+        return {
+            "queried": len(pages),
+            "sampled": len(records),
+            "work_key_property": settings.NOTION_FUNDS_WORK_KEY_PROPERTY,
+            "work_key_value_expected": settings.NOTION_FUNDS_WORK_KEY_VALUE,
+            "work_key_values": self.work_key_values([self.normalize_page(page) for page in pages]),
+            "sample": [
+                {
+                    "normalized": record.normalized_payload,
+                    "property_names": sorted((record.raw_payload.get("properties") or {}).keys()),
+                }
+                for record in records
+            ],
+        }
 
     def _work_key_filter(self):
         prop = settings.NOTION_FUNDS_WORK_KEY_PROPERTY

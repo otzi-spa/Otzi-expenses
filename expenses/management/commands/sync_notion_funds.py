@@ -9,10 +9,13 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="Consulta Notion sin persistir logs locales.")
+        parser.add_argument("--inspect", action="store_true", help="Muestra columnas y valores detectados sin persistir.")
+        parser.add_argument("--limit", type=int, default=10, help="Cantidad de filas de muestra para --inspect.")
 
     def handle(self, *args, **options):
         try:
-            stats = NotionFundsSync().sync(dry_run=options["dry_run"])
+            sync = NotionFundsSync()
+            stats = sync.inspect(limit=options["limit"]) if options["inspect"] else sync.sync(dry_run=options["dry_run"])
         except (NotionAPIError, ValueError) as exc:
             raise CommandError(str(exc)) from exc
 

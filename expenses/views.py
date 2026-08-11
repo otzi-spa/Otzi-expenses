@@ -229,8 +229,8 @@ def funds_dashboard(request):
                 messages.success(
                     request,
                     "Sincronización Notion completada: "
-                    f"{stats['fetched']} leídos, {stats['created']} nuevos, "
-                    f"{stats['updated']} actualizados, {stats['errors']} con error.",
+                    f"{stats['queried']} consultados en Notion, {stats['matched']} calzan con el filtro, "
+                    f"{stats['created']} nuevos, {stats['updated']} actualizados, {stats['errors']} con error.",
                 )
             except (NotionAPIError, ValueError) as exc:
                 messages.error(request, f"No se pudo sincronizar Notion: {exc}")
