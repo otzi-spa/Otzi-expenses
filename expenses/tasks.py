@@ -10,6 +10,7 @@ from requests import RequestException
 
 from expenses.models import ExpenseNotification
 from expenses.rindegastos_client import RindegastosAPIError
+from expenses.rindegastos_reconcile import RindegastosExpenseReconciler
 from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.rindegastos_trace import expense_integration_code
 from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, rolling_uploaded_sync_since
@@ -42,6 +43,22 @@ def sync_rindegastos_uploaded_expenses_task():
         logger.exception("No se pudo sincronizar gastos subidos a Rindegastos desde tarea programada.")
         raise
     logger.info("Sincronización programada de gastos subidos a Rindegastos completada: %s", stats)
+    return stats
+
+
+@shared_task(name="expenses.reconcile_rindegastos_expenses")
+def reconcile_rindegastos_expenses_task():
+    try:
+        stats = RindegastosExpenseReconciler().reconcile(
+            since=rolling_uploaded_sync_since(),
+            until=timezone.localdate(),
+            max_pages=20,
+            apply_safe_diffs=True,
+        )
+    except (RindegastosAPIError, ValueError):
+        logger.exception("No se pudo reconciliar gastos Rindegastos desde tarea programada.")
+        raise
+    logger.info("Reconciliación programada de gastos Rindegastos completada: %s", stats)
     return stats
 
 

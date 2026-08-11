@@ -12,7 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch
 from django.db.models import Max, Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.core.paginator import Paginator
@@ -32,6 +32,7 @@ from .models import (
     FuelSpecificTaxRate,
     RindegastosExpenseFieldCatalog,
     RindegastosExpenseDiff,
+    RindegastosReconcileRun,
     RindegastosTaxCatalog,
     SupplierCatalog,
     TaxIndicatorValue,
@@ -2723,9 +2724,38 @@ def settings_rindegastos_fields(request):
 @login_required
 @expense_manager_required
 def settings_rindegastos_rules(request):
+    last_run = RindegastosReconcileRun.objects.order_by("-started_at").first()
+    pending_diffs = list(
+        RindegastosExpenseDiff.objects.filter(status=RindegastosExpenseDiff.STATUS_OPEN)
+        .select_related("expense", "snapshot")
+        .order_by("expense_id", "field_name", "id")[:100]
+    )
+    for diff in pending_diffs:
+        diff.field_label = RINDEGASTOS_DIFF_FIELD_LABELS.get(diff.field_name, diff.field_name)
+        diff.local_display_value = _format_audit_value(diff.local_value)
+        diff.remote_display_value = _format_audit_value(diff.remote_value)
+        diff.otz_id = expense_integration_code_for_expense(diff.expense)
+        normalized = diff.snapshot.normalized_payload or {}
+        diff.report_number = normalized.get("rindegastos_report_number") or ""
+        diff.report_title = normalized.get("rindegastos_report_title") or ""
+        diff.expense_url = f"{reverse('expense_list')}?trace_id={diff.otz_id}"
+    pending_by_field = list(
+        RindegastosExpenseDiff.objects.filter(status=RindegastosExpenseDiff.STATUS_OPEN)
+        .values("field_name", "expense__status")
+        .annotate(count=Count("id"))
+        .order_by("field_name", "expense__status")
+    )
+    for row in pending_by_field:
+        row["field_label"] = RINDEGASTOS_DIFF_FIELD_LABELS.get(row["field_name"], row["field_name"])
+        row["status_label"] = dict(Expense.STATUS).get(row["expense__status"], row["expense__status"])
     context = {
         "auto_apply_rules": AUTO_APPLY_RULES,
         "manual_review_rules": MANUAL_REVIEW_RULES,
+        "last_reconcile_run": last_run,
+        "last_reconcile_metadata": (last_run.metadata if last_run else {}),
+        "pending_diffs": pending_diffs,
+        "pending_diffs_count": RindegastosExpenseDiff.objects.filter(status=RindegastosExpenseDiff.STATUS_OPEN).count(),
+        "pending_by_field": pending_by_field,
         "settings_menu_urls": _settings_menu_urls(),
     }
     return render(request, "settings/rindegastos_rules.html", context)

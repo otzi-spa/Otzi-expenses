@@ -5,6 +5,7 @@ from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import urlparse
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.files.base import ContentFile
@@ -31,7 +32,7 @@ from expenses.models import (
     TaxIndicatorValue,
     normalize_rut,
 )
-from expenses.tasks import send_expense_notification_task
+from expenses.tasks import reconcile_rindegastos_expenses_task, send_expense_notification_task
 from expenses.invoice_tax_calculator import calculate_invoice_taxes
 from expenses.rindegastos_client import RindegastosClient
 from expenses.rindegastos_reconcile import (
@@ -754,6 +755,33 @@ class RindegastosExpenseReconcilerTests(TestCase):
                 status=RindegastosExpenseDiff.STATUS_OPEN,
             ).exists()
         )
+
+    @patch("expenses.tasks.RindegastosExpenseReconciler")
+    def test_reconcile_rindegastos_expenses_task_applies_safe_diffs(self, reconciler_class):
+        reconciler_class.return_value.reconcile.return_value = {"matched": 0}
+
+        result = reconcile_rindegastos_expenses_task()
+
+        self.assertEqual(result, {"matched": 0})
+        _, kwargs = reconciler_class.return_value.reconcile.call_args
+        self.assertEqual(kwargs["max_pages"], 20)
+        self.assertTrue(kwargs["apply_safe_diffs"])
+        self.assertFalse(kwargs.get("dry_run", False))
+        self.assertIsNotNone(kwargs["since"])
+        self.assertIsNotNone(kwargs["until"])
+
+    def test_reconcile_rindegastos_expenses_is_scheduled_three_times_daily(self):
+        schedule = settings.CELERY_BEAT_SCHEDULE
+        expected = {
+            "reconcile-rindegastos-expenses-nightly": ("3", "0"),
+            "reconcile-rindegastos-expenses-midday": ("12", "0"),
+            "reconcile-rindegastos-expenses-afternoon": ("16", "0"),
+        }
+
+        for name, (hour, minute) in expected.items():
+            self.assertEqual(schedule[name]["task"], "expenses.reconcile_rindegastos_expenses")
+            self.assertEqual(str(schedule[name]["schedule"]._orig_hour), hour)
+            self.assertEqual(str(schedule[name]["schedule"]._orig_minute), minute)
 
     def test_reconcile_does_not_overwrite_conflicting_remote_integration_code(self):
         expense = Expense.objects.create(
@@ -2128,12 +2156,59 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertNotContains(response, "Cambios detectados en Rindegastos")
 
     def test_reviewer_can_view_rindegastos_rules(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Local",
+            amount=Decimal("5900"),
+            rindegastos_integration_code="OTZ-PERSISTED",
+        )
+        run = RindegastosReconcileRun.objects.create(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 11),
+            max_pages=20,
+            fetched_count=835,
+            matched_count=112,
+            diff_count=0,
+            status=RindegastosReconcileRun.STATUS_COMPLETED,
+            finished_at=timezone.now(),
+            metadata={"diffs_auto_applied": 32, "diffs_manual_review": 23},
+        )
+        snapshot = RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            run=run,
+            rindegastos_expense_id="75528397",
+            rindegastos_report_id="13421804",
+            payload_hash="h" * 64,
+            normalized_payload={
+                "rindegastos_report_number": "6571",
+                "rindegastos_report_title": "Informe usuario",
+            },
+            raw_payload={"Id": "75528397"},
+        )
+        RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=snapshot,
+            field_name="custom_fields.Vehiculo o Equipo",
+            local_value="RFJG70",
+            remote_value="Kia Sonet RFJG70",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
+
         response = self.client.get(reverse("settings_rindegastos_rules"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Reglas Rindegastos")
-        self.assertContains(response, "Autoactualización")
+        self.assertContains(response, "Sincronización Rindegastos")
+        self.assertContains(response, "Última corrida")
+        self.assertContains(response, "Autoaplicados")
+        self.assertContains(response, "32")
         self.assertContains(response, "Revisión manual")
+        self.assertContains(response, "23")
+        self.assertContains(response, "Cambios Rindegastos pendientes")
+        self.assertContains(response, "OTZ-PERSISTED")
+        self.assertContains(response, "Vehículo o Equipo")
+        self.assertContains(response, "Kia Sonet RFJG70")
+        self.assertContains(response, "6571")
+        self.assertContains(response, "Reglas de autoactualización")
         self.assertContains(response, "Proveedor")
         self.assertContains(response, "Múltiples gastos remotos")
 

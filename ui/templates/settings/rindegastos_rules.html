@@ -1,10 +1,11 @@
 {% extends "metronic/base_app.html" %}
-{% block page_title %}Reglas Rindegastos{% endblock %}
+{% load tz %}
+{% block page_title %}Sincronización Rindegastos{% endblock %}
 
 {% block toolbar %}
 <div class="app-toolbar py-3">
   <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
-    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Reglas Rindegastos</h1>
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Sincronización Rindegastos</h1>
   </div>
 </div>
 {% endblock %}
@@ -13,7 +14,165 @@
 <div class="row g-6">
   <div class="col-12">
     <div class="alert alert-light-info mb-0">
-      Estas reglas definen qué cambios detectados en Rindegastos se aplican automáticamente en Expenses y cuáles quedan pendientes para revisión manual.
+      Esta vista muestra el estado de la reconciliación automática, los cambios pendientes detectados desde Rindegastos y las reglas usadas para autoactualizar o dejar revisión manual.
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Última corrida</h3>
+          <div class="text-muted">Tarea programada: 03:00, 12:00 y 16:00.</div>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if last_reconcile_run %}
+        <div class="row g-4">
+          <div class="col-6 col-xl-2">
+            <div class="text-muted">Estado</div>
+            <div class="fw-bold fs-5">
+              {% if last_reconcile_run.status == "completed" %}
+                <span class="badge badge-light-success">Completada</span>
+              {% elif last_reconcile_run.status == "failed" %}
+                <span class="badge badge-light-danger">Error</span>
+              {% else %}
+                <span class="badge badge-light-warning">En curso</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-6 col-xl-2">
+            <div class="text-muted">Inicio</div>
+            <div class="fw-bold">{{ last_reconcile_run.started_at|localtime|date:"d/m/Y H:i" }}</div>
+          </div>
+          <div class="col-6 col-xl-2">
+            <div class="text-muted">Fin</div>
+            <div class="fw-bold">{{ last_reconcile_run.finished_at|localtime|date:"d/m/Y H:i"|default:"-" }}</div>
+          </div>
+          <div class="col-6 col-xl-2">
+            <div class="text-muted">Rango</div>
+            <div class="fw-bold">{{ last_reconcile_run.since|date:"d/m/Y" }} - {{ last_reconcile_run.until|date:"d/m/Y" }}</div>
+          </div>
+          <div class="col-6 col-xl-2">
+            <div class="text-muted">Matched</div>
+            <div class="fw-bold">{{ last_reconcile_run.matched_count }} / {{ last_reconcile_run.fetched_count }}</div>
+          </div>
+          <div class="col-6 col-xl-2">
+            <div class="text-muted">Errores</div>
+            <div class="fw-bold">{{ last_reconcile_run.error_count }}</div>
+          </div>
+        </div>
+        <div class="separator my-5"></div>
+        <div class="row g-4">
+          <div class="col-6 col-md-3">
+            <div class="text-muted">Snapshots cambiados</div>
+            <div class="fw-bold fs-5">{{ last_reconcile_run.changed_count }}</div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="text-muted">Diffs abiertos</div>
+            <div class="fw-bold fs-5">{{ last_reconcile_run.diff_count }}</div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="text-muted">Autoaplicados</div>
+            <div class="fw-bold fs-5">{{ last_reconcile_metadata.diffs_auto_applied|default:0 }}</div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="text-muted">Revisión manual</div>
+            <div class="fw-bold fs-5">{{ last_reconcile_metadata.diffs_manual_review|default:0 }}</div>
+          </div>
+        </div>
+        {% else %}
+        <div class="text-muted">Aún no hay corridas registradas.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Pendientes</h3>
+          <div class="text-muted">{{ pending_diffs_count }} cambios abiertos.</div>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if pending_by_field %}
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Campo</th>
+                <th>Estado gasto</th>
+                <th class="text-end">Cantidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in pending_by_field %}
+              <tr>
+                <td class="fw-semibold">{{ row.field_label }}</td>
+                <td class="text-muted">{{ row.status_label }}</td>
+                <td class="text-end fw-bold">{{ row.count }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-muted">No hay cambios pendientes.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Cambios Rindegastos pendientes</h3>
+          <div class="text-muted">Últimos 100 cambios abiertos para revisión manual.</div>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if pending_diffs %}
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Gasto</th>
+                <th>Campo</th>
+                <th>Expenses</th>
+                <th>Rindegastos</th>
+                <th>Informe</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for diff in pending_diffs %}
+              <tr>
+                <td>
+                  <a href="{{ diff.expense_url }}" class="fw-bold">{{ diff.otz_id }}</a>
+                  <div class="text-muted fs-8">{{ diff.expense.get_status_display }}</div>
+                </td>
+                <td class="fw-semibold">{{ diff.field_label }}</td>
+                <td class="text-muted">{{ diff.local_display_value }}</td>
+                <td>{{ diff.remote_display_value }}</td>
+                <td>
+                  {% if diff.report_number %}
+                    <span class="fw-semibold">{{ diff.report_number }}</span>
+                    {% if diff.report_title %}<div class="text-muted fs-8">{{ diff.report_title }}</div>{% endif %}
+                  {% else %}
+                    <span class="text-muted">{{ diff.snapshot.rindegastos_report_id|default:"-" }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-muted">No hay cambios Rindegastos pendientes.</div>
+        {% endif %}
+      </div>
     </div>
   </div>
 
@@ -21,8 +180,8 @@
     <div class="card h-100">
       <div class="card-header">
         <div>
-          <h3 class="card-title">Autoactualización</h3>
-          <div class="text-muted">Se ejecuta solo cuando el comando corre con autoaplicación habilitada.</div>
+          <h3 class="card-title">Reglas de autoactualización</h3>
+          <div class="text-muted">Se aplican en cada corrida programada cuando el campo es seguro.</div>
         </div>
       </div>
       <div class="card-body">
@@ -52,7 +211,7 @@
     <div class="card h-100">
       <div class="card-header">
         <div>
-          <h3 class="card-title">Revisión manual</h3>
+          <h3 class="card-title">Reglas de revisión manual</h3>
           <div class="text-muted">Quedan como cambios RG visibles en el gasto.</div>
         </div>
       </div>
@@ -74,28 +233,6 @@
               {% endfor %}
             </tbody>
           </table>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-12">
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">Cómo se ve en gastos</h3>
-      </div>
-      <div class="card-body">
-        <div class="d-flex flex-column gap-3">
-          <div>
-            <span class="badge badge-light-warning">Cambios RG N</span>
-            <span class="text-muted ms-2">Aparece cuando un gasto mantiene diferencias abiertas con Rindegastos.</span>
-          </div>
-          <div class="text-muted">
-            Al abrir el gasto, el detalle muestra valor actual en Expenses, valor detectado en Rindegastos, id de gasto Rindegastos y acciones para aplicar o ignorar.
-          </div>
-          <div class="text-muted">
-            Cada aplicación automática o manual queda registrada en la auditoría del gasto con valor anterior, valor nuevo, id gasto Rindegastos e id informe Rindegastos.
-          </div>
         </div>
       </div>
     </div>

@@ -118,6 +118,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "expenses.sync_rindegastos_uploaded_expenses",
         "schedule": crontab(hour=3, minute=0),
     },
+    "reconcile-rindegastos-expenses-nightly": {
+        "task": "expenses.reconcile_rindegastos_expenses",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    "reconcile-rindegastos-expenses-midday": {
+        "task": "expenses.reconcile_rindegastos_expenses",
+        "schedule": crontab(hour=12, minute=0),
+    },
+    "reconcile-rindegastos-expenses-afternoon": {
+        "task": "expenses.reconcile_rindegastos_expenses",
+        "schedule": crontab(hour=16, minute=0),
+    },
     "sync-tax-indicators-daily": {
         "task": "expenses.sync_tax_indicators",
         "schedule": crontab(hour=2, minute=30),
