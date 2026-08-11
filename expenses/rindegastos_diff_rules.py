@@ -8,6 +8,12 @@ from .models import ExpenseAuditLog, RindegastosExpenseDiff
 
 
 ZERO_EQUIVALENT_DIFF_FIELDS = {"tax_amount", "other_taxes"}
+DECIMAL_EQUIVALENT_DIFF_FIELDS = {
+    "tax_amount",
+    "other_taxes",
+    "custom_fields.Km.Carguio",
+    "custom_fields.Litros Combustible",
+}
 
 AUTO_APPLY_FIELD_MAP = {
     "supplier": "supplier",
@@ -131,10 +137,14 @@ def classify_diff(diff_spec, expense, remote_ids_count=1):
 
 
 def canonical_diff_value(field_name, value):
-    if field_name in ZERO_EQUIVALENT_DIFF_FIELDS:
-        zeroish = _zeroish_decimal(value)
-        if zeroish is not None:
-            return format(zeroish.normalize(), "f")
+    if field_name in DECIMAL_EQUIVALENT_DIFF_FIELDS:
+        decimal_value = _optional_decimal(value)
+        if decimal_value is not None:
+            return format(decimal_value.normalize(), "f")
+    if field_name == "tax_name" and _empty_tax_name(value):
+        return ""
+    if field_name == "custom_fields.RUT proveedor":
+        return _canonical_rut(value)
     if value is None:
         return ""
     if isinstance(value, Decimal):
@@ -147,9 +157,13 @@ def diff_values_equivalent(field_name, left, right):
 
 
 def should_ignore_diff(field_name, local_value, remote_value):
-    if field_name not in ZERO_EQUIVALENT_DIFF_FIELDS:
-        return False
-    return _zeroish_decimal(local_value) == Decimal("0") and _zeroish_decimal(remote_value) == Decimal("0")
+    if field_name in ZERO_EQUIVALENT_DIFF_FIELDS:
+        return _zeroish_decimal(local_value) == Decimal("0") and _zeroish_decimal(remote_value) == Decimal("0")
+    if field_name == "tax_name":
+        return _empty_tax_name(local_value) and _empty_tax_name(remote_value)
+    if field_name in DECIMAL_EQUIVALENT_DIFF_FIELDS or field_name == "custom_fields.RUT proveedor":
+        return canonical_diff_value(field_name, local_value) == canonical_diff_value(field_name, remote_value)
+    return False
 
 
 def apply_rindegastos_diff(diff, actor=None, source="rindegastos_reconcile"):
@@ -241,10 +255,28 @@ def _can_auto_apply_small_total_change(diff_spec, expense):
 def _zeroish_decimal(value):
     if value in {None, ""}:
         return Decimal("0")
+    return _optional_decimal(value)
+
+
+def _optional_decimal(value):
     try:
         return Decimal(str(value).replace(",", "."))
     except (InvalidOperation, TypeError, ValueError):
         return None
+
+
+def _empty_tax_name(value):
+    return str(value or "").strip().casefold() in {"", "0", "none", "null", "sin impuesto", "sin impuestos"}
+
+
+def _canonical_rut(value):
+    normalized = str(value or "").strip().upper().replace(".", "").replace(" ", "")
+    if not normalized:
+        return ""
+    if "-" in normalized:
+        body, verifier = normalized.rsplit("-", 1)
+        return f"{body}-{verifier}"
+    return normalized
 
 
 def _coerce_remote_value(target_field, value):

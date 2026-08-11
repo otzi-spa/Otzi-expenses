@@ -485,6 +485,46 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertEqual(stats["diffs_opened"], 0)
         self.assertFalse(RindegastosExpenseDiff.objects.filter(expense=expense, field_name="other_taxes").exists())
 
+    def test_reconcile_ignores_decimal_and_tax_name_equivalent_noise(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            amount=Decimal("5900"),
+            currency="CLP",
+            fuel_liters=Decimal("24.18"),
+            rindegastos_tax="",
+            supplier_rut="82971700-K",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "Supplier": "Proveedor",
+                        "Total": 5900,
+                        "Currency": "CLP",
+                        "TaxName": "0",
+                        "IntegrationCode": expense.rindegastos_integration_code,
+                        "ExpenseExtraFields": [
+                            {"Name": "Litros Combustible", "Value": "24.180"},
+                            {"Name": "RUT proveedor", "Value": "82.971.700-k"},
+                        ],
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return self.get_expenses_page({})[0][0]
+
+        stats = RindegastosExpenseReconciler(client=FakeClient(), export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+        )
+
+        self.assertEqual(stats["diffs_opened"], 0)
+        self.assertFalse(RindegastosExpenseDiff.objects.filter(expense=expense).exists())
+
     def test_reconcile_reuses_existing_diff_when_snapshot_gets_report_context(self):
         expense = Expense.objects.create(
             status="completed",
@@ -862,20 +902,50 @@ class RindegastosExpenseReconcilerTests(TestCase):
             remote_value="0",
             severity=RindegastosExpenseDiff.SEVERITY_WARNING,
         )
+        decimal_noise_diff = RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=enriched_snapshot,
+            field_name="custom_fields.Litros Combustible",
+            local_value="24.18",
+            remote_value="24.180",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
+        tax_name_noise_diff = RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=enriched_snapshot,
+            field_name="tax_name",
+            local_value="",
+            remote_value="0",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
+        rut_case_noise_diff = RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=enriched_snapshot,
+            field_name="custom_fields.RUT proveedor",
+            local_value="82971700-K",
+            remote_value="82.971.700-k",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
 
         out = io.StringIO()
         call_command("cleanup_rindegastos_diffs", "--dry-run", stdout=out)
-        self.assertIn("Total to resolve: 2", out.getvalue())
-        self.assertEqual(RindegastosExpenseDiff.objects.filter(status="open").count(), 3)
+        self.assertIn("Total to resolve: 5", out.getvalue())
+        self.assertEqual(RindegastosExpenseDiff.objects.filter(status="open").count(), 6)
 
         call_command("cleanup_rindegastos_diffs", stdout=io.StringIO())
 
         old_diff.refresh_from_db()
         enriched_diff.refresh_from_db()
         noise_diff.refresh_from_db()
+        decimal_noise_diff.refresh_from_db()
+        tax_name_noise_diff.refresh_from_db()
+        rut_case_noise_diff.refresh_from_db()
         self.assertEqual(old_diff.status, RindegastosExpenseDiff.STATUS_RESOLVED)
         self.assertEqual(enriched_diff.status, RindegastosExpenseDiff.STATUS_OPEN)
         self.assertEqual(noise_diff.status, RindegastosExpenseDiff.STATUS_RESOLVED)
+        self.assertEqual(decimal_noise_diff.status, RindegastosExpenseDiff.STATUS_RESOLVED)
+        self.assertEqual(tax_name_noise_diff.status, RindegastosExpenseDiff.STATUS_RESOLVED)
+        self.assertEqual(rut_case_noise_diff.status, RindegastosExpenseDiff.STATUS_RESOLVED)
 
     @patch("expenses.management.commands.inspect_rindegastos_expenses.RindegastosClient")
     def test_inspect_rindegastos_expenses_flags_detail_not_listed(self, client_class):
