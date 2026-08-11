@@ -1147,7 +1147,7 @@
                         <div class="expense-receipt-canvas js-receipt-viewer" data-viewer-type="{% if 'pdf' in attachment.content_type|lower %}pdf{% else %}image{% endif %}">
                           {% if "pdf" in attachment.content_type|lower %}
                             <div class="receipt-viewer-content">
-                              <iframe class="receipt-viewer-media" src="{% url 'attachment_serve' attachment.pk %}" title="Comprobante PDF #{{ forloop.counter }}"></iframe>
+                              <iframe class="receipt-viewer-media" data-receipt-src="{% url 'attachment_serve' attachment.pk %}" title="Comprobante PDF #{{ forloop.counter }}"></iframe>
                             </div>
                           {% else %}
                             <div class="receipt-viewer-content">
@@ -1496,6 +1496,8 @@
     .expense-edit-modal .receipt-fit-button {
       font-size: 0.75rem;
       font-weight: 600;
+      min-width: 62px;
+      white-space: nowrap;
     }
 
     .expense-edit-modal .receipt-zoom-value {
@@ -2536,8 +2538,8 @@
         function getNaturalSize() {
           if (viewerType === 'pdf') {
             return {
-              width: Math.max(viewer.clientWidth - 2, 640),
-              height: Math.max(viewer.clientHeight - 2, 760)
+              width: Math.max(viewer.clientWidth - 2, 720),
+              height: Math.max(viewer.clientHeight - 2, 920)
             };
           }
           return {
@@ -2593,6 +2595,14 @@
           applyZoom(getFitZoom(), false);
         }
 
+        function ensurePdfLoaded() {
+          if (viewerType !== 'pdf') return;
+          var source = media.getAttribute('data-receipt-src');
+          if (source && !media.getAttribute('src')) {
+            media.setAttribute('src', source);
+          }
+        }
+
         controls.forEach(function (control) {
           control.addEventListener('click', function () {
             var action = control.getAttribute('data-receipt-zoom');
@@ -2619,7 +2629,9 @@
           applyZoom(1, false);
         });
 
-        if (viewerType === 'pdf' || media.complete) {
+        if (viewerType === 'pdf') {
+          fitViewer();
+        } else if (media.complete) {
           fitViewer();
         }
 
@@ -2627,6 +2639,7 @@
         if (parentModal) {
           parentModal.addEventListener('shown.bs.modal', function () {
             if (state.fitted && panel.classList.contains('is-active')) {
+              ensurePdfLoaded();
               fitViewer();
             }
             updateCustomScrollbars();
@@ -2641,6 +2654,11 @@
         });
 
         return {
+          activate: function () {
+            ensurePdfLoaded();
+            fitViewer();
+            updateCustomScrollbars();
+          },
           fit: fitViewer,
           updateScrollbars: updateCustomScrollbars
         };
@@ -2667,7 +2685,9 @@
                 panel.getAttribute('data-receipt-panel') === targetId
               );
             });
-            if (viewerApis[targetId] && typeof viewerApis[targetId].fit === 'function') {
+            if (viewerApis[targetId] && typeof viewerApis[targetId].activate === 'function') {
+              viewerApis[targetId].activate();
+            } else if (viewerApis[targetId] && typeof viewerApis[targetId].fit === 'function') {
               viewerApis[targetId].fit();
               if (typeof viewerApis[targetId].updateScrollbars === 'function') {
                 viewerApis[targetId].updateScrollbars();
