@@ -99,11 +99,35 @@ class NotionFundsSync:
             "sample": [
                 {
                     "normalized": record.normalized_payload,
+                    "configured_properties": self.inspect_configured_properties(record.raw_payload),
                     "property_names": sorted((record.raw_payload.get("properties") or {}).keys()),
                 }
                 for record in records
             ],
         }
+
+    def inspect_configured_properties(self, page):
+        properties = page.get("properties") or {}
+        configured = {
+            "work_key": settings.NOTION_FUNDS_WORK_KEY_PROPERTY,
+            "beneficiary": settings.NOTION_FUNDS_BENEFICIARY_PROPERTY,
+            "rut": settings.NOTION_FUNDS_RUT_PROPERTY,
+            "amount": settings.NOTION_FUNDS_AMOUNT_PROPERTY,
+            "currency": settings.NOTION_FUNDS_CURRENCY_PROPERTY,
+            "payment_date": settings.NOTION_FUNDS_PAYMENT_DATE_PROPERTY,
+            "record_id": settings.NOTION_FUNDS_REMITTANCE_PROPERTY,
+            "cost_center": settings.NOTION_FUNDS_COST_CENTER_PROPERTY,
+        }
+        found = {}
+        for label, configured_name in configured.items():
+            actual_name, prop = _find_property(properties, configured_name)
+            found[label] = {
+                "configured": configured_name,
+                "actual": actual_name,
+                "type": (prop or {}).get("type") or "",
+                "text": _property_text(prop),
+            }
+        return found
 
     def _work_key_filter(self):
         prop = settings.NOTION_FUNDS_WORK_KEY_PROPERTY
@@ -117,14 +141,14 @@ class NotionFundsSync:
 
     def normalize_page(self, page):
         properties = page.get("properties") or {}
-        beneficiary = _property_text(properties.get(settings.NOTION_FUNDS_BENEFICIARY_PROPERTY))
-        rut = normalize_rut(_property_text(properties.get(settings.NOTION_FUNDS_RUT_PROPERTY)))
-        amount = _property_decimal(properties.get(settings.NOTION_FUNDS_AMOUNT_PROPERTY))
-        currency = _property_text(properties.get(settings.NOTION_FUNDS_CURRENCY_PROPERTY)) or "CLP"
-        payment_date = _property_date(properties.get(settings.NOTION_FUNDS_PAYMENT_DATE_PROPERTY))
-        work_key = _property_text(properties.get(settings.NOTION_FUNDS_WORK_KEY_PROPERTY))
-        record_id = _property_text(properties.get(settings.NOTION_FUNDS_REMITTANCE_PROPERTY))
-        cost_center = _property_text(properties.get(settings.NOTION_FUNDS_COST_CENTER_PROPERTY))
+        beneficiary = _property_text(_get_property(properties, settings.NOTION_FUNDS_BENEFICIARY_PROPERTY))
+        rut = normalize_rut(_property_text(_get_property(properties, settings.NOTION_FUNDS_RUT_PROPERTY)))
+        amount = _property_decimal(_get_property(properties, settings.NOTION_FUNDS_AMOUNT_PROPERTY))
+        currency = _property_text(_get_property(properties, settings.NOTION_FUNDS_CURRENCY_PROPERTY)) or "CLP"
+        payment_date = _property_date(_get_property(properties, settings.NOTION_FUNDS_PAYMENT_DATE_PROPERTY))
+        work_key = _property_text(_get_property(properties, settings.NOTION_FUNDS_WORK_KEY_PROPERTY))
+        record_id = _property_text(_get_property(properties, settings.NOTION_FUNDS_REMITTANCE_PROPERTY))
+        cost_center = _property_text(_get_property(properties, settings.NOTION_FUNDS_COST_CENTER_PROPERTY))
         normalized = {
             "page_id": page.get("id") or "",
             "url": page.get("url") or "",
@@ -268,6 +292,26 @@ def _property_text(prop):
     if prop_type == "checkbox":
         return "true" if value else "false"
     return ""
+
+
+def _get_property(properties, name):
+    return _find_property(properties, name)[1]
+
+
+def _find_property(properties, name):
+    if not properties or not name:
+        return "", None
+    if name in properties:
+        return name, properties[name]
+    expected = _normalize_property_name(name)
+    for property_name, value in properties.items():
+        if _normalize_property_name(property_name) == expected:
+            return property_name, value
+    return "", None
+
+
+def _normalize_property_name(value):
+    return " ".join((value or "").replace("\xa0", " ").strip().casefold().split())
 
 
 def _formula_text(value):
