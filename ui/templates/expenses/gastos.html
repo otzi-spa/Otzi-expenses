@@ -1146,8 +1146,16 @@
                       <div class="receipt-viewer-frame">
                         <div class="expense-receipt-canvas js-receipt-viewer" data-viewer-type="{% if 'pdf' in attachment.content_type|lower %}pdf{% else %}image{% endif %}">
                           {% if "pdf" in attachment.content_type|lower %}
-                            <div class="receipt-viewer-content">
-                              <iframe class="receipt-viewer-media" data-receipt-src="{% url 'attachment_serve' attachment.pk %}" title="Comprobante PDF #{{ forloop.counter }}"></iframe>
+                            <div class="receipt-viewer-content receipt-pdf-content">
+                              <div class="receipt-pdf-card receipt-viewer-media">
+                                <div class="receipt-pdf-icon">PDF</div>
+                                <div class="fw-bold text-gray-900">Comprobante PDF</div>
+                                <div class="text-muted fs-8 text-center">Abre el documento para revisarlo completo.</div>
+                                <div class="d-flex gap-2 mt-2">
+                                  <a class="btn btn-sm btn-light" href="{% url 'attachment_serve' attachment.pk %}?download=1" target="_blank" rel="noopener">Descargar</a>
+                                  <a class="btn btn-sm btn-primary" href="{% url 'attachment_serve' attachment.pk %}" target="_blank" rel="noopener">Abrir PDF</a>
+                                </div>
+                              </div>
                             </div>
                           {% else %}
                             <div class="receipt-viewer-content">
@@ -1612,15 +1620,48 @@
       background: #fff;
     }
 
-    .expense-edit-modal .expense-receipt-canvas iframe {
-      display: block;
-      width: 100%;
-      height: 100%;
-      min-height: 520px;
-      max-width: none;
-      border: 0;
+    .expense-edit-modal .expense-receipt-panel[data-receipt-kind="pdf"] .receipt-viewer-controls {
+      display: none;
+    }
+
+    .expense-edit-modal .expense-receipt-panel[data-receipt-kind="pdf"] .expense-receipt-canvas {
+      overflow: hidden;
+    }
+
+    .expense-edit-modal .receipt-pdf-content {
+      align-items: center;
+      justify-content: center;
+      padding: 1.25rem;
+    }
+
+    .expense-edit-modal .receipt-pdf-card {
+      width: min(100%, 260px);
+      min-height: 230px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.7rem;
+      padding: 1.35rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
       background: #fff;
-      transform-origin: top center;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    .expense-edit-modal .receipt-pdf-icon {
+      width: 58px;
+      height: 72px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      background: #eef6ff;
+      color: #0d6efd;
+      font-size: 0.86rem;
+      font-weight: 800;
+      letter-spacing: 0;
+      border: 1px solid #cfe2ff;
     }
 
     .expense-edit-modal .expense-receipt-empty {
@@ -2527,21 +2568,25 @@
           });
         }
 
+        if (viewerType === 'pdf') {
+          label.textContent = 'PDF';
+          updateCustomScrollbars();
+          return {
+            activate: updateCustomScrollbars,
+            fit: updateCustomScrollbars,
+            updateScrollbars: updateCustomScrollbars
+          };
+        }
+
         var state = {
           zoom: 1,
-          minZoom: viewerType === 'pdf' ? 0.5 : 0.25,
-          maxZoom: viewerType === 'pdf' ? 3 : 4,
+          minZoom: 0.25,
+          maxZoom: 4,
           step: 0.25,
           fitted: true
         };
 
         function getNaturalSize() {
-          if (viewerType === 'pdf') {
-            return {
-              width: Math.max(viewer.clientWidth - 2, 720),
-              height: Math.max(viewer.clientHeight - 2, 920)
-            };
-          }
           return {
             width: media.naturalWidth || media.clientWidth || 1,
             height: media.naturalHeight || media.clientHeight || 1
@@ -2569,15 +2614,9 @@
 
           content.style.width = renderedWidth + 'px';
           content.style.height = renderedHeight + 'px';
-          if (viewerType === 'pdf') {
-            media.style.width = size.width + 'px';
-            media.style.height = size.height + 'px';
-            media.style.transform = 'scale(' + state.zoom + ')';
-          } else {
-            media.style.width = (size.width * state.zoom) + 'px';
-            media.style.height = 'auto';
-            media.style.transform = 'none';
-          }
+          media.style.width = (size.width * state.zoom) + 'px';
+          media.style.height = 'auto';
+          media.style.transform = 'none';
           label.textContent = Math.round(state.zoom * 100) + '%';
 
           if (keepScrollRatio) {
@@ -2593,14 +2632,6 @@
         function fitViewer() {
           state.fitted = true;
           applyZoom(getFitZoom(), false);
-        }
-
-        function ensurePdfLoaded() {
-          if (viewerType !== 'pdf') return;
-          var source = media.getAttribute('data-receipt-src');
-          if (source && !media.getAttribute('src')) {
-            media.setAttribute('src', source);
-          }
         }
 
         controls.forEach(function (control) {
@@ -2629,9 +2660,7 @@
           applyZoom(1, false);
         });
 
-        if (viewerType === 'pdf') {
-          fitViewer();
-        } else if (media.complete) {
+        if (media.complete) {
           fitViewer();
         }
 
@@ -2639,7 +2668,6 @@
         if (parentModal) {
           parentModal.addEventListener('shown.bs.modal', function () {
             if (state.fitted && panel.classList.contains('is-active')) {
-              ensurePdfLoaded();
               fitViewer();
             }
             updateCustomScrollbars();
@@ -2655,7 +2683,6 @@
 
         return {
           activate: function () {
-            ensurePdfLoaded();
             fitViewer();
             updateCustomScrollbars();
           },
