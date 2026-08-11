@@ -110,6 +110,7 @@ class Command(BaseCommand):
         if detail_status == "error":
             flags.append("getExpense_error")
         remote_status = normalized.get("rindegastos_status") or ""
+        remote_status_label = _status_label(remote_status)
         if _looks_deleted(remote_status):
             flags.append("remote_deleted_like_status")
         if detail_status == "ok" and not listed_payloads:
@@ -122,6 +123,7 @@ class Command(BaseCommand):
             "detail_status": detail_status,
             "listed_count": len(listed_payloads),
             "remote_status": remote_status,
+            "remote_status_label": remote_status_label,
             "remote_report_id": normalized.get("rindegastos_report_id") or "",
             "remote_issue_date": normalized.get("issue_date") or "",
             "remote_supplier": normalized.get("supplier") or "",
@@ -143,6 +145,7 @@ FIELD_NAMES = [
     "detail_status",
     "listed_count",
     "remote_status",
+    "remote_status_label",
     "remote_report_id",
     "remote_issue_date",
     "remote_supplier",
@@ -171,3 +174,11 @@ def _parse_date_option(raw_value, default, name):
 def _looks_deleted(value):
     normalized = str(value or "").strip().casefold()
     return any(term in normalized for term in ("deleted", "elimin", "borrad", "anulad", "cancel"))
+
+
+def _status_label(value):
+    return {
+        "0": "En proceso",
+        "1": "Aprobado",
+        "2": "Rechazado",
+    }.get(str(value or "").strip(), "")

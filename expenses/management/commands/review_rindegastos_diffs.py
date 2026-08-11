@@ -89,6 +89,7 @@ class Command(BaseCommand):
             "rindegastos_expense_id": diff.snapshot.rindegastos_expense_id,
             "rindegastos_report_id": diff.snapshot.rindegastos_report_id,
             "rindegastos_status": remote_status,
+            "rindegastos_status_label": _status_label(remote_status),
             "expense_paid_at": expense.paid_at.isoformat() if expense.paid_at else "",
             "expense_supplier": expense.supplier or "",
             "expense_total": _format_value(expense.amount),
@@ -121,6 +122,7 @@ FIELD_NAMES = [
     "rindegastos_expense_id",
     "rindegastos_report_id",
     "rindegastos_status",
+    "rindegastos_status_label",
     "expense_paid_at",
     "expense_supplier",
     "expense_total",
@@ -146,3 +148,11 @@ def _format_value(value):
 def _looks_deleted(value):
     normalized = str(value or "").strip().casefold()
     return any(term in normalized for term in ("deleted", "elimin", "borrad", "anulad", "cancel"))
+
+
+def _status_label(value):
+    return {
+        "0": "En proceso",
+        "1": "Aprobado",
+        "2": "Rechazado",
+    }.get(str(value or "").strip(), "")

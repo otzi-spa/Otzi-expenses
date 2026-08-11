@@ -606,7 +606,7 @@ class RindegastosExpenseReconcilerTests(TestCase):
                 return {
                     "Id": expense_id,
                     "ReportId": "13421804",
-                    "Status": "Aprobado",
+                    "Status": 0,
                     "IssueDate": "2026-07-07",
                     "Supplier": "Proveedor remoto",
                     "Total": 9521,
@@ -623,6 +623,7 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertIn("75528979", content)
         self.assertIn("detail_ok_but_not_listed", content)
         self.assertIn("not_found_in_getExpenses_window", content)
+        self.assertIn("En proceso", content)
         self.assertIn("OTZ-ABC123", content)
 
 
