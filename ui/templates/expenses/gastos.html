@@ -493,6 +493,17 @@
             {% else %}
               <span class="badge badge-light">No subido</span>
             {% endif %}
+            {% if gasto.open_rindegastos_diff_count %}
+              <button
+                type="button"
+                class="badge badge-light-warning border-0 mt-1"
+                data-bs-toggle="modal"
+                data-bs-target="#expenseModal{{ gasto.pk }}"
+                title="Ver cambios detectados en Rindegastos"
+              >
+                Cambios RG {{ gasto.open_rindegastos_diff_count }}
+              </button>
+            {% endif %}
           </td>
           <td data-filter-value="{{ gasto.get_status_display|default:gasto.status }}" data-status-code="{{ gasto.status }}">
             {% with gasto.get_status_display|default:gasto.status as status_label %}
@@ -780,6 +791,56 @@
                       {% endif %}
                     </div>
                     {% endfor %}
+                  </div>
+                </div>
+                {% endif %}
+                {% if gasto.open_rindegastos_diffs %}
+                <div class="col-12">
+                  <div class="alert alert-light-warning border border-warning border-dashed mb-0">
+                    <div class="fw-semibold mb-2">Cambios detectados en Rindegastos</div>
+                    <div class="table-responsive">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead>
+                          <tr class="text-muted text-uppercase fs-8">
+                            <th>Campo</th>
+                            <th>Expenses</th>
+                            <th>Rindegastos</th>
+                            <th>Gasto RG</th>
+                            <th class="text-end">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for diff in gasto.open_rindegastos_diffs %}
+                          <tr>
+                            <td>{{ diff.field_label }}</td>
+                            <td>{{ diff.local_value|default:"-" }}</td>
+                            <td>{{ diff.remote_value|default:"-" }}</td>
+                            <td>{{ diff.snapshot.rindegastos_expense_id }}</td>
+                            <td class="text-end">
+                              {% if can_manage_expenses %}
+                              <div class="d-flex justify-content-end gap-2">
+                                <form method="post" action="{% url 'expense_action' gasto.pk 'apply_rindegastos_diff' %}">
+                                  {% csrf_token %}
+                                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                  <input type="hidden" name="diff_id" value="{{ diff.pk }}">
+                                  <button type="submit" class="btn btn-sm btn-light-primary">Aplicar</button>
+                                </form>
+                                <form method="post" action="{% url 'expense_action' gasto.pk 'ignore_rindegastos_diff' %}">
+                                  {% csrf_token %}
+                                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                  <input type="hidden" name="diff_id" value="{{ diff.pk }}">
+                                  <button type="submit" class="btn btn-sm btn-light">Ignorar</button>
+                                </form>
+                              </div>
+                              {% else %}
+                              <span class="text-muted">Solo lectura</span>
+                              {% endif %}
+                            </td>
+                          </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
                 {% endif %}

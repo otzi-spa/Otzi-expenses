@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from .models import Expense, RindegastosExpenseDiff, RindegastosExpenseSnapshot, RindegastosReconcileRun
 from .rindegastos_client import RindegastosClient
+from .rindegastos_diff_rules import apply_rindegastos_diff, classify_diff
 from .rindegastos_trace import expense_integration_code
 from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
 
@@ -186,6 +187,7 @@ class RindegastosExpenseReconciler:
         fetch_detail=True,
         mark_integration_code=False,
         integration_status=1,
+        apply_safe_diffs=False,
     ):
         matcher = RindegastosUploadedExpenseSync(client=self.client, export_id_func=self.export_id_func)
         remote_expenses, pages_read, results_per_page = matcher.fetch_remote_expenses(
@@ -196,6 +198,12 @@ class RindegastosExpenseReconciler:
         )
         local_by_export_id = matcher.build_local_export_map()
         local_by_remote_id = matcher.build_local_remote_id_map()
+        matched_remote_counts = self._matched_remote_counts(
+            remote_expenses,
+            matcher,
+            local_by_export_id,
+            local_by_remote_id,
+        )
 
         run = None
         if not dry_run:
@@ -208,6 +216,7 @@ class RindegastosExpenseReconciler:
                     "fetch_detail": fetch_detail,
                     "pages_read": pages_read,
                     "mark_integration_code": mark_integration_code,
+                    "apply_safe_diffs": apply_safe_diffs,
                 },
             )
 
@@ -226,6 +235,8 @@ class RindegastosExpenseReconciler:
             "unmatched": 0,
             "errors": 0,
             "diffs_opened": 0,
+            "diffs_auto_applied": 0,
+            "diffs_manual_review": 0,
             "matched_by": {"integration_code": 0, "note": 0, "remote_id": 0},
             "integration_code": {
                 "empty": 0,
@@ -284,8 +295,17 @@ class RindegastosExpenseReconciler:
                     dry_run=dry_run,
                 )
                 diff_specs = compare_expense_to_remote(expense, normalized)
-                diff_count = self._open_diffs(expense, snapshot, diff_specs, dry_run=dry_run)
-                stats["diffs_opened"] += diff_count
+                diff_result = self._handle_diffs(
+                    expense,
+                    snapshot,
+                    diff_specs,
+                    remote_ids_count=matched_remote_counts.get(expense.id, 1),
+                    dry_run=dry_run,
+                    apply_safe_diffs=apply_safe_diffs,
+                )
+                stats["diffs_opened"] += diff_result["opened"]
+                stats["diffs_auto_applied"] += diff_result["auto_applied"]
+                stats["diffs_manual_review"] += diff_result["manual_review"]
                 if changed:
                     stats["changed_snapshots"] += 1
                 else:
@@ -298,6 +318,20 @@ class RindegastosExpenseReconciler:
         if run:
             self._finish_run(run, stats, status=RindegastosReconcileRun.STATUS_COMPLETED)
         return stats
+
+    def _matched_remote_counts(self, remote_expenses, matcher, local_by_export_id, local_by_remote_id):
+        remote_ids_by_expense = {}
+        for payload in remote_expenses:
+            summary = summarize_rindegastos_expense(payload)
+            match = matcher.match_remote_expense(summary, local_by_export_id, local_by_remote_id)
+            if not match:
+                continue
+            expense, _otzi_id, _match_source = match
+            remote_id = str(summary["id"] or "")
+            if not remote_id:
+                continue
+            remote_ids_by_expense.setdefault(expense.id, set()).add(remote_id)
+        return {expense_id: len(remote_ids) for expense_id, remote_ids in remote_ids_by_expense.items()}
 
     @transaction.atomic
     def _process_snapshot(self, expense, payload, source_endpoint, run=None, dry_run=False):
@@ -320,11 +354,16 @@ class RindegastosExpenseReconciler:
         )
         return True, snapshot, normalized
 
-    def _open_diffs(self, expense, snapshot, diff_specs, dry_run=False):
-        opened = 0
+    def _handle_diffs(self, expense, snapshot, diff_specs, remote_ids_count=1, dry_run=False, apply_safe_diffs=False):
+        result = {"opened": 0, "auto_applied": 0, "manual_review": 0}
         for diff_spec in diff_specs:
+            classification = classify_diff(diff_spec, expense, remote_ids_count=remote_ids_count)
+            if classification == "manual_review":
+                result["manual_review"] += 1
             if dry_run:
-                opened += 1
+                result["opened"] += 1
+                if apply_safe_diffs and classification == "auto_apply":
+                    result["auto_applied"] += 1
                 continue
             exists = RindegastosExpenseDiff.objects.filter(
                 expense=expense,
@@ -332,10 +371,13 @@ class RindegastosExpenseReconciler:
                 local_value=diff_spec["local_value"],
                 remote_value=diff_spec["remote_value"],
                 status=RindegastosExpenseDiff.STATUS_OPEN,
-            ).exists()
+            ).first()
             if exists:
+                if apply_safe_diffs and classification == "auto_apply":
+                    if apply_rindegastos_diff(exists):
+                        result["auto_applied"] += 1
                 continue
-            RindegastosExpenseDiff.objects.create(
+            diff = RindegastosExpenseDiff.objects.create(
                 expense=expense,
                 snapshot=snapshot,
                 field_name=diff_spec["field_name"],
@@ -343,8 +385,11 @@ class RindegastosExpenseReconciler:
                 remote_value=diff_spec["remote_value"],
                 severity=diff_spec["severity"],
             )
-            opened += 1
-        return opened
+            result["opened"] += 1
+            if apply_safe_diffs and classification == "auto_apply":
+                if apply_rindegastos_diff(diff):
+                    result["auto_applied"] += 1
+        return result
 
     def _record_integration_code_diagnostic(self, payload, expected_otzi_id, stats):
         normalized = normalize_rindegastos_expense(payload)
@@ -421,6 +466,8 @@ class RindegastosExpenseReconciler:
             "unchanged_snapshots": stats["unchanged_snapshots"],
             "matched_by": stats["matched_by"],
             "integration_code": stats["integration_code"],
+            "diffs_auto_applied": stats["diffs_auto_applied"],
+            "diffs_manual_review": stats["diffs_manual_review"],
         }
         run.save(
             update_fields=[

@@ -20,6 +20,7 @@ class Command(BaseCommand):
         parser.add_argument("--fetch-detail", action=argparse.BooleanOptionalAction, default=True)
         parser.add_argument("--mark-integration-code", action="store_true")
         parser.add_argument("--integration-status", type=int, default=1)
+        parser.add_argument("--apply-safe-diffs", action="store_true")
 
     def handle(self, *args, **options):
         since = parse_date(options.get("since") or "") or rolling_uploaded_sync_since()
@@ -33,6 +34,7 @@ class Command(BaseCommand):
                 fetch_detail=options["fetch_detail"],
                 mark_integration_code=options["mark_integration_code"],
                 integration_status=options["integration_status"],
+                apply_safe_diffs=options["apply_safe_diffs"],
             )
         except (RindegastosAPIError, ValueError) as exc:
             raise CommandError(str(exc)) from exc
@@ -43,6 +45,8 @@ class Command(BaseCommand):
         self.stdout.write(f"Changed snapshots: {stats['changed_snapshots']}")
         self.stdout.write(f"Unchanged snapshots: {stats['unchanged_snapshots']}")
         self.stdout.write(f"Diffs opened: {stats['diffs_opened']}")
+        self.stdout.write(f"Diffs auto-applied: {stats['diffs_auto_applied']}")
+        self.stdout.write(f"Diffs manual review: {stats['diffs_manual_review']}")
         self.stdout.write(f"Unmatched: {stats['unmatched']}")
         self.stdout.write(f"Errors: {stats['errors']}")
         self.stdout.write(f"Matched by: {stats['matched_by']}")

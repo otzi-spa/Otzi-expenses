@@ -139,6 +139,14 @@ class Command(BaseCommand):
             "report_number": report_context["number"],
             "report_title": report_context["title"],
             "report_employee": report_context["employee"],
+            "report_send_date": report_context["send_date"],
+            "report_close_date": report_context["close_date"],
+            "report_policy": report_context["policy"],
+            "report_total": report_context["total"],
+            "report_total_approved": report_context["total_approved"],
+            "report_expenses": report_context["expenses_count"],
+            "report_approved_expenses": report_context["approved_expenses_count"],
+            "report_rejected_expenses": report_context["rejected_expenses_count"],
             "report_error": report_context["error"],
             "remote_issue_date": normalized.get("issue_date") or "",
             "remote_supplier": normalized.get("supplier") or "",
@@ -169,6 +177,20 @@ class Command(BaseCommand):
                 "number": str(_first_present(payload, "ReportNumber", "Folio", "folio", "reportNumber") or ""),
                 "title": str(_first_present(payload, "Title", "title") or ""),
                 "employee": str(_first_present(payload, "EmployeeName", "UserName", "employeeName", "userName") or ""),
+                "send_date": str(_first_present(payload, "SendDate", "sendDate") or ""),
+                "close_date": str(_first_present(payload, "CloseDate", "closeDate") or ""),
+                "policy": str(_first_present(payload, "PolicyName", "ExpensePolicyName", "policyName") or ""),
+                "total": str(_first_present(payload, "ReportTotal", "Total", "reportTotal") or ""),
+                "total_approved": str(
+                    _first_present(payload, "ReportTotalApproved", "TotalApproved", "reportTotalApproved") or ""
+                ),
+                "expenses_count": str(_first_present(payload, "NbrExpenses", "Expenses", "nbrExpenses") or ""),
+                "approved_expenses_count": str(
+                    _first_present(payload, "NbrApprovedExpenses", "ApprovedExpenses", "nbrApprovedExpenses") or ""
+                ),
+                "rejected_expenses_count": str(
+                    _first_present(payload, "NbrRejectedExpenses", "RejectedExpenses", "nbrRejectedExpenses") or ""
+                ),
                 "error": "",
             }
         except Exception as exc:
@@ -192,6 +214,14 @@ FIELD_NAMES = [
     "report_number",
     "report_title",
     "report_employee",
+    "report_send_date",
+    "report_close_date",
+    "report_policy",
+    "report_total",
+    "report_total_approved",
+    "report_expenses",
+    "report_approved_expenses",
+    "report_rejected_expenses",
     "report_error",
     "remote_issue_date",
     "remote_supplier",
@@ -259,5 +289,13 @@ def _empty_report_context():
         "number": "",
         "title": "",
         "employee": "",
+        "send_date": "",
+        "close_date": "",
+        "policy": "",
+        "total": "",
+        "total_approved": "",
+        "expenses_count": "",
+        "approved_expenses_count": "",
+        "rejected_expenses_count": "",
         "error": "",
     }

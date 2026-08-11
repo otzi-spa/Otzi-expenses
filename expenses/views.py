@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Prefetch
 from django.db.models import Max, Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.core.paginator import Paginator
@@ -29,6 +30,7 @@ from .models import (
     ExpenseTypeCatalog,
     FuelSpecificTaxRate,
     RindegastosExpenseFieldCatalog,
+    RindegastosExpenseDiff,
     RindegastosTaxCatalog,
     SupplierCatalog,
     TaxIndicatorValue,
@@ -43,6 +45,7 @@ from django.utils import timezone
 from requests import RequestException
 from .invoice_tax_calculator import calculate_invoice_taxes
 from .rindegastos_client import RindegastosAPIError
+from .rindegastos_diff_rules import apply_rindegastos_diff, ignore_rindegastos_diff
 from .rindegastos_trace import ensure_expense_integration_code, expense_integration_code, expense_integration_code_for_expense
 from .rindegastos_sync import RindegastosCatalogSync
 from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, default_uploaded_sync_since
@@ -68,6 +71,27 @@ RINDEGASTOS_POLICIES = [
     "Curimon III",
     "Autopista de Antofagasta 2026",
 ]
+
+RINDEGASTOS_DIFF_FIELD_LABELS = {
+    "supplier": "Proveedor",
+    "total": "Monto",
+    "currency": "Moneda",
+    "issue_date": "Fecha gasto",
+    "policy_name": "Política",
+    "category_name": "Categoría",
+    "tax_name": "Impuesto",
+    "tax_amount": "IVA",
+    "other_taxes": "Otros impuestos",
+    "custom_fields.Centro de Costo / Faena": "Centro de Costo / Faena",
+    "custom_fields.Nombre quien rinde": "Nombre quien rinde",
+    "custom_fields.RUT proveedor": "RUT proveedor",
+    "custom_fields.Tipo de Documento": "Tipo de Documento",
+    "custom_fields.Numero de Documento": "Número de Documento",
+    "custom_fields.Vehiculo o Equipo": "Vehículo o Equipo",
+    "custom_fields.Km.Carguio": "Km carguío",
+    "custom_fields.Litros Combustible": "Litros combustible",
+    "custom_fields.Categoria": "Categoría Rindegastos",
+}
 
 
 logger = logging.getLogger(__name__)
@@ -1165,7 +1189,18 @@ def expense_list(request):
 
     queryset = (
         Expense.objects.select_related("created_by", "wa_sender", "decision_by")
-        .prefetch_related("attachments", "audit_logs", "notifications")
+        .prefetch_related(
+            "attachments",
+            "audit_logs",
+            "notifications",
+            Prefetch(
+                "rindegastos_diffs",
+                queryset=RindegastosExpenseDiff.objects.filter(status=RindegastosExpenseDiff.STATUS_OPEN)
+                .select_related("snapshot")
+                .order_by("field_name", "id"),
+                to_attr="open_rindegastos_diffs",
+            ),
+        )
     )
     status_filter = column_filter_params["status"]
     status_filter_is_valid = status_filter in dict(Expense.STATUS)
@@ -1502,6 +1537,9 @@ def expense_list(request):
             and gasto.rejection_notification
             and gasto.rejection_notification.status == ExpenseNotification.STATUS_FAILED
         )
+        for diff in getattr(gasto, "open_rindegastos_diffs", []):
+            diff.field_label = RINDEGASTOS_DIFF_FIELD_LABELS.get(diff.field_name, diff.field_name)
+        gasto.open_rindegastos_diff_count = len(getattr(gasto, "open_rindegastos_diffs", []))
         gasto.is_locked = _is_final_expense(gasto)
         gasto.can_manage = can_manage_expenses
         gasto.split_label = ""
@@ -1903,6 +1941,45 @@ def expense_action(request, pk: int, action: str):
         notification.save(update_fields=["status", "last_error", "next_retry_at", "updated_at"])
         enqueue_notification_send(notification)
         messages.success(request, "La notificación WhatsApp quedó pendiente de reintento.")
+        return action_redirect()
+
+    if action == "apply_rindegastos_diff":
+        diff = get_object_or_404(
+            RindegastosExpenseDiff,
+            pk=request.POST.get("diff_id"),
+            expense=expense,
+            status=RindegastosExpenseDiff.STATUS_OPEN,
+        )
+        if apply_rindegastos_diff(diff, actor=request.user, source="rindegastos_manual_review"):
+            messages.success(request, "Cambio de Rindegastos aplicado al gasto.")
+        else:
+            messages.info(request, "La diferencia ya estaba resuelta.")
+        return action_redirect()
+
+    if action == "ignore_rindegastos_diff":
+        diff = get_object_or_404(
+            RindegastosExpenseDiff,
+            pk=request.POST.get("diff_id"),
+            expense=expense,
+            status=RindegastosExpenseDiff.STATUS_OPEN,
+        )
+        ignore_rindegastos_diff(diff, actor=request.user)
+        _log_expense_event(
+            expense,
+            action="updated",
+            actor=request.user,
+            source="rindegastos_manual_review",
+            reason="Diferencia de Rindegastos ignorada manualmente.",
+            changes={
+                "rindegastos_diff": {
+                    "field": diff.field_name,
+                    "local": diff.local_value,
+                    "remote": diff.remote_value,
+                    "status": "ignored",
+                }
+            },
+        )
+        messages.success(request, "Diferencia de Rindegastos ignorada.")
         return action_redirect()
 
     if _is_final_expense(expense):
