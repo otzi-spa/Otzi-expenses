@@ -23,6 +23,7 @@ AUTO_APPLY_FIELD_MAP = {
     "custom_fields.RUT proveedor": "supplier_rut",
     "custom_fields.Centro de Costo / Faena": "rindegastos_cost_center",
 }
+APPROVED_SAFE_AUTO_APPLY_FIELDS = set(AUTO_APPLY_FIELD_MAP)
 
 APPLY_FIELD_MAP = {
     **AUTO_APPLY_FIELD_MAP,
@@ -127,7 +128,9 @@ def classify_diff(diff_spec, expense, remote_ids_count=1):
     field_name = diff_spec["field_name"]
     if remote_ids_count > 1:
         return "manual_review"
-    if expense.status in {"approved", "rejected"}:
+    if expense.status == "rejected":
+        return "manual_review"
+    if expense.status == "approved" and field_name not in APPROVED_SAFE_AUTO_APPLY_FIELDS:
         return "manual_review"
     if field_name in AUTO_APPLY_FIELD_MAP and diff_spec.get("remote_value") not in {None, ""}:
         return "auto_apply"

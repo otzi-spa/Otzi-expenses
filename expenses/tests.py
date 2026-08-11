@@ -697,6 +697,64 @@ class RindegastosExpenseReconcilerTests(TestCase):
             ).exists()
         )
 
+    def test_reconcile_auto_applies_safe_diff_on_approved_expense_but_keeps_total_manual(self):
+        expense = Expense.objects.create(
+            status="approved",
+            supplier="Proveedor Local",
+            amount=Decimal("5900"),
+            currency="CLP",
+            rindegastos_tax="",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "ReportId": "13421804",
+                        "Supplier": "Proveedor Remoto",
+                        "Total": 5903,
+                        "Currency": "CLP",
+                        "TaxName": "IVA",
+                        "IntegrationCode": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "ReportId": "13421804",
+                    "Supplier": "Proveedor Remoto",
+                    "Total": 5903,
+                    "Currency": "CLP",
+                    "TaxName": "IVA",
+                    "IntegrationCode": expense.rindegastos_integration_code,
+                }
+
+            def get_expense_report(self, report_id):
+                return {"Id": report_id, "ReportNumber": "6571", "Title": "Informe aprobado"}
+
+        stats = RindegastosExpenseReconciler(client=FakeClient(), export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+            apply_safe_diffs=True,
+        )
+
+        expense.refresh_from_db()
+        self.assertEqual(expense.supplier, "Proveedor Remoto")
+        self.assertEqual(expense.rindegastos_tax, "IVA")
+        self.assertEqual(expense.amount, Decimal("5900"))
+        self.assertEqual(stats["diffs_auto_applied"], 2)
+        self.assertEqual(stats["diffs_manual_review"], 1)
+        self.assertTrue(
+            RindegastosExpenseDiff.objects.filter(
+                expense=expense,
+                field_name="total",
+                status=RindegastosExpenseDiff.STATUS_OPEN,
+            ).exists()
+        )
+
     def test_reconcile_does_not_overwrite_conflicting_remote_integration_code(self):
         expense = Expense.objects.create(
             status="completed",
