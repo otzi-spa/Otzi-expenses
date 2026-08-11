@@ -73,3 +73,6 @@ class NotionClient:
 
     def update_page_properties(self, page_id, properties):
         return self._request("PATCH", f"pages/{page_id}", payload={"properties": properties})
+
+    def retrieve_page(self, page_id):
+        return self._request("GET", f"pages/{page_id}")

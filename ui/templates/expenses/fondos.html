@@ -106,7 +106,8 @@
             <th>Monto</th>
             <th>Fecha</th>
             <th>Obra/Centro</th>
-            <th>Estado</th>
+            <th>Estado Notion</th>
+            <th>Sync</th>
             <th>Error</th>
             <th class="text-end pe-6">Notion</th>
           </tr>
@@ -126,6 +127,7 @@
             </td>
             <td>{{ log.payment_date|date:"d/m/Y"|default:"-" }}</td>
             <td>{{ log.cost_center|default:"-" }}</td>
+            <td>{{ log.notion_status|default:"-" }}</td>
             <td><span class="badge badge-light-primary">{{ log.get_local_status_display }}</span></td>
             <td class="text-muted fs-8" style="max-width: 360px;">{{ log.last_error|default:"" }}</td>
             <td class="text-end pe-6">
@@ -138,7 +140,7 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="9" class="text-center text-muted py-10">Todavía no hay registros sincronizados.</td>
+            <td colspan="10" class="text-center text-muted py-10">Todavía no hay registros sincronizados.</td>
           </tr>
           {% endfor %}
         </tbody>

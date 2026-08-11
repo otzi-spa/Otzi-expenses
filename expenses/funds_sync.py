@@ -16,6 +16,7 @@ class NotionFundRecord:
     page_id: str
     url: str
     work_key: str
+    notion_status: str
     record_id: str
     beneficiary_name: str
     beneficiary_rut: str
@@ -30,6 +31,7 @@ class NotionFundRecord:
 class NotionFundsSync:
     def __init__(self, client=None):
         self.client = client or NotionClient()
+        self._related_page_cache = {}
 
     def sync(self, dry_run=False):
         stats = {
@@ -117,6 +119,7 @@ class NotionFundsSync:
             "payment_date": settings.NOTION_FUNDS_PAYMENT_DATE_PROPERTY,
             "record_id": settings.NOTION_FUNDS_REMITTANCE_PROPERTY,
             "cost_center": settings.NOTION_FUNDS_COST_CENTER_PROPERTY,
+            "notion_status": settings.NOTION_FUNDS_STATUS_PROPERTY,
         }
         found = {}
         for label, configured_name in configured.items():
@@ -142,17 +145,21 @@ class NotionFundsSync:
     def normalize_page(self, page):
         properties = page.get("properties") or {}
         beneficiary = _property_text(_get_property(properties, settings.NOTION_FUNDS_BENEFICIARY_PROPERTY))
+        if not beneficiary:
+            beneficiary = self._resolve_relation_names(_get_property(properties, "Beneficiario"))
         rut = normalize_rut(_property_text(_get_property(properties, settings.NOTION_FUNDS_RUT_PROPERTY)))
         amount = _property_decimal(_get_property(properties, settings.NOTION_FUNDS_AMOUNT_PROPERTY))
         currency = _property_text(_get_property(properties, settings.NOTION_FUNDS_CURRENCY_PROPERTY)) or "CLP"
         payment_date = _property_date(_get_property(properties, settings.NOTION_FUNDS_PAYMENT_DATE_PROPERTY))
         work_key = _property_text(_get_property(properties, settings.NOTION_FUNDS_WORK_KEY_PROPERTY))
+        notion_status = _property_text(_get_property(properties, settings.NOTION_FUNDS_STATUS_PROPERTY))
         record_id = _property_text(_get_property(properties, settings.NOTION_FUNDS_REMITTANCE_PROPERTY))
         cost_center = _property_text(_get_property(properties, settings.NOTION_FUNDS_COST_CENTER_PROPERTY))
         normalized = {
             "page_id": page.get("id") or "",
             "url": page.get("url") or "",
             "work_key": work_key,
+            "notion_status": notion_status,
             "record_id": record_id,
             "beneficiary_name": beneficiary,
             "beneficiary_rut": rut,
@@ -165,6 +172,7 @@ class NotionFundsSync:
             page_id=page.get("id") or "",
             url=page.get("url") or "",
             work_key=work_key,
+            notion_status=notion_status,
             record_id=record_id,
             beneficiary_name=beneficiary,
             beneficiary_rut=rut,
@@ -182,6 +190,7 @@ class NotionFundsSync:
         status, error = self._validate(record, mapping)
         defaults = {
             "notion_url": record.url,
+            "notion_status": record.notion_status,
             "notion_work_key": record.work_key,
             "notion_record_id": record.record_id,
             "beneficiary_name": record.beneficiary_name,
@@ -265,6 +274,22 @@ class NotionFundsSync:
         )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+    def _resolve_relation_names(self, prop):
+        relation_ids = _property_relation_ids(prop)
+        names = []
+        for page_id in relation_ids:
+            try:
+                page = self._related_page_cache.get(page_id)
+                if page is None:
+                    page = self.client.retrieve_page(page_id)
+                    self._related_page_cache[page_id] = page
+            except Exception:
+                continue
+            name = _page_title(page)
+            if name:
+                names.append(name)
+        return ", ".join(names)
+
 
 def _property_text(prop):
     if not prop:
@@ -283,6 +308,10 @@ def _property_text(prop):
         return ((value or {}).get("start") or "").strip()
     if prop_type == "formula":
         return _formula_text(value or {})
+    if prop_type == "rollup":
+        return _rollup_text(value or {})
+    if prop_type == "relation":
+        return ", ".join(item.get("id") or "" for item in value or []).strip()
     if prop_type == "unique_id":
         prefix = (value or {}).get("prefix") or ""
         number = (value or {}).get("number")
@@ -291,6 +320,27 @@ def _property_text(prop):
         return (value or "").strip()
     if prop_type == "checkbox":
         return "true" if value else "false"
+    return ""
+
+
+def _property_relation_ids(prop):
+    if not prop or prop.get("type") != "relation":
+        return []
+    return [item.get("id") for item in prop.get("relation") or [] if item.get("id")]
+
+
+def _page_title(page):
+    properties = page.get("properties") or {}
+    for prop in properties.values():
+        if prop.get("type") == "title":
+            text = _property_text(prop)
+            if text:
+                return text
+    for prop in properties.values():
+        if prop.get("type") in {"rich_text", "select", "status", "email"}:
+            text = _property_text(prop)
+            if text:
+                return text
     return ""
 
 
@@ -321,6 +371,19 @@ def _formula_text(value):
         return "" if formula_value is None else str(formula_value)
     if formula_type == "date":
         return ((formula_value or {}).get("start") or "").strip()
+    return ""
+
+
+def _rollup_text(value):
+    rollup_type = value.get("type")
+    rollup_value = value.get(rollup_type)
+    if rollup_type in {"number", "incomplete", "unsupported"}:
+        return "" if rollup_value is None else str(rollup_value)
+    if rollup_type == "date":
+        return ((rollup_value or {}).get("start") or "").strip()
+    if rollup_type == "array":
+        parts = [_property_text(item) for item in rollup_value or []]
+        return ", ".join(part for part in parts if part).strip()
     return ""
 
 

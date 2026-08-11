@@ -249,6 +249,7 @@ def funds_dashboard(request):
             Q(beneficiary_name__icontains=search_query)
             | Q(beneficiary_rut__icontains=search_query)
             | Q(notion_record_id__icontains=search_query)
+            | Q(notion_status__icontains=search_query)
             | Q(cost_center__icontains=search_query)
         )
 
