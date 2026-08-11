@@ -3681,7 +3681,13 @@
           var validFiles = [];
           var errors = [];
           var allowedExt = { '.pdf': true, '.jpg': true, '.jpeg': true, '.png': true };
-          var allowedMime = { 'application/pdf': true, 'image/jpeg': true, 'image/png': true };
+          var allowedMime = {
+            'application/pdf': true,
+            'image/jpeg': true,
+            'image/jpg': true,
+            'image/pjpeg': true,
+            'image/png': true
+          };
           var maxBytes = 10 * 1024 * 1024;
 
           for (var i = 0; i < fileList.length; i++) {
@@ -3708,11 +3714,27 @@
 
         function setReceiptInputFiles(files) {
           if (!receiptInput) return;
-          var dt = new DataTransfer();
+          var DataTransferCtor = window.DataTransfer || window.ClipboardEvent && function () {
+            var event = new ClipboardEvent('');
+            return event.clipboardData;
+          };
+          if (!DataTransferCtor) {
+            return false;
+          }
+          var dt;
+          try {
+            dt = new DataTransferCtor();
+          } catch (error) {
+            return false;
+          }
+          if (!dt || !dt.items) {
+            return false;
+          }
           for (var i = 0; i < files.length; i++) {
             dt.items.add(files[i]);
           }
           receiptInput.files = dt.files;
+          return true;
         }
 
         if (receiptDropzone && receiptInput) {
@@ -3725,12 +3747,15 @@
           receiptInput.addEventListener('change', function () {
             var validation = validateReceiptFiles(receiptInput.files || []);
             if (validation.errors.length) {
-              setReceiptInputFiles(validation.validFiles);
               receiptFeedback.classList.remove('text-primary');
               receiptFeedback.classList.add('text-danger');
               receiptFeedback.textContent = validation.errors.join(' ');
               if (validation.validFiles.length) {
-                receiptFeedback.textContent += ' Se mantuvieron ' + validation.validFiles.length + ' archivo(s) válido(s).';
+                if (setReceiptInputFiles(validation.validFiles)) {
+                  receiptFeedback.textContent += ' Se mantuvieron ' + validation.validFiles.length + ' archivo(s) válido(s).';
+                } else {
+                  receiptFeedback.textContent += ' Vuelve a seleccionar solo archivos válidos.';
+                }
               }
               return;
             }
@@ -3754,7 +3779,12 @@
           receiptDropzone.addEventListener('drop', function (event) {
             if (!event.dataTransfer || !event.dataTransfer.files || !event.dataTransfer.files.length) return;
             var validation = validateReceiptFiles(event.dataTransfer.files);
-            setReceiptInputFiles(validation.validFiles);
+            if (!setReceiptInputFiles(validation.validFiles)) {
+              receiptFeedback.classList.remove('text-primary');
+              receiptFeedback.classList.add('text-danger');
+              receiptFeedback.textContent = 'Tu navegador no permite adjuntar por arrastre aquí. Haz click para seleccionar el archivo.';
+              return;
+            }
             if (validation.errors.length) {
               receiptFeedback.classList.remove('text-primary');
               receiptFeedback.classList.add('text-danger');

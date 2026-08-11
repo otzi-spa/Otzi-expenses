@@ -9,6 +9,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -1671,6 +1672,31 @@ class SupplierCatalogFlowTests(TestCase):
         expense = Expense.objects.get(supplier="Proveedor Sin Rut")
         self.assertEqual(supplier.rut, "")
         self.assertIsNone(expense.supplier_rut)
+
+    @override_settings(STORAGES=LOCAL_TEST_STORAGES, MEDIA_ROOT="/tmp/otzi-expenses-test-media")
+    def test_manual_expense_accepts_mobile_jpeg_receipt(self):
+        receipt = SimpleUploadedFile(
+            "comprobante.jpg",
+            b"jpeg-bytes",
+            content_type="image/pjpeg",
+        )
+
+        response = self.client.post(
+            reverse("expense_create"),
+            {
+                "status": "pending",
+                "category_select": self.policy.name,
+                "new_supplier_name": "Proveedor Imagen",
+                "supplier_select": "Proveedor Imagen",
+                "receipt_files": receipt,
+            },
+        )
+
+        self.assertRedirects(response, reverse("expense_list"))
+        expense = Expense.objects.get(supplier="Proveedor Imagen")
+        attachment = expense.attachments.get()
+        self.assertEqual(attachment.content_type, "image/pjpeg")
+        self.assertTrue(attachment.file.name.endswith(".jpg"))
 
     def test_supplier_maintainer_accepts_blank_rut(self):
         response = self.client.post(

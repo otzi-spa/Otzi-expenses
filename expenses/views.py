@@ -65,7 +65,7 @@ from .whatsapp_notifications import create_rejection_notification, enqueue_notif
 
 
 ALLOWED_RECEIPT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
-ALLOWED_RECEIPT_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
+ALLOWED_RECEIPT_MIME_TYPES = {"application/pdf", "image/jpeg", "image/jpg", "image/pjpeg", "image/png"}
 MAX_RECEIPT_SIZE_BYTES = 10 * 1024 * 1024
 ATTACHMENT_EXPORT_TOKEN_TTL_SECONDS = 60 * 60
 
