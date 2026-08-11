@@ -7,6 +7,8 @@ from django.utils.dateparse import parse_date
 from .models import ExpenseAuditLog, RindegastosExpenseDiff
 
 
+ZERO_EQUIVALENT_DIFF_FIELDS = {"tax_amount", "other_taxes"}
+
 AUTO_APPLY_FIELD_MAP = {
     "supplier": "supplier",
     "policy_name": "category",
@@ -128,6 +130,28 @@ def classify_diff(diff_spec, expense, remote_ids_count=1):
     return "manual_review"
 
 
+def canonical_diff_value(field_name, value):
+    if field_name in ZERO_EQUIVALENT_DIFF_FIELDS:
+        zeroish = _zeroish_decimal(value)
+        if zeroish is not None:
+            return format(zeroish.normalize(), "f")
+    if value is None:
+        return ""
+    if isinstance(value, Decimal):
+        return format(value.normalize(), "f")
+    return str(value).strip()
+
+
+def diff_values_equivalent(field_name, left, right):
+    return canonical_diff_value(field_name, left) == canonical_diff_value(field_name, right)
+
+
+def should_ignore_diff(field_name, local_value, remote_value):
+    if field_name not in ZERO_EQUIVALENT_DIFF_FIELDS:
+        return False
+    return _zeroish_decimal(local_value) == Decimal("0") and _zeroish_decimal(remote_value) == Decimal("0")
+
+
 def apply_rindegastos_diff(diff, actor=None, source="rindegastos_reconcile"):
     target_field = _target_field_for_diff(diff)
     if not target_field:
@@ -212,6 +236,15 @@ def _can_auto_apply_small_total_change(diff_spec, expense):
     absolute_delta = abs(remote - local)
     percent_delta = absolute_delta / abs(local)
     return absolute_delta <= Decimal("500") and percent_delta <= Decimal("0.01")
+
+
+def _zeroish_decimal(value):
+    if value in {None, ""}:
+        return Decimal("0")
+    try:
+        return Decimal(str(value).replace(",", "."))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 
 def _coerce_remote_value(target_field, value):

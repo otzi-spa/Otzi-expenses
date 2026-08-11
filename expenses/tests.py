@@ -444,6 +444,109 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertTrue(RindegastosExpenseDiff.objects.filter(field_name="supplier").exists())
         self.assertTrue(RindegastosExpenseDiff.objects.filter(field_name="total").exists())
 
+    def test_reconcile_ignores_zero_equivalent_tax_noise(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            amount=Decimal("5900"),
+            currency="CLP",
+            specific_tax_amount=None,
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "Supplier": "Proveedor",
+                        "Total": 5900,
+                        "Currency": "CLP",
+                        "OtherTaxes": 0,
+                        "IntegrationCode": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "Supplier": "Proveedor",
+                    "Total": 5900,
+                    "Currency": "CLP",
+                    "OtherTaxes": 0,
+                    "IntegrationCode": expense.rindegastos_integration_code,
+                }
+
+        stats = RindegastosExpenseReconciler(client=FakeClient(), export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+        )
+
+        self.assertEqual(stats["diffs_opened"], 0)
+        self.assertFalse(RindegastosExpenseDiff.objects.filter(expense=expense, field_name="other_taxes").exists())
+
+    def test_reconcile_reuses_existing_diff_when_snapshot_gets_report_context(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Local",
+            amount=Decimal("5900"),
+            currency="CLP",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+        old_snapshot = RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            rindegastos_expense_id="987",
+            rindegastos_report_id="13421804",
+            payload_hash="a" * 64,
+            normalized_payload={"supplier": "Proveedor Remoto"},
+            raw_payload={"Id": "987"},
+        )
+        existing_diff = RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=old_snapshot,
+            field_name="supplier",
+            local_value="Proveedor Local",
+            remote_value="Proveedor Remoto",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "ReportId": "13421804",
+                        "Supplier": "Proveedor Remoto",
+                        "Total": 5900,
+                        "Currency": "CLP",
+                        "IntegrationCode": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "ReportId": "13421804",
+                    "Supplier": "Proveedor Remoto",
+                    "Total": 5900,
+                    "Currency": "CLP",
+                    "IntegrationCode": expense.rindegastos_integration_code,
+                }
+
+            def get_expense_report(self, report_id):
+                return {"Id": report_id, "ReportNumber": "6571", "Title": "Informe visible"}
+
+        stats = RindegastosExpenseReconciler(client=FakeClient(), export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+        )
+
+        existing_diff.refresh_from_db()
+        self.assertEqual(stats["diffs_opened"], 0)
+        self.assertEqual(RindegastosExpenseDiff.objects.filter(expense=expense, status="open").count(), 1)
+        self.assertNotEqual(existing_diff.snapshot_id, old_snapshot.id)
+        self.assertEqual(existing_diff.snapshot.normalized_payload["rindegastos_report_number"], "6571")
+
     def test_reconcile_auto_applies_safe_diff_and_audits_change(self):
         expense = Expense.objects.create(
             status="completed",
@@ -707,6 +810,72 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertIn("remote_id_mismatch", content)
         self.assertIn("remote_deleted_like_status", content)
         self.assertIn("manual_review", content)
+
+    def test_cleanup_rindegastos_diffs_resolves_duplicates_and_zero_tax_noise(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            amount=Decimal("5900"),
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+        old_snapshot = RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            rindegastos_expense_id="74704333",
+            rindegastos_report_id="13257470",
+            payload_hash="c" * 64,
+            normalized_payload={"supplier": "Proveedor Remoto"},
+            raw_payload={"Id": "74704333"},
+        )
+        enriched_snapshot = RindegastosExpenseSnapshot.objects.create(
+            expense=expense,
+            rindegastos_expense_id="74704333",
+            rindegastos_report_id="13257470",
+            payload_hash="d" * 64,
+            normalized_payload={
+                "supplier": "Proveedor Remoto",
+                "rindegastos_report_number": "6532",
+                "rindegastos_report_title": "6532: Gastos mauricio Conejero",
+            },
+            raw_payload={"Id": "74704333"},
+        )
+        old_diff = RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=old_snapshot,
+            field_name="supplier",
+            local_value="Proveedor",
+            remote_value="Proveedor Remoto",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
+        enriched_diff = RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=enriched_snapshot,
+            field_name="supplier",
+            local_value="Proveedor",
+            remote_value="Proveedor Remoto",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
+        noise_diff = RindegastosExpenseDiff.objects.create(
+            expense=expense,
+            snapshot=enriched_snapshot,
+            field_name="other_taxes",
+            local_value="",
+            remote_value="0",
+            severity=RindegastosExpenseDiff.SEVERITY_WARNING,
+        )
+
+        out = io.StringIO()
+        call_command("cleanup_rindegastos_diffs", "--dry-run", stdout=out)
+        self.assertIn("Total to resolve: 2", out.getvalue())
+        self.assertEqual(RindegastosExpenseDiff.objects.filter(status="open").count(), 3)
+
+        call_command("cleanup_rindegastos_diffs", stdout=io.StringIO())
+
+        old_diff.refresh_from_db()
+        enriched_diff.refresh_from_db()
+        noise_diff.refresh_from_db()
+        self.assertEqual(old_diff.status, RindegastosExpenseDiff.STATUS_RESOLVED)
+        self.assertEqual(enriched_diff.status, RindegastosExpenseDiff.STATUS_OPEN)
+        self.assertEqual(noise_diff.status, RindegastosExpenseDiff.STATUS_RESOLVED)
 
     @patch("expenses.management.commands.inspect_rindegastos_expenses.RindegastosClient")
     def test_inspect_rindegastos_expenses_flags_detail_not_listed(self, client_class):

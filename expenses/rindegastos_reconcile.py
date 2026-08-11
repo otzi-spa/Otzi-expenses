@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from .models import Expense, RindegastosExpenseDiff, RindegastosExpenseSnapshot, RindegastosReconcileRun
 from .rindegastos_client import RindegastosClient
-from .rindegastos_diff_rules import apply_rindegastos_diff, classify_diff
+from .rindegastos_diff_rules import apply_rindegastos_diff, classify_diff, diff_values_equivalent, should_ignore_diff
 from .rindegastos_trace import expense_integration_code
 from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
 
@@ -152,7 +152,9 @@ def compare_expense_to_remote(expense, remote_payload):
         remote_value = remote_payload.get(remote_key)
         if remote_value in {None, ""}:
             continue
-        if local_value != remote_value:
+        if should_ignore_diff(field_name, local_value, remote_value):
+            continue
+        if not diff_values_equivalent(field_name, local_value, remote_value):
             diffs.append(
                 {
                     "field_name": field_name,
@@ -168,10 +170,11 @@ def compare_expense_to_remote(expense, remote_payload):
         remote_value = remote_custom_fields.get(field_name)
         if remote_value in {None, ""}:
             continue
-        if local_value != remote_value:
+        prefixed_field_name = f"custom_fields.{field_name}"
+        if not diff_values_equivalent(prefixed_field_name, local_value, remote_value):
             diffs.append(
                 {
-                    "field_name": f"custom_fields.{field_name}",
+                    "field_name": prefixed_field_name,
                     "local_value": local_value,
                     "remote_value": remote_value,
                     "severity": RindegastosExpenseDiff.SEVERITY_WARNING,
@@ -389,13 +392,7 @@ class RindegastosExpenseReconciler:
                 if apply_safe_diffs and classification == "auto_apply":
                     result["auto_applied"] += 1
                 continue
-            exists = RindegastosExpenseDiff.objects.filter(
-                expense=expense,
-                field_name=diff_spec["field_name"],
-                local_value=diff_spec["local_value"],
-                remote_value=diff_spec["remote_value"],
-                status=RindegastosExpenseDiff.STATUS_OPEN,
-            ).first()
+            exists = self._find_existing_open_diff(expense, diff_spec)
             if exists:
                 if snapshot and exists.snapshot_id != snapshot.id:
                     exists.snapshot = snapshot
@@ -417,6 +414,20 @@ class RindegastosExpenseReconciler:
                 if apply_rindegastos_diff(diff):
                     result["auto_applied"] += 1
         return result
+
+    def _find_existing_open_diff(self, expense, diff_spec):
+        candidates = RindegastosExpenseDiff.objects.filter(
+            expense=expense,
+            field_name=diff_spec["field_name"],
+            status=RindegastosExpenseDiff.STATUS_OPEN,
+        ).select_related("snapshot")
+        for candidate in candidates:
+            if not diff_values_equivalent(diff_spec["field_name"], candidate.local_value, diff_spec["local_value"]):
+                continue
+            if not diff_values_equivalent(diff_spec["field_name"], candidate.remote_value, diff_spec["remote_value"]):
+                continue
+            return candidate
+        return None
 
     def _record_integration_code_diagnostic(self, payload, expected_otzi_id, stats):
         normalized = normalize_rindegastos_expense(payload)
