@@ -112,6 +112,18 @@ class RindegastosClient:
         payload = self._get("getExpense", params={"Id": expense_id})
         return payload.get("Expense") or payload.get("expense") or payload
 
+    def get_expense_report(self, report_id):
+        payload = self._get("getExpenseReport", params={"Id": report_id})
+        report = payload.get("ExpenseReport") or payload.get("expenseReport")
+        if report:
+            return report
+        reports = payload.get("ExpenseReports") or payload.get("expenseReports")
+        if isinstance(reports, list):
+            return reports[0] if reports else {}
+        if isinstance(reports, dict):
+            return reports
+        return payload
+
     def set_expense_integration(self, expense_id, integration_status, integration_code, integration_date=None):
         data = {
             "Id": expense_id,

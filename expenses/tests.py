@@ -260,6 +260,20 @@ class RindegastosClientTests(TestCase):
             timeout=7,
         )
 
+    @patch("expenses.rindegastos_client.requests.get")
+    def test_get_expense_report_fetches_detail_by_id(self, get_mock):
+        get_mock.return_value = self.FakeResponse({"ExpenseReport": {"Id": 654, "ReportNumber": "2095"}})
+
+        result = RindegastosClient(base_url="https://api.example.test/v1", token="token", timeout=7).get_expense_report(654)
+
+        self.assertEqual(result, {"Id": 654, "ReportNumber": "2095"})
+        get_mock.assert_called_once_with(
+            "https://api.example.test/v1/getExpenseReport",
+            params={"Id": 654},
+            headers={"Authorization": "Bearer token"},
+            timeout=7,
+        )
+
     @patch("expenses.rindegastos_client.requests.put")
     def test_set_expense_integration_sends_json_body(self, put_mock):
         put_mock.return_value = self.FakeResponse({"Id": 987, "IntegrationCode": "OTZ-ABC123"})
@@ -613,6 +627,15 @@ class RindegastosExpenseReconcilerTests(TestCase):
                     "IntegrationCode": "OTZ-ABC123",
                 }
 
+            def get_expense_report(self, report_id):
+                return {
+                    "Id": report_id,
+                    "ReportNumber": "8842",
+                    "Title": "Repuestos en proceso",
+                    "Status": 0,
+                    "EmployeeName": "Octavio Olivares",
+                }
+
         client_class.return_value = FakeClient()
 
         out = io.StringIO()
@@ -624,6 +647,9 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertIn("detail_ok_but_not_listed", content)
         self.assertIn("not_found_in_getExpenses_window", content)
         self.assertIn("En proceso", content)
+        self.assertIn("Abierto / En proceso", content)
+        self.assertIn("8842", content)
+        self.assertIn("Octavio Olivares", content)
         self.assertIn("OTZ-ABC123", content)
 
 

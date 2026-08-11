@@ -34,8 +34,15 @@ class Command(BaseCommand):
 
         client = RindegastosClient()
         listed_by_id = self._fetch_listed_by_id(client, ids, since, until, options)
+        report_cache = {}
         rows = [
-            self._inspect_remote_id(client, remote_id, listed_by_id.get(remote_id, []), local_expenses.get(remote_id, []))
+            self._inspect_remote_id(
+                client,
+                remote_id,
+                listed_by_id.get(remote_id, []),
+                local_expenses.get(remote_id, []),
+                report_cache,
+            )
             for remote_id in sorted(ids)
         ]
 
@@ -90,7 +97,7 @@ class Command(BaseCommand):
                 listed_by_id[remote_id].append(payload)
         return listed_by_id
 
-    def _inspect_remote_id(self, client, remote_id, listed_payloads, local_expenses):
+    def _inspect_remote_id(self, client, remote_id, listed_payloads, local_expenses, report_cache):
         detail_payload = None
         detail_error = ""
         try:
@@ -101,6 +108,7 @@ class Command(BaseCommand):
             detail_error = str(exc)
 
         normalized = normalize_rindegastos_expense(detail_payload or listed_payloads[0]) if detail_payload or listed_payloads else {}
+        report_context = self._report_context(client, normalized.get("rindegastos_report_id") or "", report_cache)
         local_ids = sorted({str(expense.id) for expense in local_expenses})
         local_otz_ids = sorted({expense_integration_code_for_expense(expense) for expense in local_expenses})
         snapshot_count = RindegastosExpenseSnapshot.objects.filter(rindegastos_expense_id=remote_id).count()
@@ -125,6 +133,13 @@ class Command(BaseCommand):
             "remote_status": remote_status,
             "remote_status_label": remote_status_label,
             "remote_report_id": normalized.get("rindegastos_report_id") or "",
+            "report_detail_status": report_context["detail_status"],
+            "report_status": report_context["status"],
+            "report_status_label": report_context["status_label"],
+            "report_number": report_context["number"],
+            "report_title": report_context["title"],
+            "report_employee": report_context["employee"],
+            "report_error": report_context["error"],
             "remote_issue_date": normalized.get("issue_date") or "",
             "remote_supplier": normalized.get("supplier") or "",
             "remote_total": normalized.get("total") or "",
@@ -139,6 +154,30 @@ class Command(BaseCommand):
             "flags": ",".join(flags),
         }
 
+    def _report_context(self, client, report_id, report_cache):
+        if not report_id:
+            return _empty_report_context()
+        if report_id in report_cache:
+            return report_cache[report_id]
+        try:
+            payload = client.get_expense_report(report_id)
+            status = _first_present(payload, "Status", "status")
+            context = {
+                "detail_status": "ok",
+                "status": str(status if status is not None else ""),
+                "status_label": _report_status_label(status),
+                "number": str(_first_present(payload, "ReportNumber", "Folio", "folio", "reportNumber") or ""),
+                "title": str(_first_present(payload, "Title", "title") or ""),
+                "employee": str(_first_present(payload, "EmployeeName", "UserName", "employeeName", "userName") or ""),
+                "error": "",
+            }
+        except Exception as exc:
+            context = _empty_report_context()
+            context["detail_status"] = "error"
+            context["error"] = str(exc)[:300]
+        report_cache[report_id] = context
+        return context
+
 
 FIELD_NAMES = [
     "rindegastos_expense_id",
@@ -147,6 +186,13 @@ FIELD_NAMES = [
     "remote_status",
     "remote_status_label",
     "remote_report_id",
+    "report_detail_status",
+    "report_status",
+    "report_status_label",
+    "report_number",
+    "report_title",
+    "report_employee",
+    "report_error",
     "remote_issue_date",
     "remote_supplier",
     "remote_total",
@@ -181,4 +227,37 @@ def _status_label(value):
         "0": "En proceso",
         "1": "Aprobado",
         "2": "Rechazado",
-    }.get(str(value or "").strip(), "")
+    }.get(_normalized_code(value), "")
+
+
+def _report_status_label(value):
+    return {
+        "0": "Abierto / En proceso",
+        "1": "Cerrado",
+    }.get(_normalized_code(value), "")
+
+
+def _normalized_code(value):
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _first_present(payload, *keys):
+    for key in keys:
+        value = (payload or {}).get(key)
+        if value not in {None, ""}:
+            return value
+    return None
+
+
+def _empty_report_context():
+    return {
+        "detail_status": "",
+        "status": "",
+        "status_label": "",
+        "number": "",
+        "title": "",
+        "employee": "",
+        "error": "",
+    }
