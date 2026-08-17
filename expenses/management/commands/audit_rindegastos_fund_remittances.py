@@ -59,6 +59,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Imprime el objeto JSON donde se encontró cada remesa.",
         )
+        parser.add_argument(
+            "--raw-json",
+            default="",
+            help="Ruta opcional para guardar el payload crudo de fondos consultados.",
+        )
 
     def handle(self, *args, **options):
         target_status = options["notion_status"].strip()
@@ -86,7 +91,12 @@ class Command(BaseCommand):
         except RindegastosAPIError as exc:
             raise CommandError(f"No se pudo leer Rindegastos: {exc}") from exc
 
-        matches = self._match_remittances(remittances, fund_payloads)
+        if options["raw_json"]:
+            with open(options["raw_json"], "w", encoding="utf-8") as output:
+                json.dump(fund_payloads, output, ensure_ascii=False, indent=2, default=str)
+            self.stdout.write(self.style.SUCCESS(f"Payload crudo escrito en {options['raw_json']}"))
+
+        matches, diagnostics = self._match_remittances(remittances, fund_payloads)
         rows = [self._row_for_record(record, matches.get(record.record_id.upper()), options) for record in remittances]
 
         if options["csv_path"]:
@@ -102,6 +112,14 @@ class Command(BaseCommand):
             )
         )
         self.stdout.write(f"Remesas auditadas: {', '.join(remittance_ids)}")
+        self.stdout.write(
+            "Diagnóstico Rindegastos: "
+            f"{diagnostics['funds_scanned']} fondos escaneados, "
+            f"{diagnostics['objects_scanned']} objetos JSON revisados, "
+            f"{diagnostics['remesas_found_count']} remesas distintas encontradas en payload."
+        )
+        if diagnostics["remesas_found"]:
+            self.stdout.write("Remesas encontradas en Rindegastos: " + ", ".join(diagnostics["remesas_found"][:50]))
         for row in rows:
             status = "OK" if row["matched"] == "yes" else "SIN MATCH"
             self.stdout.write(
@@ -129,12 +147,22 @@ class Command(BaseCommand):
     def _match_remittances(self, remittances, fund_payloads):
         remittance_by_id = {record.record_id.upper(): record for record in remittances}
         matches = {}
+        diagnostics = {
+            "funds_scanned": len(fund_payloads),
+            "objects_scanned": 0,
+            "remesas_found": [],
+            "remesas_found_count": 0,
+        }
+        all_found_ids = set()
         for fund in fund_payloads:
-            fund_id = fund.get("Id") or fund.get("id") or ""
-            fund_title = fund.get("Title") or fund.get("Name") or fund.get("FundName") or ""
+            fund_info = _fund_identity(fund)
+            fund_id = fund_info["id"]
+            fund_title = fund_info["title"]
             for candidate in _match_candidates(fund):
+                diagnostics["objects_scanned"] += 1
                 haystack = _flatten_text(candidate)
                 found_ids = {value.upper() for value in REMESA_PATTERN.findall(haystack)}
+                all_found_ids.update(found_ids)
                 for remittance_id in found_ids:
                     if remittance_id in remittance_by_id and remittance_id not in matches:
                         matches[remittance_id] = {
@@ -143,7 +171,9 @@ class Command(BaseCommand):
                             "transaction": candidate,
                             "text": haystack,
                         }
-        return matches
+        diagnostics["remesas_found"] = sorted(all_found_ids)
+        diagnostics["remesas_found_count"] = len(all_found_ids)
+        return matches, diagnostics
 
     def _row_for_record(self, record, match, options):
         transaction = (match or {}).get("transaction") or {}
@@ -206,6 +236,26 @@ def _match_candidates(fund):
         if isinstance(value, dict):
             candidates.append(value)
     return candidates or [fund]
+
+
+def _fund_identity(fund):
+    root = fund
+    for key in ("Fund", "fund", "ExpenseFund", "expenseFund"):
+        if isinstance(fund.get(key), dict):
+            root = fund[key]
+            break
+    return {
+        "id": root.get("Id") or root.get("id") or fund.get("Id") or fund.get("id") or "",
+        "title": (
+            root.get("Title")
+            or root.get("Name")
+            or root.get("FundName")
+            or fund.get("Title")
+            or fund.get("Name")
+            or fund.get("FundName")
+            or ""
+        ),
+    }
 
 
 def _walk_dicts_and_lists(value):
