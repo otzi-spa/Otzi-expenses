@@ -31,6 +31,11 @@ class Command(BaseCommand):
             help="Estado Notion a auditar.",
         )
         parser.add_argument(
+            "--all-notion-statuses",
+            action="store_true",
+            help="Audita todos los estados Notion de los fondos por rendir.",
+        )
+        parser.add_argument(
             "--fund-id",
             action="append",
             default=[],
@@ -83,14 +88,14 @@ class Command(BaseCommand):
             remittances = explicit_remittances
         else:
             try:
-                notion_records = [
-                    record
-                    for record in NotionFundsSync().fetch_records()
-                    if record.notion_status.casefold() == target_status.casefold()
-                ]
+                notion_records = NotionFundsSync().fetch_records()
             except (NotionAPIError, ValueError) as exc:
                 raise CommandError(f"No se pudo leer Notion: {exc}") from exc
 
+            if not options["all_notion_statuses"]:
+                notion_records = [
+                    record for record in notion_records if record.notion_status.casefold() == target_status.casefold()
+                ]
             remittances = [record for record in notion_records if record.record_id]
         remittance_ids = [record.record_id.upper() for record in remittances]
         if not remittances:
@@ -115,9 +120,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"CSV escrito en {options['csv_path']}"))
 
         matched_count = sum(1 for row in rows if row["matched"] == "yes")
+        status_label = "todos los estados" if options["all_notion_statuses"] else f"estado '{target_status}'"
         self.stdout.write(
             self.style.SUCCESS(
-                f"Auditoría completada: {len(rows)} remesas estado '{target_status}', "
+                f"Auditoría completada: {len(rows)} remesas {status_label}, "
                 f"{matched_count} con match en movimientos Rindegastos, "
                 f"{len(rows) - matched_count} sin match."
             )
@@ -145,7 +151,7 @@ class Command(BaseCommand):
         client = _client_for_version(options["api_version"])
         fund_ids = [value for value in options["fund_id"] if value]
         if options["api_version"] == "core" and not fund_ids:
-            raise RindegastosAPIError("--api-version core requiere al menos un --fund-id.")
+            fund_ids = _fund_ids_from_public_api(options["max_funds"])
         if not fund_ids:
             funds = client.get_funds()
             max_funds = options["max_funds"]
@@ -253,7 +259,26 @@ def _match_candidates(fund):
     for value in _walk_dicts_and_lists(fund):
         if isinstance(value, dict):
             candidates.append(value)
-    return candidates or [fund]
+    candidates = _deduplicate_candidates(candidates)
+    return sorted(candidates, key=_candidate_score) or [fund]
+
+
+def _deduplicate_candidates(candidates):
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        marker = id(candidate)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        unique.append(candidate)
+    return unique
+
+
+def _candidate_score(candidate):
+    keys = {str(key).lower() for key in candidate.keys()}
+    is_transaction = bool({"fundid", "amount", "note", "isdeposit", "reportid"} & keys)
+    return (0 if is_transaction else 1, len(_flatten_text(candidate)))
 
 
 def _fund_identity(fund):
@@ -267,9 +292,11 @@ def _fund_identity(fund):
         "title": (
             root.get("Title")
             or root.get("Name")
+            or root.get("name")
             or root.get("FundName")
             or fund.get("Title")
             or fund.get("Name")
+            or fund.get("name")
             or fund.get("FundName")
             or ""
         ),
@@ -335,3 +362,10 @@ def _client_for_version(api_version):
     if api_version == "core":
         return RindegastosCoreClient()
     return RindegastosClient()
+
+
+def _fund_ids_from_public_api(max_funds):
+    funds = RindegastosClient().get_funds()
+    if max_funds:
+        funds = funds[:max_funds]
+    return [str(fund.get("Id") or fund.get("id")) for fund in funds if fund.get("Id") or fund.get("id")]
