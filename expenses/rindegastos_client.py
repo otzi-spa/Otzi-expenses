@@ -29,6 +29,7 @@ class RindegastosClient:
             payload = response.json()
         except ValueError as exc:
             raise RindegastosAPIError(f"{endpoint}: respuesta no es JSON") from exc
+        _raise_payload_error(endpoint, payload)
         return payload
 
     def _put(self, endpoint, data=None):
@@ -48,6 +49,7 @@ class RindegastosClient:
             payload = response.json()
         except ValueError as exc:
             raise RindegastosAPIError(f"{endpoint}: respuesta no es JSON") from exc
+        _raise_payload_error(endpoint, payload)
         return payload
 
     def _get_paginated(self, endpoint, collection_key, params=None):
@@ -201,3 +203,16 @@ def _format_integration_date(value):
     if hasattr(value, "strftime"):
         return value.strftime("%Y-%m-%d %H:%M:%S")
     return str(value)
+
+
+def _raise_payload_error(endpoint, payload):
+    if not isinstance(payload, dict):
+        return
+    status_code = payload.get("statusCode") or payload.get("StatusCode")
+    try:
+        status_code = int(status_code)
+    except (TypeError, ValueError):
+        return
+    if status_code >= 400:
+        message = payload.get("message") or payload.get("Message") or payload
+        raise RindegastosAPIError(f"{endpoint}: API statusCode {status_code} - {message}")

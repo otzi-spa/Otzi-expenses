@@ -74,6 +74,25 @@ class Command(BaseCommand):
             f"Id={_first_present(root, 'Id', 'id') or _first_present(payload, 'Id', 'id') or '-'} | "
             f"Nombre={_first_present(root, 'Title', 'Name', 'FundName', 'Description') or '-'}"
         )
+        for key in (
+            "Description",
+            "FundComment",
+            "FundRequestId",
+            "IntegrationExternalCode",
+            "IntegrationInternalCode",
+            "IntegrationDate",
+            "IsIntegrated",
+        ):
+            value = _first_present(root, key) or _first_present(payload, key)
+            if value not in (None, "", [], {}):
+                self.stdout.write(f"{key}: {value}")
+        fund_request = root.get("FundRequest") or payload.get("FundRequest")
+        if isinstance(fund_request, dict):
+            self.stdout.write("Campos FundRequest embebido: " + ", ".join(sorted(fund_request.keys())))
+            for key in ("Id", "Comment", "FundComment", "Description", "Reason", "Status", "Amount"):
+                value = _first_present(fund_request, key)
+                if value not in (None, "", [], {}):
+                    self.stdout.write(f"FundRequest.{key}: {value}")
 
         transactions = _transactions(payload)
         self.stdout.write(f"Movimientos detectados: {len(transactions)}")
@@ -147,7 +166,10 @@ def _text_key_hits(value, path=""):
         for key, child in value.items():
             next_path = f"{path}.{key}" if path else key
             normalized = key.lower()
-            if any(token in normalized for token in ("comment", "coment", "note", "nota", "detail", "description")):
+            if any(
+                token in normalized
+                for token in ("comment", "coment", "fundcomment", "note", "nota", "detail", "description", "reason")
+            ):
                 if child not in (None, "", [], {}):
                     hits.append((next_path, _short_text(child)))
             hits.extend(_text_key_hits(child, next_path))
