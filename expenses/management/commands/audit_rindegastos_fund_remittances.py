@@ -7,7 +7,12 @@ from django.core.management.base import BaseCommand, CommandError
 
 from expenses.funds_sync import NotionFundsSync
 from expenses.notion_client import NotionAPIError
-from expenses.rindegastos_client import RindegastosAPIError, RindegastosClient, RindegastosV2Client
+from expenses.rindegastos_client import (
+    RindegastosAPIError,
+    RindegastosClient,
+    RindegastosCoreClient,
+    RindegastosV2Client,
+)
 
 
 REMESA_PATTERN = re.compile(r"\bREMESA-\d+\b", re.IGNORECASE)
@@ -33,7 +38,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--api-version",
-            choices=["v1", "v2"],
+            choices=["v1", "v2", "core"],
             default="v1",
             help="Versión API Rindegastos a usar para fondos.",
         )
@@ -137,8 +142,10 @@ class Command(BaseCommand):
                 self.stdout.write(row["match_json"])
 
     def _fetch_funds(self, options):
-        client = RindegastosV2Client() if options["api_version"] == "v2" else RindegastosClient()
+        client = _client_for_version(options["api_version"])
         fund_ids = [value for value in options["fund_id"] if value]
+        if options["api_version"] == "core" and not fund_ids:
+            raise RindegastosAPIError("--api-version core requiere al menos un --fund-id.")
         if not fund_ids:
             funds = client.get_funds()
             max_funds = options["max_funds"]
@@ -147,7 +154,10 @@ class Command(BaseCommand):
             fund_ids = [str(fund.get("Id") or fund.get("id")) for fund in funds if fund.get("Id") or fund.get("id")]
         fund_payloads = []
         for fund_id in fund_ids:
-            fund_payloads.append(client.get_fund(fund_id))
+            if hasattr(client, "get_company_fund"):
+                fund_payloads.append(client.get_company_fund(fund_id))
+            else:
+                fund_payloads.append(client.get_fund(fund_id))
         return fund_payloads
 
     def _match_remittances(self, remittances, fund_payloads):
@@ -197,7 +207,8 @@ class Command(BaseCommand):
             "fund_title": (match or {}).get("fund_title") or "",
             "transaction_type": _first_present(transaction, "TransactionTypeName", "Type", "type"),
             "transaction_amount": str(_first_present(transaction, "TransactionAmount", "Amount", "amount") or ""),
-            "transaction_date": _first_present(transaction, "TransactionDate", "CreatedAt", "Date", "date"),
+            "transaction_date": _first_present(transaction, "TransactionDate", "CreatedAt", "createdAt", "Date", "date"),
+            "transaction_note": _first_present(transaction, "Note", "note", "Comment", "comment", "Description", "description"),
             "transaction_text": (match or {}).get("text") or "",
         }
         row["amount_matches"] = _amount_matches(row["amount"], row["transaction_amount"])
@@ -223,6 +234,7 @@ class Command(BaseCommand):
             "transaction_type",
             "transaction_amount",
             "transaction_date",
+            "transaction_note",
             "transaction_text",
             "notion_url",
         ]
@@ -315,3 +327,11 @@ def _remittance_record(value):
     record.cost_center = ""
     record.url = ""
     return record
+
+
+def _client_for_version(api_version):
+    if api_version == "v2":
+        return RindegastosV2Client()
+    if api_version == "core":
+        return RindegastosCoreClient()
+    return RindegastosClient()

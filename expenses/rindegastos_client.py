@@ -193,6 +193,45 @@ class RindegastosV2Client(RindegastosClient):
         return payload
 
 
+class RindegastosCoreClient:
+    def __init__(self, base_url=None, token=None, timeout=None):
+        self.base_url = (base_url or settings.RINDEGASTOS_CORE_BASE_URL).rstrip("/")
+        self.token = token if token is not None else settings.RINDEGASTOS_CORE_TOKEN
+        self.timeout = timeout or settings.RINDEGASTOS_API_TIMEOUT
+        if not self.token:
+            raise RindegastosAPIError("RINDEGASTOS_CORE_TOKEN no está configurado.")
+
+    def _get(self, endpoint, params=None):
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        response = requests.get(
+            url,
+            params=params or {},
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/json",
+                "contenttype": "application/json",
+                "Origin": "https://app.rindegastos.com",
+                "Referer": "https://app.rindegastos.com/",
+            },
+            timeout=self.timeout,
+        )
+        if response.status_code >= 400:
+            raise RindegastosAPIError(f"{endpoint}: HTTP {response.status_code} - {response.text[:500]}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RindegastosAPIError(f"{endpoint}: respuesta no es JSON") from exc
+        _raise_payload_error(endpoint, payload)
+        if isinstance(payload, dict) and payload.get("ok") is False:
+            raise RindegastosAPIError(f"{endpoint}: respuesta ok=false - {payload}")
+        return payload
+
+    def get_company_fund(self, fund_id):
+        payload = self._get("fund/getCompanyFund", params={"fundId": fund_id})
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return data if isinstance(data, dict) else payload
+
+
 def _format_integration_date(value):
     if not value:
         return ""

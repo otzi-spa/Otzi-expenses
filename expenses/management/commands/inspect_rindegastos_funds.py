@@ -2,7 +2,12 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
-from expenses.rindegastos_client import RindegastosAPIError, RindegastosClient, RindegastosV2Client
+from expenses.rindegastos_client import (
+    RindegastosAPIError,
+    RindegastosClient,
+    RindegastosCoreClient,
+    RindegastosV2Client,
+)
 
 
 class Command(BaseCommand):
@@ -12,7 +17,7 @@ class Command(BaseCommand):
         parser.add_argument("--fund-id", default="", help="ID de fondo para inspeccionar con getFund.")
         parser.add_argument(
             "--api-version",
-            choices=["v1", "v2"],
+            choices=["v1", "v2", "core"],
             default="v1",
             help="Versión API Rindegastos a usar para fondos.",
         )
@@ -27,7 +32,7 @@ class Command(BaseCommand):
         parser.add_argument("--sample-transactions", type=int, default=5, help="Cantidad de movimientos a mostrar.")
 
     def handle(self, *args, **options):
-        client = RindegastosV2Client() if options["api_version"] == "v2" else RindegastosClient()
+        client = _client_for_version(options["api_version"])
         try:
             if options["fund_request_id"]:
                 if not hasattr(client, "get_fund_request"):
@@ -38,7 +43,10 @@ class Command(BaseCommand):
                     self._write_json(options["raw_json"], payload)
                 return
             if options["fund_id"]:
-                payload = client.get_fund(options["fund_id"])
+                if hasattr(client, "get_company_fund"):
+                    payload = client.get_company_fund(options["fund_id"])
+                else:
+                    payload = client.get_fund(options["fund_id"])
                 self._print_fund_detail(payload, options)
                 if options["raw_json"]:
                     self._write_json(options["raw_json"], payload)
@@ -76,12 +84,16 @@ class Command(BaseCommand):
         )
         for key in (
             "Description",
+            "description",
             "FundComment",
+            "note",
             "FundRequestId",
+            "fundRequestId",
             "IntegrationExternalCode",
             "IntegrationInternalCode",
             "IntegrationDate",
             "IsIntegrated",
+            "isIntegrated",
         ):
             value = _first_present(root, key) or _first_present(payload, key)
             if value not in (None, "", [], {}):
@@ -104,9 +116,23 @@ class Command(BaseCommand):
             self.stdout.write("Campos primer movimiento: " + ", ".join(sorted(transactions[0].keys())))
         for index, transaction in enumerate(transactions[: options["sample_transactions"]], start=1):
             amount = _first_present(transaction, "TransactionAmount", "Amount", "amount", "DepositAmount")
-            date = _first_present(transaction, "TransactionDate", "CreatedAt", "Date", "date")
-            detail = _first_present(transaction, "Detail", "Description", "Comment", "Note", "DepositComment")
-            self.stdout.write(f"Movimiento {index}: fecha={date or '-'} | monto={amount or '-'} | detalle={detail or '-'}")
+            date = _first_present(transaction, "TransactionDate", "CreatedAt", "createdAt", "Date", "date")
+            detail = _first_present(
+                transaction,
+                "Detail",
+                "Description",
+                "description",
+                "Comment",
+                "comment",
+                "Note",
+                "note",
+                "DepositComment",
+            )
+            user = _first_present(transaction, "userFullName", "UserFullName", "userName", "UserName")
+            self.stdout.write(
+                f"Movimiento {index}: fecha={date or '-'} | monto={amount or '-'} | "
+                f"usuario={user or '-'} | detalle={detail or '-'}"
+            )
             self.stdout.write("  campos: " + ", ".join(sorted(transaction.keys())))
 
         text_hits = _text_key_hits(payload)
@@ -154,6 +180,14 @@ def _fund_root(payload):
         if isinstance(value, dict):
             return value
     return payload
+
+
+def _client_for_version(api_version):
+    if api_version == "v2":
+        return RindegastosV2Client()
+    if api_version == "core":
+        return RindegastosCoreClient()
+    return RindegastosClient()
 
 
 def _transactions(payload):

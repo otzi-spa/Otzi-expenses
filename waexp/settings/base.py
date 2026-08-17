@@ -143,6 +143,8 @@ RINDEGASTOS_API_TIMEOUT = int(os.environ.get("RINDEGASTOS_API_TIMEOUT", "20"))
 RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED = (
     os.environ.get("RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 )
+RINDEGASTOS_CORE_BASE_URL = os.environ.get("RINDEGASTOS_CORE_BASE_URL", "https://prod-core.rindegastos.com").rstrip("/")
+RINDEGASTOS_CORE_TOKEN = os.environ.get("RINDEGASTOS_CORE_TOKEN", "").strip()
 
 NOTION_API_BASE_URL = os.environ.get("NOTION_API_BASE_URL", "https://api.notion.com/v1").rstrip("/")
 NOTION_API_KEY = os.environ.get("NOTION_API_KEY", "").strip()
