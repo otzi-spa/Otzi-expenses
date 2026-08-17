@@ -495,6 +495,7 @@ class EmployeeFundMapping(models.Model):
 
 class NotionFundSyncLog(models.Model):
     STATUS_PENDING = "pending"
+    STATUS_PENDING_MAPPING = "pending_mapping"
     STATUS_VALIDATED = "validated"
     STATUS_READY = "ready"
     STATUS_ERROR = "error"
@@ -505,6 +506,7 @@ class NotionFundSyncLog(models.Model):
 
     STATUS_CHOICES = [
         (STATUS_PENDING, "Pendiente"),
+        (STATUS_PENDING_MAPPING, "Pendiente mapeo"),
         (STATUS_VALIDATED, "Validado"),
         (STATUS_READY, "Listo para abono"),
         (STATUS_ERROR, "Error"),

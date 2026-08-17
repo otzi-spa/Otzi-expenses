@@ -1,4 +1,5 @@
 import csv
+import json
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -47,19 +48,34 @@ class Command(BaseCommand):
             action="store_true",
             help="Incluye llaves disponibles en la transacción encontrada.",
         )
+        parser.add_argument(
+            "--remesa",
+            action="append",
+            default=[],
+            help="Busca una o más remesas específicas en Rindegastos, independiente del estado Notion.",
+        )
+        parser.add_argument(
+            "--dump-matches",
+            action="store_true",
+            help="Imprime el objeto JSON donde se encontró cada remesa.",
+        )
 
     def handle(self, *args, **options):
         target_status = options["notion_status"].strip()
-        try:
-            notion_records = [
-                record
-                for record in NotionFundsSync().fetch_records()
-                if record.notion_status.casefold() == target_status.casefold()
-            ]
-        except (NotionAPIError, ValueError) as exc:
-            raise CommandError(f"No se pudo leer Notion: {exc}") from exc
+        explicit_remittances = [_remittance_record(value) for value in options["remesa"] if value]
+        if explicit_remittances:
+            remittances = explicit_remittances
+        else:
+            try:
+                notion_records = [
+                    record
+                    for record in NotionFundsSync().fetch_records()
+                    if record.notion_status.casefold() == target_status.casefold()
+                ]
+            except (NotionAPIError, ValueError) as exc:
+                raise CommandError(f"No se pudo leer Notion: {exc}") from exc
 
-        remittances = [record for record in notion_records if record.record_id]
+            remittances = [record for record in notion_records if record.record_id]
         remittance_ids = [record.record_id.upper() for record in remittances]
         if not remittances:
             self.stdout.write(self.style.WARNING(f"No hay remesas Notion con estado '{target_status}'."))
@@ -93,6 +109,8 @@ class Command(BaseCommand):
                 f"fondo {row['fund_id'] or '-'} | tx {row['transaction_amount'] or '-'} | "
                 f"{row['transaction_date'] or '-'}"
             )
+            if options["dump_matches"] and row.get("match_json"):
+                self.stdout.write(row["match_json"])
 
     def _fetch_funds(self, options):
         client = RindegastosClient()
@@ -114,15 +132,15 @@ class Command(BaseCommand):
         for fund in fund_payloads:
             fund_id = fund.get("Id") or fund.get("id") or ""
             fund_title = fund.get("Title") or fund.get("Name") or fund.get("FundName") or ""
-            for transaction in _transactions(fund):
-                haystack = _flatten_text(transaction)
+            for candidate in _match_candidates(fund):
+                haystack = _flatten_text(candidate)
                 found_ids = {value.upper() for value in REMESA_PATTERN.findall(haystack)}
                 for remittance_id in found_ids:
                     if remittance_id in remittance_by_id and remittance_id not in matches:
                         matches[remittance_id] = {
                             "fund_id": fund_id,
                             "fund_title": fund_title,
-                            "transaction": transaction,
+                            "transaction": candidate,
                             "text": haystack,
                         }
         return matches
@@ -149,6 +167,8 @@ class Command(BaseCommand):
         row["amount_matches"] = _amount_matches(row["amount"], row["transaction_amount"])
         if options["show_transaction_keys"]:
             row["transaction_keys"] = ", ".join(sorted(transaction.keys()))
+        if options["dump_matches"] and transaction:
+            row["match_json"] = json.dumps(transaction, ensure_ascii=False, indent=2, default=str)
         return row
 
     def _write_csv(self, path, rows):
@@ -172,17 +192,30 @@ class Command(BaseCommand):
         ]
         if any("transaction_keys" in row for row in rows):
             fieldnames.append("transaction_keys")
+        if any("match_json" in row for row in rows):
+            fieldnames.append("match_json")
         with open(path, "w", newline="", encoding="utf-8") as output:
             writer = csv.DictWriter(output, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
 
 
-def _transactions(fund):
-    transactions = fund.get("Transactions") or fund.get("transactions") or []
-    if isinstance(transactions, dict):
-        return [transactions]
-    return transactions or []
+def _match_candidates(fund):
+    candidates = []
+    for value in _walk_dicts_and_lists(fund):
+        if isinstance(value, dict):
+            candidates.append(value)
+    return candidates or [fund]
+
+
+def _walk_dicts_and_lists(value):
+    yield value
+    if isinstance(value, dict):
+        for child in value.values():
+            yield from _walk_dicts_and_lists(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_dicts_and_lists(child)
 
 
 def _flatten_text(value):
@@ -210,3 +243,19 @@ def _amount_matches(left, right):
         return "yes" if Decimal(str(left)) == Decimal(str(right)) else "no"
     except (InvalidOperation, ValueError):
         return ""
+
+
+def _remittance_record(value):
+    class Record:
+        pass
+
+    record = Record()
+    record.record_id = value.strip().upper()
+    record.notion_status = ""
+    record.beneficiary_name = ""
+    record.amount = None
+    record.currency = ""
+    record.payment_date = None
+    record.cost_center = ""
+    record.url = ""
+    return record

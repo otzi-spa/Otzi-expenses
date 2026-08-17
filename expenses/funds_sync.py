@@ -41,6 +41,7 @@ class NotionFundsSync:
             "created": 0,
             "updated": 0,
             "ready": 0,
+            "pending_mapping": 0,
             "errors": 0,
             "ignored": 0,
             "dry_run": dry_run,
@@ -58,10 +59,19 @@ class NotionFundsSync:
             return stats
 
         for record in matched_records:
-            result = self.upsert_record(record)
-            stats[result] += 1
-            if result == "ready":
+            created, status = self.upsert_record(record)
+            if created:
+                stats["created"] += 1
+            else:
                 stats["updated"] += 1
+            if status == NotionFundSyncLog.STATUS_READY:
+                stats["ready"] += 1
+            elif status == NotionFundSyncLog.STATUS_PENDING_MAPPING:
+                stats["pending_mapping"] += 1
+            elif status == NotionFundSyncLog.STATUS_ERROR:
+                stats["errors"] += 1
+            elif status == NotionFundSyncLog.STATUS_IGNORED:
+                stats["ignored"] += 1
         return stats
 
     def fetch_pages(self):
@@ -223,15 +233,7 @@ class NotionFundsSync:
             notion_page_id=record.page_id,
             defaults=defaults,
         )
-        if created:
-            return "created"
-        if log.local_status == NotionFundSyncLog.STATUS_READY:
-            return "ready"
-        if log.local_status == NotionFundSyncLog.STATUS_ERROR:
-            return "errors"
-        if log.local_status == NotionFundSyncLog.STATUS_IGNORED:
-            return "ignored"
-        return "updated"
+        return created, log.local_status
 
     def _find_mapping(self, record):
         if record.beneficiary_rut:
@@ -252,6 +254,7 @@ class NotionFundsSync:
 
     def _validate(self, record, mapping):
         errors = []
+        pending = []
         if not record.page_id:
             errors.append("Notion no entregó page_id.")
         if record.work_key != settings.NOTION_FUNDS_WORK_KEY_VALUE:
@@ -259,17 +262,19 @@ class NotionFundsSync:
         if not record.beneficiary_name:
             errors.append("Beneficiario vacío.")
         if not record.beneficiary_rut:
-            errors.append("RUT vacío.")
+            pending.append("RUT vacío.")
         if record.amount is None or record.amount <= 0:
             errors.append("Monto vacío o menor/igual a cero.")
         if not record.payment_date:
             errors.append("Fecha de pago vacía o inválida.")
         if not mapping:
-            errors.append("No existe mapeo activo beneficiario -> Rindegastos.")
+            pending.append("No existe mapeo activo beneficiario -> Rindegastos.")
         elif not mapping.rindegastos_user and not mapping.rindegastos_fund_id:
-            errors.append("El mapeo no tiene usuario ni fondo Rindegastos.")
+            pending.append("El mapeo no tiene usuario ni fondo Rindegastos.")
         if errors:
             return NotionFundSyncLog.STATUS_ERROR, " ".join(errors)
+        if pending:
+            return NotionFundSyncLog.STATUS_PENDING_MAPPING, " ".join(pending)
         return NotionFundSyncLog.STATUS_READY, ""
 
     def idempotency_key(self, record):
