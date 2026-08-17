@@ -124,6 +124,24 @@ class RindegastosClient:
             return reports
         return payload
 
+    def get_funds(self, params=None):
+        funds = self._get_paginated("getFunds", "Funds", params=params)
+        if isinstance(funds, dict):
+            return [funds]
+        return funds or []
+
+    def get_fund(self, fund_id):
+        payload = self._get("getFund", params={"Id": fund_id})
+        funds = payload.get("Funds") or payload.get("funds")
+        if isinstance(funds, list):
+            return funds[0] if funds else {}
+        if isinstance(funds, dict):
+            return funds
+        fund = payload.get("Fund") or payload.get("fund")
+        if fund:
+            return fund
+        return payload
+
     def set_expense_integration(self, expense_id, integration_status, integration_code, integration_date=None):
         data = {
             "Id": expense_id,

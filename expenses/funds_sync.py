@@ -52,6 +52,7 @@ class NotionFundsSync:
         stats["matched"] = len(matched_records)
         stats["fetched"] = len(matched_records)
         stats["work_key_values"] = self.work_key_values(records)
+        stats["notion_status_values"] = self.notion_status_values(matched_records)
         if dry_run:
             stats["preview"] = [record.normalized_payload for record in matched_records[:20]]
             return stats
@@ -89,15 +90,24 @@ class NotionFundsSync:
             counts[value] = counts.get(value, 0) + 1
         return counts
 
+    def notion_status_values(self, records):
+        counts = {}
+        for record in records:
+            value = record.notion_status or "(vacío)"
+            counts[value] = counts.get(value, 0) + 1
+        return counts
+
     def inspect(self, limit=10):
         pages = self.fetch_pages()
-        records = [self.normalize_page(page) for page in pages[:limit]]
+        all_records = [self.normalize_page(page) for page in pages]
+        records = all_records[:limit]
         return {
             "queried": len(pages),
             "sampled": len(records),
             "work_key_property": settings.NOTION_FUNDS_WORK_KEY_PROPERTY,
             "work_key_value_expected": settings.NOTION_FUNDS_WORK_KEY_VALUE,
-            "work_key_values": self.work_key_values([self.normalize_page(page) for page in pages]),
+            "work_key_values": self.work_key_values(all_records),
+            "notion_status_values": self.notion_status_values(self.matching_records(all_records)),
             "sample": [
                 {
                     "normalized": record.normalized_payload,
