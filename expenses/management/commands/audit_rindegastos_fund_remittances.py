@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from expenses.funds_sync import NotionFundsSync
 from expenses.notion_client import NotionAPIError
-from expenses.rindegastos_client import RindegastosAPIError, RindegastosClient
+from expenses.rindegastos_client import RindegastosAPIError, RindegastosClient, RindegastosV2Client
 
 
 REMESA_PATTERN = re.compile(r"\bREMESA-\d+\b", re.IGNORECASE)
@@ -30,6 +30,12 @@ class Command(BaseCommand):
             action="append",
             default=[],
             help="Limita la auditoría a uno o más IDs de fondo Rindegastos.",
+        )
+        parser.add_argument(
+            "--api-version",
+            choices=["v1", "v2"],
+            default="v1",
+            help="Versión API Rindegastos a usar para fondos.",
         )
         parser.add_argument(
             "--max-funds",
@@ -131,7 +137,7 @@ class Command(BaseCommand):
                 self.stdout.write(row["match_json"])
 
     def _fetch_funds(self, options):
-        client = RindegastosClient()
+        client = RindegastosV2Client() if options["api_version"] == "v2" else RindegastosClient()
         fund_ids = [value for value in options["fund_id"] if value]
         if not fund_ids:
             funds = client.get_funds()

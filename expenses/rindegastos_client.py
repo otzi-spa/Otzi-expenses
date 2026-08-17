@@ -154,6 +154,43 @@ class RindegastosClient:
         return self._put("setExpenseIntegration", data=data)
 
 
+class RindegastosV2Client(RindegastosClient):
+    def __init__(self, base_url=None, token=None, timeout=None):
+        resolved_base_url = base_url
+        if resolved_base_url is None:
+            resolved_base_url = settings.RINDEGASTOS_API_BASE_URL.rstrip("/")
+            if resolved_base_url.endswith("/v1"):
+                resolved_base_url = resolved_base_url[:-3] + "/v2"
+            elif not resolved_base_url.endswith("/v2"):
+                resolved_base_url = resolved_base_url.rstrip("/") + "/v2"
+        super().__init__(base_url=resolved_base_url, token=token, timeout=timeout)
+
+    def get_funds(self, params=None):
+        payload = self._get("getFunds", params=params)
+        funds = payload.get("Funds") or payload.get("funds") or []
+        if isinstance(funds, dict):
+            return [funds]
+        return funds or []
+
+    def get_fund(self, fund_id):
+        payload = self._get("getFund", params={"Id": fund_id})
+        funds = payload.get("Funds") or payload.get("funds")
+        if isinstance(funds, list):
+            return funds[0] if funds else payload
+        if isinstance(funds, dict):
+            return funds
+        return payload
+
+    def get_fund_request(self, request_id):
+        payload = self._get("getFundRequest", params={"Id": request_id})
+        requests_payload = payload.get("FundRequests") or payload.get("fundRequests")
+        if isinstance(requests_payload, list):
+            return requests_payload[0] if requests_payload else payload
+        if isinstance(requests_payload, dict):
+            return requests_payload
+        return payload
+
+
 def _format_integration_date(value):
     if not value:
         return ""

@@ -2,7 +2,7 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
-from expenses.rindegastos_client import RindegastosAPIError, RindegastosClient
+from expenses.rindegastos_client import RindegastosAPIError, RindegastosClient, RindegastosV2Client
 
 
 class Command(BaseCommand):
@@ -10,14 +10,33 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--fund-id", default="", help="ID de fondo para inspeccionar con getFund.")
+        parser.add_argument(
+            "--api-version",
+            choices=["v1", "v2"],
+            default="v1",
+            help="Versión API Rindegastos a usar para fondos.",
+        )
+        parser.add_argument(
+            "--fund-request-id",
+            default="",
+            help="ID de solicitud de fondo para probar v2/getFundRequest.",
+        )
         parser.add_argument("--limit", type=int, default=30, help="Cantidad de fondos a listar desde getFunds.")
         parser.add_argument("--raw-json", default="", help="Ruta opcional para guardar el JSON crudo.")
         parser.add_argument("--full", action="store_true", help="Imprime JSON completo del fondo indicado.")
         parser.add_argument("--sample-transactions", type=int, default=5, help="Cantidad de movimientos a mostrar.")
 
     def handle(self, *args, **options):
-        client = RindegastosClient()
+        client = RindegastosV2Client() if options["api_version"] == "v2" else RindegastosClient()
         try:
+            if options["fund_request_id"]:
+                if not hasattr(client, "get_fund_request"):
+                    raise CommandError("--fund-request-id requiere --api-version v2")
+                payload = client.get_fund_request(options["fund_request_id"])
+                self._print_fund_detail(payload, options)
+                if options["raw_json"]:
+                    self._write_json(options["raw_json"], payload)
+                return
             if options["fund_id"]:
                 payload = client.get_fund(options["fund_id"])
                 self._print_fund_detail(payload, options)
