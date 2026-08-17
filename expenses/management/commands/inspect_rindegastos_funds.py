@@ -94,6 +94,10 @@ class Command(BaseCommand):
                 if value not in (None, "", [], {}):
                     self.stdout.write(f"FundRequest.{key}: {value}")
 
+        self._print_collection("Deposits", _collection(payload, "Deposits", "deposits"), options)
+        self._print_collection("Withdrawals", _collection(payload, "Withdrawals", "withdrawals"), options)
+        self._print_collection("FundRequest", _collection(payload, "FundRequest", "fundRequest"), options)
+
         transactions = _transactions(payload)
         self.stdout.write(f"Movimientos detectados: {len(transactions)}")
         if transactions:
@@ -115,6 +119,28 @@ class Command(BaseCommand):
 
         if options["full"]:
             self.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+
+    def _print_collection(self, label, items, options):
+        self.stdout.write(f"{label}: {len(items)} objeto(s)")
+        if not items:
+            return
+        self.stdout.write(f"Campos primer {label}: " + ", ".join(sorted(items[0].keys())))
+        for index, item in enumerate(items[: options["sample_transactions"]], start=1):
+            amount = _first_present(item, "TransactionAmount", "Amount", "amount", "DepositAmount", "WithdrawalAmount")
+            date = _first_present(item, "TransactionDate", "CreatedAt", "Date", "date")
+            detail = _first_present(
+                item,
+                "Detail",
+                "Description",
+                "Comment",
+                "FundComment",
+                "Note",
+                "DepositComment",
+                "WithdrawalComment",
+                "Reason",
+            )
+            self.stdout.write(f"{label} {index}: fecha={date or '-'} | monto={amount or '-'} | detalle={detail or '-'}")
+            self.stdout.write("  campos: " + ", ".join(sorted(item.keys())))
 
     def _write_json(self, path, payload):
         with open(path, "w", encoding="utf-8") as output:
@@ -149,6 +175,20 @@ def _transactions(payload):
     root = _fund_root(payload)
     if root is not payload:
         candidates.extend(_transactions(root))
+    return candidates
+
+
+def _collection(payload, *keys):
+    candidates = []
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            candidates.extend(item for item in value if isinstance(item, dict))
+        elif isinstance(value, dict):
+            candidates.append(value)
+    root = _fund_root(payload)
+    if root is not payload:
+        candidates.extend(_collection(root, *keys))
     return candidates
 
 
