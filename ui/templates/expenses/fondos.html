@@ -86,8 +86,52 @@
     min-height: 360px;
   }
 
-  .funds-chart-select {
-    min-height: 118px;
+  .funds-multiselect-menu {
+    max-height: 320px;
+    min-width: 420px;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .funds-multiselect-option {
+    align-items: flex-start;
+    border-radius: 6px;
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .funds-multiselect-option:hover {
+    background: #f7f7f5;
+  }
+
+  .funds-multiselect-option input {
+    margin-top: 3px;
+  }
+
+  .funds-multiselect-title {
+    color: #37352f;
+    font-size: 0.86rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .funds-multiselect-meta {
+    color: #8c8a84;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .funds-section-title {
+    color: #37352f;
+    font-size: 1rem;
+    font-weight: 800;
+  }
+
+  .funds-section-meta {
+    color: #8c8a84;
+    font-size: 0.78rem;
+    font-weight: 600;
   }
 
   .funds-filter-grid {
@@ -119,22 +163,6 @@
 <div class="app-toolbar py-3">
   <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
     <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Fondos</h1>
-    <div class="d-flex align-items-center gap-2 ms-auto flex-wrap justify-content-end">
-      <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="sync_rindegastos_funds">
-        <button type="submit" class="btn btn-light-primary">
-          Sincronizar Rindegastos
-        </button>
-      </form>
-      <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="sync_notion_funds">
-        <button type="submit" class="btn btn-primary" {% if not notion_configured %}disabled{% endif %}>
-          Sincronizar desde Notion
-        </button>
-      </form>
-    </div>
   </div>
 </div>
 {% endblock %}
@@ -155,68 +183,102 @@
 {% endif %}
 
 <div class="funds-shell p-4 p-lg-5 mb-5">
-  <div class="d-flex flex-column flex-xl-row justify-content-between gap-3 mb-4">
-    <div>
-      <div class="text-muted fw-semibold fs-8 text-uppercase">Ultima sincronizacion Notion</div>
-      <div class="fw-bold text-gray-900">
-        {% if notion_last_synced_at %}{{ notion_last_synced_at|date:"d/m/Y H:i" }}{% else %}Sin sincronizacion{% endif %}
-      </div>
-    </div>
-    <div>
-      <div class="text-muted fw-semibold fs-8 text-uppercase">Ultima lectura Rindegastos</div>
-      <div class="fw-bold text-gray-900">
-        {% if funds_chart.last_synced_at %}{{ funds_chart.last_synced_at|date:"d/m/Y H:i" }}{% else %}Sin lectura reciente{% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="funds-panel mb-4">
-    <div class="row g-0">
-      <div class="col-md-3 funds-kpi p-4">
-        <div class="text-muted fw-semibold fs-8 text-uppercase">Depositos Rindegastos</div>
-        <div class="fs-3 fw-bold text-gray-900">CLP {{ funds_chart.totals.deposits|floatformat:0|localize }}</div>
-        <div class="text-muted fs-8">{% if funds_chart.available %}API oficial{% else %}Sin lectura API{% endif %}</div>
-      </div>
-      <div class="col-md-3 funds-kpi p-4">
-        <div class="text-muted fw-semibold fs-8 text-uppercase">Gastos Rindegastos</div>
-        <div class="fs-3 fw-bold text-gray-900">CLP {{ funds_chart.totals.withdrawals|floatformat:0|localize }}</div>
-        <div class="text-muted fs-8">Cargos aprobados contra fondos</div>
-      </div>
-      <div class="col-md-3 funds-kpi p-4">
-        <div class="text-muted fw-semibold fs-8 text-uppercase">Saldo Rindegastos</div>
-        <div class="fs-3 fw-bold text-gray-900">CLP {{ funds_chart.totals.balance|floatformat:0|localize }}</div>
-        <div class="text-muted fs-8">Disponible actual</div>
-      </div>
-      <div class="col-md-3 funds-kpi p-4">
-        <div class="text-muted fw-semibold fs-8 text-uppercase">Proyectado Expenses</div>
-        <div class="fs-3 fw-bold text-gray-900">CLP {{ funds_chart.totals.projected|floatformat:0|localize }}</div>
-        <div class="text-muted fs-8">Notion local aun no sincronizado</div>
-      </div>
-    </div>
-  </div>
-
   <div class="funds-panel p-4 mb-4">
-    <div class="d-flex flex-column flex-xl-row gap-4">
-      <div class="flex-grow-1">
-        <div class="fw-bold text-gray-900 mb-1">Resumen de fondos</div>
-        <div class="text-muted fs-8">Depositos, gastos, saldo y proyeccion pendiente por fondo.</div>
+    <div class="d-flex flex-column flex-xl-row justify-content-between gap-4">
+      <div>
+        <div class="funds-section-title">Rindegastos</div>
+        <div class="funds-section-meta">
+          Ultima lectura:
+          {% if funds_chart.last_synced_at %}{{ funds_chart.last_synced_at|date:"d/m/Y H:i" }}{% else %}sin lectura reciente{% endif %}
+        </div>
         {% if funds_chart.error %}
         <div class="text-warning fs-8 mt-2">{{ funds_chart.error }}</div>
         {% endif %}
       </div>
       <div class="d-flex flex-column flex-md-row gap-3 align-items-md-end">
+        <div style="min-width: 220px;">
+          <label class="form-label">Periodo Rindegastos</label>
+          <select id="fundsChartPeriod" class="form-select">
+            <option value="all">Todo</option>
+            <option value="30">Ultimos 30 dias</option>
+            <option value="60">Ultimos 60 dias</option>
+            <option value="90">Ultimos 90 dias</option>
+          </select>
+        </div>
         <div style="min-width: 320px;">
-          <label class="form-label">Fondos del grafico</label>
-          <select id="fundsChartSelector" class="form-select funds-chart-select" multiple size="4"></select>
-          <div class="text-muted fs-8 mt-1">Sin seleccion muestra todos los fondos principales.</div>
+          <label class="form-label">Fondos Rindegastos</label>
+          <div class="dropdown" id="fundsChartSelector">
+            <button
+              class="btn btn-light border w-100 text-start d-flex justify-content-between align-items-center"
+              type="button"
+              data-bs-toggle="dropdown"
+              data-bs-auto-close="outside"
+              aria-expanded="false"
+            >
+              <span id="fundsChartSelectorLabel">Fondos abiertos: todos</span>
+              <span class="text-muted">&dtrif;</span>
+            </button>
+            <div class="dropdown-menu funds-multiselect-menu" id="fundsChartSelectorMenu"></div>
+          </div>
+          <div class="text-muted fs-8 mt-1">Solo fondos abiertos. Sin seleccion muestra todos.</div>
         </div>
         <div class="d-flex gap-2 flex-wrap pb-md-2">
           <button type="button" id="fundsChartSelectAll" class="btn btn-sm btn-light">Todos</button>
           <button type="button" id="fundsChartClear" class="btn btn-sm btn-light">Limpiar</button>
         </div>
+        <form method="post" class="pb-md-2">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="sync_rindegastos_funds">
+          <button type="submit" class="btn btn-light-primary">Sincronizar Rindegastos</button>
+        </form>
       </div>
     </div>
+
+    <div class="funds-panel mt-4 mb-4">
+      <div class="row g-0">
+      <div class="col-md-3 funds-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Depositos Rindegastos</div>
+        <div class="fs-3 fw-bold text-gray-900">CLP <span data-funds-kpi="deposits">{{ funds_chart.totals.deposits }}</span></div>
+        <div class="text-muted fs-8">{% if funds_chart.available %}API oficial{% else %}Sin lectura API{% endif %}</div>
+      </div>
+      <div class="col-md-3 funds-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Gastos Rindegastos</div>
+        <div class="fs-3 fw-bold text-gray-900">CLP <span data-funds-kpi="withdrawals">{{ funds_chart.totals.withdrawals }}</span></div>
+        <div class="text-muted fs-8">Cargos aprobados contra fondos</div>
+      </div>
+      <div class="col-md-3 funds-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Saldo Rindegastos</div>
+        <div class="fs-3 fw-bold text-gray-900">CLP <span data-funds-kpi="balance">{{ funds_chart.totals.balance }}</span></div>
+        <div class="text-muted fs-8">Disponible actual</div>
+      </div>
+      <div class="col-md-3 funds-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Proyectado Expenses</div>
+        <div class="fs-3 fw-bold text-gray-900">CLP <span data-funds-kpi="projected">{{ funds_chart.totals.projected }}</span></div>
+        <div class="text-muted fs-8">Notion local aun no sincronizado</div>
+      </div>
+      </div>
+    </div>
+
     <div id="fundsChart" class="funds-chart mt-4"></div>
+  </div>
+
+  <div class="funds-panel p-4 mb-4">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-4">
+      <div>
+        <div class="funds-section-title">Notion</div>
+        <div class="funds-section-meta">
+          Ultima sincronizacion:
+          {% if notion_last_synced_at %}{{ notion_last_synced_at|date:"d/m/Y H:i" }}{% else %}sin sincronizacion{% endif %}
+        </div>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_notion_funds">
+        <button type="submit" class="btn btn-primary" {% if not notion_configured %}disabled{% endif %}>
+          Sincronizar desde Notion
+        </button>
+      </form>
+    </div>
   </div>
 
   <div class="funds-panel p-4 mb-4">
@@ -386,6 +448,9 @@
     var el = document.getElementById("fundsChart");
     if (!el) return;
     var selector = document.getElementById("fundsChartSelector");
+    var selectorMenu = document.getElementById("fundsChartSelectorMenu");
+    var selectorLabel = document.getElementById("fundsChartSelectorLabel");
+    var periodSelector = document.getElementById("fundsChartPeriod");
     var selectAllButton = document.getElementById("fundsChartSelectAll");
     var clearButton = document.getElementById("fundsChartClear");
     var chart = null;
@@ -394,14 +459,27 @@
       return new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(value || 0);
     }
 
+    function escapeHtml(value) {
+      return String(value || "").replace(/[&<>"']/g, function (char) {
+        return {
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#039;"
+        }[char];
+      });
+    }
+
     if (!window.ApexCharts) {
       el.innerHTML = '<div class="text-muted">ApexCharts no disponible</div>';
       return;
     }
 
     var payload = JSON.parse(document.getElementById("funds-chart-data").textContent || "{}");
-    var rows = payload.rows || [];
-    if (!rows.length) {
+    var allRows = payload.all_rows || payload.rows || [];
+    var defaultRows = allRows;
+    if (!allRows.length) {
       el.innerHTML = '<div class="text-muted py-10 text-center">Sin datos de fondos para graficar</div>';
       return;
     }
@@ -410,25 +488,61 @@
       return (row.fund_id || row.title || "fund") + ":" + index;
     }
 
-    rows.forEach(function (row, index) {
+    allRows.forEach(function (row, index) {
       row._chartKey = rowKey(row, index);
     });
 
-    if (selector) {
-      selector.innerHTML = rows.map(function (row) {
+    if (selectorMenu) {
+      selectorMenu.innerHTML = [
+        '<div class="px-2 pb-2 border-bottom mb-1">',
+        '<div class="fw-bold text-gray-900">Fondos abiertos</div>',
+        '<div class="text-muted fs-8">' + allRows.length + ' disponibles desde Rindegastos</div>',
+        '</div>'
+      ].join("") + allRows.map(function (row) {
         var title = row.title || row.fund_id || "Sin fondo";
-        var suffix = row.fund_id ? " · ID " + row.fund_id : "";
-        return '<option value="' + row._chartKey + '">' + title + suffix + '</option>';
+        var meta = [
+          row.fund_id ? "ID " + row.fund_id : "",
+          row.status || "Abierto"
+        ].filter(Boolean).join(" - ");
+        return [
+          '<label class="funds-multiselect-option">',
+          '<input class="form-check-input" type="checkbox" value="' + escapeHtml(row._chartKey) + '" data-funds-chart-option>',
+          '<span>',
+          '<span class="funds-multiselect-title">' + escapeHtml(title) + '</span>',
+          '<span class="funds-multiselect-meta d-block">' + escapeHtml(meta) + '</span>',
+          '</span>',
+          '</label>'
+        ].join("");
       }).join("");
     }
 
-    function selectedRows() {
-      if (!selector) return rows;
-      var selected = Array.prototype.slice.call(selector.selectedOptions || []).map(function (option) {
-        return option.value;
+    function periodRows(sourceRows) {
+      if (!periodSelector || periodSelector.value === "all") return sourceRows;
+      var days = parseInt(periodSelector.value, 10);
+      if (!days) return sourceRows;
+      var cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      return sourceRows.filter(function (row) {
+        if (!row.last_activity_at) return false;
+        var value = new Date(row.last_activity_at);
+        return !isNaN(value.getTime()) && value >= cutoff;
       });
-      if (!selected.length) return rows;
-      return rows.filter(function (row) { return selected.indexOf(row._chartKey) !== -1; });
+    }
+
+    function selectedRows() {
+      var selected = Array.prototype.slice.call(document.querySelectorAll("[data-funds-chart-option]:checked")).map(
+        function (option) { return option.value; }
+      );
+      var sourceRows = selected.length ? allRows : defaultRows;
+      var periodFilteredRows = periodRows(sourceRows);
+      if (!selected.length) return periodFilteredRows;
+      return periodFilteredRows.filter(function (row) { return selected.indexOf(row._chartKey) !== -1; });
+    }
+
+    function updateSelectorLabel() {
+      if (!selectorLabel) return;
+      var selectedCount = document.querySelectorAll("[data-funds-chart-option]:checked").length;
+      selectorLabel.textContent = selectedCount ? "Fondos abiertos: " + selectedCount + " seleccionados" : "Fondos abiertos: todos";
     }
 
     function shortLabel(row) {
@@ -439,23 +553,46 @@
       return title.length > 22 ? title.slice(0, 22) + "..." : title;
     }
 
+    function updateKpis(visibleRows) {
+      var totals = visibleRows.reduce(function (acc, row) {
+        acc.deposits += row.deposits || 0;
+        acc.withdrawals += row.withdrawals || 0;
+        acc.balance += row.balance || 0;
+        acc.projected += row.projected || 0;
+        return acc;
+      }, { deposits: 0, withdrawals: 0, balance: 0, projected: 0 });
+
+      Object.keys(totals).forEach(function (key) {
+        var target = document.querySelector('[data-funds-kpi="' + key + '"]');
+        if (target) target.textContent = formatCurrency(totals[key]);
+      });
+    }
+
     function renderChart() {
       var visibleRows = selectedRows();
+      updateKpis(visibleRows);
+      if (!visibleRows.length) {
+        if (chart) chart.destroy();
+        el.innerHTML = '<div class="text-muted py-10 text-center">Sin fondos para el periodo seleccionado</div>';
+        return;
+      }
       var categories = visibleRows.map(shortLabel);
       var height = Math.max(360, Math.min(520, 300 + visibleRows.length * 12));
       var options = {
         series: [
-          { name: "Depositos", data: visibleRows.map(function (row) { return row.deposits || 0; }) },
-          { name: "Gastos", data: visibleRows.map(function (row) { return row.withdrawals || 0; }) },
-          { name: "Saldo", data: visibleRows.map(function (row) { return row.balance || 0; }) },
-          { name: "Proyectado", data: visibleRows.map(function (row) { return row.projected || 0; }) }
+          { name: "Depositos", type: "column", data: visibleRows.map(function (row) { return row.deposits || 0; }) },
+          { name: "Gastos", type: "column", data: visibleRows.map(function (row) { return row.withdrawals || 0; }) },
+          { name: "Saldo", type: "line", data: visibleRows.map(function (row) { return row.balance || 0; }) },
+          { name: "Proyectado", type: "column", data: visibleRows.map(function (row) { return row.projected || 0; }) }
         ],
         chart: {
-          type: "bar",
+          type: "line",
           height: height,
           toolbar: { show: false },
           stacked: false
         },
+        stroke: { width: [0, 0, 3, 0], curve: "straight" },
+        markers: { size: [0, 0, 5, 0], strokeWidth: 2 },
         colors: ["#6c9bd2", "#d86f68", "#73a580", "#d6a84f"],
         plotOptions: {
           bar: {
@@ -464,7 +601,17 @@
             columnWidth: "58%"
           }
         },
-        dataLabels: { enabled: false },
+        dataLabels: {
+          enabled: true,
+          enabledOnSeries: [2],
+          formatter: function (value) { return "$" + formatCurrency(value); },
+          style: { fontSize: "10px", colors: ["#4c735c"] },
+          background: {
+            enabled: true,
+            borderRadius: 3,
+            opacity: 0.85
+          }
+        },
         grid: { borderColor: "#eceae5" },
         xaxis: {
           categories: categories,
@@ -498,26 +645,36 @@
       };
 
       if (chart) chart.destroy();
+      el.innerHTML = "";
       chart = new ApexCharts(el, options);
       chart.render();
     }
 
-    if (selector) {
-      selector.addEventListener("change", renderChart);
+    document.querySelectorAll("[data-funds-chart-option]").forEach(function (input) {
+      input.addEventListener("change", function () {
+        updateSelectorLabel();
+        renderChart();
+      });
+    });
+    if (periodSelector) {
+      periodSelector.addEventListener("change", renderChart);
     }
-    if (selectAllButton && selector) {
+    if (selectAllButton) {
       selectAllButton.addEventListener("click", function () {
-        Array.prototype.slice.call(selector.options).forEach(function (option) { option.selected = true; });
+        document.querySelectorAll("[data-funds-chart-option]").forEach(function (option) { option.checked = true; });
+        updateSelectorLabel();
         renderChart();
       });
     }
-    if (clearButton && selector) {
+    if (clearButton) {
       clearButton.addEventListener("click", function () {
-        Array.prototype.slice.call(selector.options).forEach(function (option) { option.selected = false; });
+        document.querySelectorAll("[data-funds-chart-option]").forEach(function (option) { option.checked = false; });
+        updateSelectorLabel();
         renderChart();
       });
     }
 
+    updateSelectorLabel();
     renderChart();
   })();
 </script>

@@ -187,6 +187,24 @@ def _fund_field(fund, *keys):
     return ""
 
 
+def _fund_status_text(fund):
+    value = _fund_field(fund, "Status", "status", "FundStatus", "fundStatus")
+    if value in (None, ""):
+        return ""
+    if str(value).strip() == "1":
+        return "Abierto"
+    if str(value).strip() == "2":
+        return "Cerrado"
+    if str(value).strip() == "3":
+        return "Bloqueado"
+    return str(value).strip()
+
+
+def _is_open_fund(fund):
+    status = _fund_status_text(fund).casefold()
+    return status in {"1", "abierto", "open", "active", "activo"}
+
+
 def _funds_chart_context(local_logs):
     projected_by_fund = {}
     projected_logs = local_logs.exclude(notion_status__icontains="sincronizado").exclude(
@@ -216,6 +234,7 @@ def _funds_chart_context(local_logs):
             "balance": 0,
             "projected": sum(item["projected"] for item in projected_by_fund.values()),
         },
+        "all_rows": [],
         "rows": [],
     }
 
@@ -230,7 +249,7 @@ def _funds_chart_context(local_logs):
     except (RindegastosAPIError, RequestException) as exc:
         payload["error"] = str(exc)
         for item in projected_by_fund.values():
-            payload["rows"].append(
+            payload["all_rows"].append(
                 {
                     "fund_id": item["fund_id"],
                     "title": item["title"],
@@ -239,14 +258,18 @@ def _funds_chart_context(local_logs):
                     "balance": 0,
                     "projected": item["projected"],
                     "projected_count": item["projected_count"],
+                    "last_activity_at": "",
                 }
             )
-        payload["rows"] = sorted(payload["rows"], key=lambda item: item["projected"], reverse=True)[:12]
+        payload["all_rows"] = sorted(payload["all_rows"], key=lambda item: item["projected"], reverse=True)
+        payload["rows"] = payload["all_rows"][:12]
         return payload
 
     payload["last_synced_at"] = cache.get(cache_synced_key)
     rows_by_key = {}
     for fund in funds:
+        if not _is_open_fund(fund):
+            continue
         fund_id = str(_fund_field(fund, "Id", "id"))
         title = str(_fund_field(fund, "Title", "Name", "name", "FundName", "Description") or f"Fondo {fund_id}")
         deposits = _money_int(_fund_field(fund, "Deposits", "deposits", "ManualDeposit", "manualDeposit"))
@@ -262,6 +285,11 @@ def _funds_chart_context(local_logs):
             "balance": balance,
             "projected": projected.get("projected", 0),
             "projected_count": projected.get("projected_count", 0),
+            "status": _fund_status_text(fund),
+            "last_activity_at": str(
+                _fund_field(fund, "UpdatedAt", "updatedAt", "LastMovementDate", "lastMovementDate", "CreatedAt", "createdAt")
+                or ""
+            ),
         }
 
     for key, item in projected_by_fund.items():
@@ -274,6 +302,7 @@ def _funds_chart_context(local_logs):
                 "balance": 0,
                 "projected": item["projected"],
                 "projected_count": item["projected_count"],
+                "last_activity_at": "",
             }
 
     rows = list(rows_by_key.values())
@@ -281,11 +310,13 @@ def _funds_chart_context(local_logs):
     payload["totals"]["deposits"] = sum(row["deposits"] for row in rows)
     payload["totals"]["withdrawals"] = sum(row["withdrawals"] for row in rows)
     payload["totals"]["balance"] = sum(row["balance"] for row in rows)
-    payload["rows"] = sorted(
+    sorted_rows = sorted(
         rows,
         key=lambda item: max(item["projected"], item["balance"], item["deposits"], item["withdrawals"]),
         reverse=True,
-    )[:12]
+    )
+    payload["all_rows"] = sorted_rows
+    payload["rows"] = sorted_rows[:12]
     return payload
 
 
