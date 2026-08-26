@@ -732,24 +732,38 @@
     }
 
     function colorBalanceDataLabels(visibleRows) {
-      window.setTimeout(function () {
+      function paint() {
         var labels = el.querySelectorAll(".apexcharts-datalabel");
+        var backgroundRects = el.querySelectorAll(".apexcharts-data-labels rect");
         labels.forEach(function (label, index) {
           var row = visibleRows[index] || {};
           var color = (row.balance || 0) < 0 ? "#b42318" : "#4c735c";
           label.setAttribute("fill", "#ffffff");
-          label.style.fill = "#ffffff";
-          var group = label.closest("g");
-          if (!group) return;
-          var rect = group.querySelector("rect");
+          label.style.setProperty("fill", "#ffffff", "important");
+          var rect = backgroundRects[index];
+          if (!rect && label.previousElementSibling && label.previousElementSibling.tagName.toLowerCase() === "rect") {
+            rect = label.previousElementSibling;
+          }
+          if (!rect) {
+            var group = label.closest("g");
+            rect = group ? group.querySelector("rect") : null;
+          }
           if (rect) {
             rect.setAttribute("fill", color);
             rect.setAttribute("stroke", color);
             rect.setAttribute("rx", "4");
             rect.setAttribute("ry", "4");
+            rect.style.setProperty("fill", color, "important");
+            rect.style.setProperty("stroke", color, "important");
+            rect.style.setProperty("opacity", "0.92", "important");
           }
         });
-      }, 0);
+      }
+
+      window.requestAnimationFrame(paint);
+      [50, 150, 350, 800].forEach(function (delay) {
+        window.setTimeout(paint, delay);
+      });
     }
 
     function renderChart() {
