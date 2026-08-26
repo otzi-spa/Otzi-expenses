@@ -47,6 +47,7 @@ class NotionFundsSync:
             "pending_mapping": 0,
             "errors": 0,
             "ignored": 0,
+            "closed": 0,
             "dry_run": dry_run,
         }
         pages = self.fetch_pages()
@@ -69,6 +70,8 @@ class NotionFundsSync:
                 stats["updated"] += 1
             if status == NotionFundSyncLog.STATUS_READY:
                 stats["ready"] += 1
+            elif status == NotionFundSyncLog.STATUS_CLOSED:
+                stats["closed"] += 1
             elif status == NotionFundSyncLog.STATUS_PENDING_MAPPING:
                 stats["pending_mapping"] += 1
             elif status == NotionFundSyncLog.STATUS_ERROR:
@@ -269,10 +272,22 @@ class NotionFundsSync:
     def _validate(self, record, mapping):
         errors = []
         pending = []
+        notion_status = _normalize_status(record.notion_status)
+        transferred_status = _normalize_status("Transferido")
+        synced_status = _normalize_status("Transferido y sincronizado")
         if not record.page_id:
             errors.append("Notion no entregó page_id.")
         if record.work_key != settings.NOTION_FUNDS_WORK_KEY_VALUE:
             errors.append(f"k de trabajo no coincide con {settings.NOTION_FUNDS_WORK_KEY_VALUE}.")
+        if notion_status == synced_status:
+            if errors:
+                return NotionFundSyncLog.STATUS_ERROR, " ".join(errors)
+            return NotionFundSyncLog.STATUS_CLOSED, ""
+        if notion_status != transferred_status:
+            if errors:
+                return NotionFundSyncLog.STATUS_ERROR, " ".join(errors)
+            status_label = record.notion_status or "(vacío)"
+            return NotionFundSyncLog.STATUS_IGNORED, f"Estado Notion sin acción de abono: {status_label}."
         if not record.beneficiary_name:
             errors.append("Beneficiario vacío.")
         if not record.beneficiary_rut:
@@ -356,6 +371,10 @@ def _property_text(prop):
     if prop_type == "checkbox":
         return "true" if value else "false"
     return ""
+
+
+def _normalize_status(value):
+    return (value or "").strip().casefold()
 
 
 def _extract_fund_id(value):

@@ -211,6 +211,8 @@ def _funds_chart_context(local_logs):
             NotionFundSyncLog.STATUS_RINDEGASTOS_OK,
             NotionFundSyncLog.STATUS_NOTION_OK,
             NotionFundSyncLog.STATUS_RINDEGASTOS_OK_NOTION_ERROR,
+            NotionFundSyncLog.STATUS_CLOSED,
+            NotionFundSyncLog.STATUS_IGNORED,
         ]
     )
     for row in projected_logs.values("rindegastos_fund_id", "cost_center").annotate(total=Sum("amount"), count=Count("id")):
@@ -243,8 +245,8 @@ def _funds_chart_context(local_logs):
     try:
         if funds is None:
             funds = RindegastosClient().get_funds()
-            cache.set(cache_key, funds, 5 * 60)
-            cache.set(cache_synced_key, timezone.now(), 5 * 60)
+            cache.set(cache_key, funds, settings.FUNDS_RINDEGASTOS_CACHE_TIMEOUT_SECONDS)
+            cache.set(cache_synced_key, timezone.now(), settings.FUNDS_RINDEGASTOS_CACHE_TIMEOUT_SECONDS)
     except (RindegastosAPIError, RequestException) as exc:
         payload["error"] = str(exc)
         for item in projected_by_fund.values():
@@ -385,7 +387,8 @@ def funds_dashboard(request):
                     "Sincronización Notion completada: "
                     f"{stats['queried']} consultados en Notion, {stats['matched']} calzan con el filtro, "
                     f"{stats['created']} nuevos, {stats['updated']} actualizados, "
-                    f"{stats['pending_mapping']} pendientes de mapeo, {stats['errors']} con error.",
+                    f"{stats['pending_mapping']} pendientes de mapeo, {stats.get('closed', 0)} cerrados, "
+                    f"{stats['errors']} con error.",
                 )
             except (NotionAPIError, ValueError) as exc:
                 messages.error(request, f"No se pudo sincronizar Notion: {exc}")
@@ -394,8 +397,16 @@ def funds_dashboard(request):
             cache.delete("expenses:funds_dashboard:rindegastos_funds_synced_at:v1")
             try:
                 funds = RindegastosClient().get_funds()
-                cache.set("expenses:funds_dashboard:rindegastos_funds:v1", funds, 5 * 60)
-                cache.set("expenses:funds_dashboard:rindegastos_funds_synced_at:v1", timezone.now(), 5 * 60)
+                cache.set(
+                    "expenses:funds_dashboard:rindegastos_funds:v1",
+                    funds,
+                    settings.FUNDS_RINDEGASTOS_CACHE_TIMEOUT_SECONDS,
+                )
+                cache.set(
+                    "expenses:funds_dashboard:rindegastos_funds_synced_at:v1",
+                    timezone.now(),
+                    settings.FUNDS_RINDEGASTOS_CACHE_TIMEOUT_SECONDS,
+                )
                 messages.success(request, f"Fondos Rindegastos sincronizados: {len(funds)} fondos leídos.")
             except (RindegastosAPIError, RequestException) as exc:
                 messages.error(request, f"No se pudo sincronizar Rindegastos: {exc}")

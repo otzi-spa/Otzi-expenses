@@ -498,6 +498,7 @@ class NotionFundSyncLog(models.Model):
     STATUS_PENDING_MAPPING = "pending_mapping"
     STATUS_VALIDATED = "validated"
     STATUS_READY = "ready"
+    STATUS_CLOSED = "closed"
     STATUS_ERROR = "error"
     STATUS_IGNORED = "ignored"
     STATUS_RINDEGASTOS_OK = "rindegastos_ok"
@@ -509,6 +510,7 @@ class NotionFundSyncLog(models.Model):
         (STATUS_PENDING_MAPPING, "Pendiente mapeo"),
         (STATUS_VALIDATED, "Validado"),
         (STATUS_READY, "Listo para abono"),
+        (STATUS_CLOSED, "Cerrado"),
         (STATUS_ERROR, "Error"),
         (STATUS_IGNORED, "Ignorado"),
         (STATUS_RINDEGASTOS_OK, "Rindegastos OK"),

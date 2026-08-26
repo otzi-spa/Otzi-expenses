@@ -131,6 +131,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "expenses.reconcile_rindegastos_expenses",
         "schedule": crontab(hour=16, minute=0),
     },
+    "sync-funds-sources-nightly": {
+        "task": "expenses.sync_funds_sources",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    "sync-funds-sources-midday": {
+        "task": "expenses.sync_funds_sources",
+        "schedule": crontab(hour=12, minute=0),
+    },
+    "sync-funds-sources-afternoon": {
+        "task": "expenses.sync_funds_sources",
+        "schedule": crontab(hour=16, minute=0),
+    },
     "sync-tax-indicators-daily": {
         "task": "expenses.sync_tax_indicators",
         "schedule": crontab(hour=2, minute=30),
@@ -140,6 +152,9 @@ CELERY_BEAT_SCHEDULE = {
 RINDEGASTOS_API_BASE_URL = os.environ.get("RINDEGASTOS_API_BASE_URL", "https://api.rindegastos.com/v1").rstrip("/")
 RINDEGASTOS_API_TOKEN = os.environ.get("RINDEGASTOS_API_TOKEN", "").strip()
 RINDEGASTOS_API_TIMEOUT = int(os.environ.get("RINDEGASTOS_API_TIMEOUT", "20"))
+FUNDS_RINDEGASTOS_CACHE_TIMEOUT_SECONDS = int(
+    os.environ.get("FUNDS_RINDEGASTOS_CACHE_TIMEOUT_SECONDS", str(24 * 60 * 60))
+)
 RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED = (
     os.environ.get("RINDEGASTOS_MARK_INTEGRATION_CODE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 )

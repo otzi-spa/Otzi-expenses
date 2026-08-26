@@ -99,6 +99,7 @@
   .pill-status-gray { background: #e8e6e1; color: #5f5b53; }
   .pill-sync-error { background: #f8d7da; color: #842029; }
   .pill-sync-ready { background: #d1e7dd; color: #0f5132; }
+  .pill-sync-closed { background: #e8e6e1; color: #5f5b53; }
   .pill-sync-pending { background: #fff3cd; color: #664d03; }
   .pill-sync-default { background: #e7f1ff; color: #084298; }
 
@@ -111,6 +112,13 @@
     min-width: 420px;
     overflow-y: auto;
     padding: 8px;
+  }
+
+  .funds-multiselect-search {
+    background: #ffffff;
+    position: sticky;
+    top: -8px;
+    z-index: 2;
   }
 
   .funds-multiselect-option {
@@ -142,6 +150,15 @@
     font-weight: 600;
   }
 
+  .funds-multiselect-empty {
+    color: #8c8a84;
+    display: none;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 12px 8px;
+    text-align: center;
+  }
+
   .funds-section-title {
     color: #37352f;
     font-size: 1rem;
@@ -168,6 +185,11 @@
     grid-template-columns: 220px minmax(320px, 1fr) auto;
   }
 
+  .funds-rg-help {
+    grid-column: 2 / 3;
+    margin-top: -6px;
+  }
+
   .funds-rg-actions {
     align-items: end;
     display: flex;
@@ -188,6 +210,11 @@
 
     .funds-rg-controls {
       grid-template-columns: 1fr;
+    }
+
+    .funds-rg-help {
+      grid-column: 1;
+      margin-top: 0;
     }
 
     .funds-rg-actions {
@@ -280,12 +307,12 @@
           </button>
           <div class="dropdown-menu funds-multiselect-menu" id="fundsChartSelectorMenu"></div>
         </div>
-        <div class="text-muted fs-8 mt-1">Solo fondos abiertos. Sin seleccion muestra todos.</div>
       </div>
       <div class="funds-rg-actions">
         <button type="button" id="fundsChartSelectAll" class="btn btn-sm btn-light">Todos</button>
         <button type="button" id="fundsChartClear" class="btn btn-sm btn-light">Limpiar</button>
       </div>
+      <div class="funds-rg-help text-muted fs-8">Solo fondos abiertos. Sin seleccion muestra todos.</div>
     </div>
 
     <div class="funds-panel mt-4 mb-4">
@@ -496,7 +523,7 @@
               {% endif %}
             </td>
             <td>
-              <span class="notion-pill {% if log.local_status == 'error' %}pill-sync-error{% elif log.local_status == 'ready' or log.local_status == 'rindegastos_ok' or log.local_status == 'notion_ok' %}pill-sync-ready{% elif log.local_status == 'pending_mapping' or log.local_status == 'pending' %}pill-sync-pending{% else %}pill-sync-default{% endif %}">{{ log.get_local_status_display }}</span>
+              <span class="notion-pill {% if log.local_status == 'error' %}pill-sync-error{% elif log.local_status == 'closed' %}pill-sync-closed{% elif log.local_status == 'ready' or log.local_status == 'rindegastos_ok' or log.local_status == 'notion_ok' %}pill-sync-ready{% elif log.local_status == 'pending_mapping' or log.local_status == 'pending' %}pill-sync-pending{% else %}pill-sync-default{% endif %}">{{ log.get_local_status_display }}</span>
             </td>
             <td class="text-muted fs-8" style="max-width: 360px;">{{ log.last_error|default:"" }}</td>
             <td class="text-end pe-6">
@@ -545,6 +572,8 @@
     var periodSelector = document.getElementById("fundsChartPeriod");
     var selectAllButton = document.getElementById("fundsChartSelectAll");
     var clearButton = document.getElementById("fundsChartClear");
+    var selectorSearch = null;
+    var selectorEmpty = null;
     var chart = null;
 
     function formatCurrency(value) {
@@ -589,6 +618,9 @@
         '<div class="px-2 pb-2 border-bottom mb-1">',
         '<div class="fw-bold text-gray-900">Fondos abiertos</div>',
         '<div class="text-muted fs-8">' + allRows.length + ' disponibles desde Rindegastos</div>',
+        '<div class="funds-multiselect-search pt-2">',
+        '<input type="search" class="form-control form-control-sm" placeholder="Buscar fondo o ID" data-funds-chart-search>',
+        '</div>',
         '</div>'
       ].join("") + allRows.map(function (row) {
         var title = row.title || row.fund_id || "Sin fondo";
@@ -596,8 +628,9 @@
           row.fund_id ? "ID " + row.fund_id : "",
           row.status || "Abierto"
         ].filter(Boolean).join(" - ");
+        var searchText = [title, row.fund_id || "", meta].join(" ").toLowerCase();
         return [
-          '<label class="funds-multiselect-option">',
+          '<label class="funds-multiselect-option" data-funds-chart-row data-search="' + escapeHtml(searchText) + '">',
           '<input class="form-check-input" type="checkbox" value="' + escapeHtml(row._chartKey) + '" data-funds-chart-option>',
           '<span>',
           '<span class="funds-multiselect-title">' + escapeHtml(title) + '</span>',
@@ -605,7 +638,23 @@
           '</span>',
           '</label>'
         ].join("");
-      }).join("");
+      }).join("") + '<div class="funds-multiselect-empty" data-funds-chart-empty>Sin fondos para esa busqueda</div>';
+      selectorSearch = selectorMenu.querySelector("[data-funds-chart-search]");
+      selectorEmpty = selectorMenu.querySelector("[data-funds-chart-empty]");
+    }
+
+    function filterSelectorOptions() {
+      if (!selectorMenu || !selectorSearch) return;
+      var query = selectorSearch.value.trim().toLowerCase();
+      var visibleCount = 0;
+      selectorMenu.querySelectorAll("[data-funds-chart-row]").forEach(function (row) {
+        var isVisible = !query || (row.getAttribute("data-search") || "").indexOf(query) !== -1;
+        row.style.display = isVisible ? "" : "none";
+        if (isVisible) visibleCount += 1;
+      });
+      if (selectorEmpty) {
+        selectorEmpty.style.display = visibleCount ? "none" : "block";
+      }
     }
 
     function periodRows(sourceRows) {
@@ -656,8 +705,41 @@
 
       Object.keys(totals).forEach(function (key) {
         var target = document.querySelector('[data-funds-kpi="' + key + '"]');
-        if (target) target.textContent = formatCurrency(totals[key]);
+        if (!target) return;
+        target.textContent = formatCurrency(totals[key]);
+        if (key === "balance") {
+          target.classList.toggle("text-danger", totals[key] < 0);
+          target.classList.toggle("text-success", totals[key] >= 0);
+          target.classList.toggle("text-gray-900", false);
+        }
       });
+    }
+
+    function colorBalanceDataLabels(visibleRows) {
+      window.setTimeout(function () {
+        var labels = el.querySelectorAll('.apexcharts-series[seriesName="Saldo"] .apexcharts-datalabel');
+        if (!labels.length) {
+          labels = el.querySelectorAll(".apexcharts-datalabel");
+        }
+        labels.forEach(function (label, index) {
+          var row = visibleRows[index] || {};
+          var color = (row.balance || 0) < 0 ? "#b42318" : "#4c735c";
+          label.setAttribute("fill", "#ffffff");
+          label.style.fill = "#ffffff";
+          var parent = label.parentNode;
+          var rect = null;
+          if (parent) {
+            rect = parent.querySelector("rect");
+          }
+          if (!rect && label.previousElementSibling && label.previousElementSibling.tagName.toLowerCase() === "rect") {
+            rect = label.previousElementSibling;
+          }
+          if (rect) {
+            rect.setAttribute("fill", color);
+            rect.setAttribute("stroke", color);
+          }
+        });
+      }, 0);
     }
 
     function renderChart() {
@@ -681,7 +763,11 @@
           type: "line",
           height: height,
           toolbar: { show: false },
-          stacked: false
+          stacked: false,
+          events: {
+            mounted: function () { colorBalanceDataLabels(visibleRows); },
+            updated: function () { colorBalanceDataLabels(visibleRows); }
+          }
         },
         stroke: { width: [0, 0, 3, 0], curve: "straight" },
         markers: { size: [0, 0, 5, 0], strokeWidth: 2 },
@@ -697,14 +783,7 @@
           enabled: true,
           enabledOnSeries: [2],
           formatter: function (value) { return "$" + formatCurrency(value); },
-          style: {
-            fontSize: "10px",
-            colors: [
-              function (opts) {
-                return opts.value < 0 ? "#b42318" : "#2f6f45";
-              }
-            ]
-          },
+          style: { fontSize: "10px", colors: ["#ffffff"] },
           background: {
             enabled: true,
             borderRadius: 3,
@@ -746,7 +825,14 @@
       if (chart) chart.destroy();
       el.innerHTML = "";
       chart = new ApexCharts(el, options);
-      chart.render();
+      var renderResult = chart.render();
+      if (renderResult && typeof renderResult.then === "function") {
+        renderResult.then(function () {
+          colorBalanceDataLabels(visibleRows);
+        });
+      } else {
+        colorBalanceDataLabels(visibleRows);
+      }
     }
 
     document.querySelectorAll("[data-funds-chart-option]").forEach(function (input) {
@@ -755,6 +841,15 @@
         renderChart();
       });
     });
+    if (selectorSearch) {
+      selectorSearch.addEventListener("click", function (event) {
+        event.stopPropagation();
+      });
+      selectorSearch.addEventListener("keydown", function (event) {
+        event.stopPropagation();
+      });
+      selectorSearch.addEventListener("input", filterSelectorOptions);
+    }
     if (periodSelector) {
       periodSelector.addEventListener("change", renderChart);
     }

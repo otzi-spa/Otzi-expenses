@@ -4,12 +4,16 @@ from decimal import InvalidOperation
 
 from celery import shared_task
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 from requests import RequestException
 
+from expenses.funds_sync import NotionFundsSync
 from expenses.models import ExpenseNotification
 from expenses.rindegastos_client import RindegastosAPIError
+from expenses.notion_client import NotionAPIError
+from expenses.rindegastos_client import RindegastosClient
 from expenses.rindegastos_reconcile import RindegastosExpenseReconciler
 from expenses.rindegastos_sync import RindegastosCatalogSync
 from expenses.rindegastos_trace import expense_integration_code
@@ -19,6 +23,9 @@ from expenses.whatsapp_notifications import WhatsAppNotificationError, send_what
 
 
 logger = logging.getLogger(__name__)
+
+FUNDS_CACHE_KEY = "expenses:funds_dashboard:rindegastos_funds:v1"
+FUNDS_CACHE_SYNCED_AT_KEY = "expenses:funds_dashboard:rindegastos_funds_synced_at:v1"
 
 
 @shared_task(name="expenses.sync_rindegastos_catalogs")
@@ -43,6 +50,39 @@ def sync_rindegastos_uploaded_expenses_task():
         logger.exception("No se pudo sincronizar gastos subidos a Rindegastos desde tarea programada.")
         raise
     logger.info("Sincronización programada de gastos subidos a Rindegastos completada: %s", stats)
+    return stats
+
+
+@shared_task(name="expenses.sync_funds_sources")
+def sync_funds_sources_task():
+    stats = {
+        "notion": None,
+        "rindegastos": None,
+        "errors": {},
+    }
+
+    if settings.NOTION_API_KEY and (settings.NOTION_DATA_SOURCE_ID or settings.NOTION_DATABASE_ID):
+        try:
+            stats["notion"] = NotionFundsSync().sync(dry_run=False)
+        except (NotionAPIError, ValueError) as exc:
+            logger.exception("No se pudo sincronizar fondos Notion desde tarea programada.")
+            stats["errors"]["notion"] = str(exc)
+    else:
+        stats["notion"] = {"status": "skipped", "reason": "not_configured"}
+
+    if settings.RINDEGASTOS_API_TOKEN:
+        try:
+            funds = RindegastosClient().get_funds()
+            cache.set(FUNDS_CACHE_KEY, funds, settings.FUNDS_RINDEGASTOS_CACHE_TIMEOUT_SECONDS)
+            cache.set(FUNDS_CACHE_SYNCED_AT_KEY, timezone.now(), settings.FUNDS_RINDEGASTOS_CACHE_TIMEOUT_SECONDS)
+            stats["rindegastos"] = {"funds": len(funds)}
+        except (RindegastosAPIError, RequestException, ValueError) as exc:
+            logger.exception("No se pudo sincronizar fondos Rindegastos desde tarea programada.")
+            stats["errors"]["rindegastos"] = str(exc)
+    else:
+        stats["rindegastos"] = {"status": "skipped", "reason": "not_configured"}
+
+    logger.info("Sincronización programada de fondos completada: %s", stats)
     return stats
 
 

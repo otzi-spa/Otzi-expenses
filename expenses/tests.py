@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -24,6 +24,7 @@ from expenses.models import (
     ExpenseNotification,
     ExpenseTypeCatalog,
     FuelSpecificTaxRate,
+    NotionFundSyncLog,
     RindegastosExpenseDiff,
     RindegastosExpenseSnapshot,
     RindegastosExpenseFieldCatalog,
@@ -33,7 +34,7 @@ from expenses.models import (
     TaxIndicatorValue,
     normalize_rut,
 )
-from expenses.tasks import reconcile_rindegastos_expenses_task, send_expense_notification_task
+from expenses.tasks import reconcile_rindegastos_expenses_task, send_expense_notification_task, sync_funds_sources_task
 from expenses.invoice_tax_calculator import calculate_invoice_taxes
 from expenses.rindegastos_client import RindegastosClient
 from expenses.rindegastos_reconcile import (
@@ -46,6 +47,7 @@ from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, e
 from expenses.tax_indicators_sync import SiiTaxIndicatorSync
 from expenses.views import _expense_export_id, _find_similar_expenses, _missing_fields_for_parametrization, _rindegastos_note
 from expenses.whatsapp_notifications import build_rejection_payload, build_whatsapp_template_request
+from expenses.funds_sync import NotionFundsSync
 
 LOCAL_TEST_STORAGES = {
     "default": {
@@ -55,6 +57,53 @@ LOCAL_TEST_STORAGES = {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
+
+
+class NotionFundsSyncStatusTests(SimpleTestCase):
+    def _record(self, **overrides):
+        defaults = {
+            "page_id": "page-1",
+            "work_key": settings.NOTION_FUNDS_WORK_KEY_VALUE,
+            "notion_status": "Transferido",
+            "beneficiary_name": "Beneficiario",
+            "beneficiary_rut": "11111111-1",
+            "amount": Decimal("100000"),
+            "payment_date": date(2026, 8, 25),
+            "rindegastos_fund_id": "123456",
+        }
+        defaults.update(overrides)
+        return type("Record", (), defaults)()
+
+    def test_transferido_is_ready_for_deposit(self):
+        status, error = NotionFundsSync(client=object())._validate(self._record(), mapping=None)
+
+        self.assertEqual(status, NotionFundSyncLog.STATUS_READY)
+        self.assertEqual(error, "")
+
+    def test_transferido_y_sincronizado_is_closed(self):
+        status, error = NotionFundsSync(client=object())._validate(
+            self._record(
+                notion_status="Transferido y sincronizado",
+                beneficiary_name="",
+                beneficiary_rut="",
+                amount=None,
+                payment_date=None,
+                rindegastos_fund_id="",
+            ),
+            mapping=None,
+        )
+
+        self.assertEqual(status, NotionFundSyncLog.STATUS_CLOSED)
+        self.assertEqual(error, "")
+
+    def test_other_notion_status_is_ignored(self):
+        status, error = NotionFundsSync(client=object())._validate(
+            self._record(notion_status="Aprobado para solicitar transferencia"),
+            mapping=None,
+        )
+
+        self.assertEqual(status, NotionFundSyncLog.STATUS_IGNORED)
+        self.assertIn("Estado Notion sin acción de abono", error)
 
 
 class FuelExpenseValidationTests(TestCase):
@@ -783,6 +832,45 @@ class RindegastosExpenseReconcilerTests(TestCase):
             self.assertEqual(schedule[name]["task"], "expenses.reconcile_rindegastos_expenses")
             self.assertEqual(str(schedule[name]["schedule"]._orig_hour), hour)
             self.assertEqual(str(schedule[name]["schedule"]._orig_minute), minute)
+
+    def test_sync_funds_sources_is_scheduled_three_times_daily(self):
+        schedule = settings.CELERY_BEAT_SCHEDULE
+        expected = {
+            "sync-funds-sources-nightly": ("3", "0"),
+            "sync-funds-sources-midday": ("12", "0"),
+            "sync-funds-sources-afternoon": ("16", "0"),
+        }
+
+        for name, (hour, minute) in expected.items():
+            self.assertEqual(schedule[name]["task"], "expenses.sync_funds_sources")
+            self.assertEqual(str(schedule[name]["schedule"]._orig_hour), hour)
+            self.assertEqual(str(schedule[name]["schedule"]._orig_minute), minute)
+
+    @override_settings(
+        NOTION_API_KEY="notion-key",
+        NOTION_DATA_SOURCE_ID="source-id",
+        NOTION_DATABASE_ID="",
+        RINDEGASTOS_API_TOKEN="rindegastos-token",
+    )
+    @patch("expenses.tasks.cache")
+    @patch("expenses.tasks.RindegastosClient")
+    @patch("expenses.tasks.NotionFundsSync")
+    def test_sync_funds_sources_task_updates_notion_and_rindegastos_cache(
+        self,
+        notion_sync_class,
+        rindegastos_client_class,
+        cache_mock,
+    ):
+        notion_sync_class.return_value.sync.return_value = {"matched": 2}
+        rindegastos_client_class.return_value.get_funds.return_value = [{"Id": 1}, {"Id": 2}]
+
+        result = sync_funds_sources_task()
+
+        self.assertEqual(result["notion"], {"matched": 2})
+        self.assertEqual(result["rindegastos"], {"funds": 2})
+        self.assertEqual(result["errors"], {})
+        notion_sync_class.return_value.sync.assert_called_once_with(dry_run=False)
+        self.assertEqual(cache_mock.set.call_count, 2)
 
     def test_reconcile_does_not_overwrite_conflicting_remote_integration_code(self):
         expense = Expense.objects.create(
