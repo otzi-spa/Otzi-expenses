@@ -209,6 +209,7 @@ def _funds_chart_context(local_logs):
     payload = {
         "available": False,
         "error": "",
+        "last_synced_at": None,
         "totals": {
             "deposits": 0,
             "withdrawals": 0,
@@ -219,11 +220,13 @@ def _funds_chart_context(local_logs):
     }
 
     cache_key = "expenses:funds_dashboard:rindegastos_funds:v1"
+    cache_synced_key = "expenses:funds_dashboard:rindegastos_funds_synced_at:v1"
     funds = cache.get(cache_key)
     try:
         if funds is None:
             funds = RindegastosClient().get_funds()
             cache.set(cache_key, funds, 5 * 60)
+            cache.set(cache_synced_key, timezone.now(), 5 * 60)
     except (RindegastosAPIError, RequestException) as exc:
         payload["error"] = str(exc)
         for item in projected_by_fund.values():
@@ -241,6 +244,7 @@ def _funds_chart_context(local_logs):
         payload["rows"] = sorted(payload["rows"], key=lambda item: item["projected"], reverse=True)[:12]
         return payload
 
+    payload["last_synced_at"] = cache.get(cache_synced_key)
     rows_by_key = {}
     for fund in funds:
         fund_id = str(_fund_field(fund, "Id", "id"))
@@ -355,6 +359,16 @@ def funds_dashboard(request):
                 )
             except (NotionAPIError, ValueError) as exc:
                 messages.error(request, f"No se pudo sincronizar Notion: {exc}")
+        elif action == "sync_rindegastos_funds":
+            cache.delete("expenses:funds_dashboard:rindegastos_funds:v1")
+            cache.delete("expenses:funds_dashboard:rindegastos_funds_synced_at:v1")
+            try:
+                funds = RindegastosClient().get_funds()
+                cache.set("expenses:funds_dashboard:rindegastos_funds:v1", funds, 5 * 60)
+                cache.set("expenses:funds_dashboard:rindegastos_funds_synced_at:v1", timezone.now(), 5 * 60)
+                messages.success(request, f"Fondos Rindegastos sincronizados: {len(funds)} fondos leídos.")
+            except (RindegastosAPIError, RequestException) as exc:
+                messages.error(request, f"No se pudo sincronizar Rindegastos: {exc}")
         return redirect("funds_dashboard")
 
     base_logs = (
@@ -418,6 +432,7 @@ def funds_dashboard(request):
     query_without_page = request.GET.copy()
     query_without_page.pop("page", None)
     filtered_total_amount = logs.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    notion_last_synced_at = base_logs.aggregate(value=Max("last_synced_at"))["value"]
     funds_chart = _funds_chart_context(base_logs)
     context = {
         "page_obj": page_obj,
@@ -435,6 +450,7 @@ def funds_dashboard(request):
         "status_counts": status_counts,
         "mapping_count": EmployeeFundMapping.objects.filter(is_active=True).count(),
         "filtered_total_amount": filtered_total_amount,
+        "notion_last_synced_at": notion_last_synced_at,
         "query_without_page": query_without_page.urlencode(),
         "funds_chart": funds_chart,
         "notion_configured": bool(

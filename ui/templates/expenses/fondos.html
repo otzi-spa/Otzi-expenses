@@ -83,7 +83,11 @@
   .pill-sync-default { background: #e7f1ff; color: #084298; }
 
   .funds-chart {
-    min-height: 320px;
+    min-height: 360px;
+  }
+
+  .funds-chart-select {
+    min-height: 118px;
   }
 
   .funds-filter-grid {
@@ -115,7 +119,14 @@
 <div class="app-toolbar py-3">
   <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
     <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Fondos</h1>
-    <div class="d-flex align-items-center gap-2 ms-auto">
+    <div class="d-flex align-items-center gap-2 ms-auto flex-wrap justify-content-end">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_rindegastos_funds">
+        <button type="submit" class="btn btn-light-primary">
+          Sincronizar Rindegastos
+        </button>
+      </form>
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="sync_notion_funds">
@@ -144,6 +155,21 @@
 {% endif %}
 
 <div class="funds-shell p-4 p-lg-5 mb-5">
+  <div class="d-flex flex-column flex-xl-row justify-content-between gap-3 mb-4">
+    <div>
+      <div class="text-muted fw-semibold fs-8 text-uppercase">Ultima sincronizacion Notion</div>
+      <div class="fw-bold text-gray-900">
+        {% if notion_last_synced_at %}{{ notion_last_synced_at|date:"d/m/Y H:i" }}{% else %}Sin sincronizacion{% endif %}
+      </div>
+    </div>
+    <div>
+      <div class="text-muted fw-semibold fs-8 text-uppercase">Ultima lectura Rindegastos</div>
+      <div class="fw-bold text-gray-900">
+        {% if funds_chart.last_synced_at %}{{ funds_chart.last_synced_at|date:"d/m/Y H:i" }}{% else %}Sin lectura reciente{% endif %}
+      </div>
+    </div>
+  </div>
+
   <div class="funds-panel mb-4">
     <div class="row g-0">
       <div class="col-md-3 funds-kpi p-4">
@@ -170,7 +196,7 @@
   </div>
 
   <div class="funds-panel p-4 mb-4">
-    <div class="d-flex flex-column flex-lg-row gap-4">
+    <div class="d-flex flex-column flex-xl-row gap-4">
       <div class="flex-grow-1">
         <div class="fw-bold text-gray-900 mb-1">Resumen de fondos</div>
         <div class="text-muted fs-8">Depositos, gastos, saldo y proyeccion pendiente por fondo.</div>
@@ -178,9 +204,16 @@
         <div class="text-warning fs-8 mt-2">{{ funds_chart.error }}</div>
         {% endif %}
       </div>
-      <div class="d-flex gap-2 flex-wrap">
-        <span class="notion-pill pill-fund-blue">Rindegastos</span>
-        <span class="notion-pill pill-status-yellow">Proyectado</span>
+      <div class="d-flex flex-column flex-md-row gap-3 align-items-md-end">
+        <div style="min-width: 320px;">
+          <label class="form-label">Fondos del grafico</label>
+          <select id="fundsChartSelector" class="form-select funds-chart-select" multiple size="4"></select>
+          <div class="text-muted fs-8 mt-1">Sin seleccion muestra todos los fondos principales.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap pb-md-2">
+          <button type="button" id="fundsChartSelectAll" class="btn btn-sm btn-light">Todos</button>
+          <button type="button" id="fundsChartClear" class="btn btn-sm btn-light">Limpiar</button>
+        </div>
       </div>
     </div>
     <div id="fundsChart" class="funds-chart mt-4"></div>
@@ -328,20 +361,19 @@
         </tbody>
       </table>
     </div>
-  </div>
-  {% if page_obj.paginator.num_pages > 1 %}
-  <div class="d-flex justify-content-between align-items-center px-5 py-4 border-top border-gray-200">
-    <span class="text-muted fs-8">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
-    <div class="d-flex gap-2">
-      {% if page_obj.has_previous %}
-      <a class="btn btn-sm btn-light" href="?page={{ page_obj.previous_page_number }}{% if query_without_page %}&{{ query_without_page }}{% endif %}">Anterior</a>
-      {% endif %}
-      {% if page_obj.has_next %}
-      <a class="btn btn-sm btn-light" href="?page={{ page_obj.next_page_number }}{% if query_without_page %}&{{ query_without_page }}{% endif %}">Siguiente</a>
-      {% endif %}
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="d-flex justify-content-between align-items-center px-5 py-4 border-top border-gray-200">
+      <span class="text-muted fs-8">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+      <div class="d-flex gap-2">
+        {% if page_obj.has_previous %}
+        <a class="btn btn-sm btn-light" href="?page={{ page_obj.previous_page_number }}{% if query_without_page %}&{{ query_without_page }}{% endif %}">Anterior</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a class="btn btn-sm btn-light" href="?page={{ page_obj.next_page_number }}{% if query_without_page %}&{{ query_without_page }}{% endif %}">Siguiente</a>
+        {% endif %}
+      </div>
     </div>
-  </div>
-  {% endif %}
+    {% endif %}
   </div>
 </div>
 {% endblock %}
@@ -353,6 +385,10 @@
   (function () {
     var el = document.getElementById("fundsChart");
     if (!el) return;
+    var selector = document.getElementById("fundsChartSelector");
+    var selectAllButton = document.getElementById("fundsChartSelectAll");
+    var clearButton = document.getElementById("fundsChartClear");
+    var chart = null;
 
     function formatCurrency(value) {
       return new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(value || 0);
@@ -370,52 +406,119 @@
       return;
     }
 
-    var categories = rows.map(function (row) {
-      var title = row.title || row.fund_id || "Sin fondo";
-      return title.length > 28 ? title.slice(0, 28) + "..." : title;
+    function rowKey(row, index) {
+      return (row.fund_id || row.title || "fund") + ":" + index;
+    }
+
+    rows.forEach(function (row, index) {
+      row._chartKey = rowKey(row, index);
     });
 
-    var options = {
-      series: [
-        { name: "Depositos", data: rows.map(function (row) { return row.deposits || 0; }) },
-        { name: "Gastos", data: rows.map(function (row) { return row.withdrawals || 0; }) },
-        { name: "Saldo", data: rows.map(function (row) { return row.balance || 0; }) },
-        { name: "Proyectado", data: rows.map(function (row) { return row.projected || 0; }) }
-      ],
-      chart: {
-        type: "bar",
-        height: 330,
-        toolbar: { show: false },
-        stacked: false
-      },
-      colors: ["#6c9bd2", "#d86f68", "#73a580", "#d6a84f"],
-      plotOptions: {
-        bar: {
-          horizontal: true,
-          borderRadius: 3,
-          barHeight: "64%"
-        }
-      },
-      dataLabels: { enabled: false },
-      grid: { borderColor: "#eceae5" },
-      xaxis: {
-        categories: categories,
-        labels: {
-          formatter: function (value) { return "$" + formatCurrency(value); }
-        }
-      },
-      tooltip: {
-        y: {
-          formatter: function (value) { return "CLP " + formatCurrency(value); }
-        }
-      },
-      legend: {
-        position: "top",
-        horizontalAlign: "left"
-      }
-    };
+    if (selector) {
+      selector.innerHTML = rows.map(function (row) {
+        var title = row.title || row.fund_id || "Sin fondo";
+        var suffix = row.fund_id ? " · ID " + row.fund_id : "";
+        return '<option value="' + row._chartKey + '">' + title + suffix + '</option>';
+      }).join("");
+    }
 
-    new ApexCharts(el, options).render();
+    function selectedRows() {
+      if (!selector) return rows;
+      var selected = Array.prototype.slice.call(selector.selectedOptions || []).map(function (option) {
+        return option.value;
+      });
+      if (!selected.length) return rows;
+      return rows.filter(function (row) { return selected.indexOf(row._chartKey) !== -1; });
+    }
+
+    function shortLabel(row) {
+      var title = row.title || row.fund_id || "Sin fondo";
+      if (row.fund_id && title.indexOf(row.fund_id) === -1) {
+        title = row.fund_id + " - " + title;
+      }
+      return title.length > 22 ? title.slice(0, 22) + "..." : title;
+    }
+
+    function renderChart() {
+      var visibleRows = selectedRows();
+      var categories = visibleRows.map(shortLabel);
+      var height = Math.max(360, Math.min(520, 300 + visibleRows.length * 12));
+      var options = {
+        series: [
+          { name: "Depositos", data: visibleRows.map(function (row) { return row.deposits || 0; }) },
+          { name: "Gastos", data: visibleRows.map(function (row) { return row.withdrawals || 0; }) },
+          { name: "Saldo", data: visibleRows.map(function (row) { return row.balance || 0; }) },
+          { name: "Proyectado", data: visibleRows.map(function (row) { return row.projected || 0; }) }
+        ],
+        chart: {
+          type: "bar",
+          height: height,
+          toolbar: { show: false },
+          stacked: false
+        },
+        colors: ["#6c9bd2", "#d86f68", "#73a580", "#d6a84f"],
+        plotOptions: {
+          bar: {
+            horizontal: false,
+            borderRadius: 3,
+            columnWidth: "58%"
+          }
+        },
+        dataLabels: { enabled: false },
+        grid: { borderColor: "#eceae5" },
+        xaxis: {
+          categories: categories,
+          labels: {
+            rotate: -35,
+            rotateAlways: true,
+            trim: false,
+            style: { fontSize: "11px" }
+          }
+        },
+        yaxis: {
+          labels: {
+            formatter: function (value) { return "$" + formatCurrency(value); }
+          }
+        },
+        tooltip: {
+          x: {
+            formatter: function (_value, opts) {
+              var row = visibleRows[opts.dataPointIndex] || {};
+              return row.title || row.fund_id || "Sin fondo";
+            }
+          },
+          y: {
+            formatter: function (value) { return "CLP " + formatCurrency(value); }
+          }
+        },
+        legend: {
+          position: "top",
+          horizontalAlign: "left"
+        }
+      };
+
+      if (chart) chart.destroy();
+      chart = new ApexCharts(el, options);
+      chart.render();
+    }
+
+    if (selector) {
+      selector.addEventListener("change", renderChart);
+    }
+    if (selectAllButton && selector) {
+      selectAllButton.addEventListener("click", function () {
+        Array.prototype.slice.call(selector.options).forEach(function (option) { option.selected = true; });
+        renderChart();
+      });
+    }
+    if (clearButton && selector) {
+      clearButton.addEventListener("click", function () {
+        Array.prototype.slice.call(selector.options).forEach(function (option) { option.selected = false; });
+        renderChart();
+      });
+    }
+
+    renderChart();
   })();
 </script>
 {% endblock %}
