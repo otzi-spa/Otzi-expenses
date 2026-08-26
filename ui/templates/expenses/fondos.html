@@ -580,6 +580,22 @@
       return new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(value || 0);
     }
 
+    function formatCompactCurrency(value) {
+      var amount = Number(value || 0);
+      var absAmount = Math.abs(amount);
+      var sign = amount < 0 ? "-" : "";
+      if (absAmount >= 1000000) {
+        return "$" + sign + new Intl.NumberFormat("es-CL", {
+          maximumFractionDigits: 1,
+          minimumFractionDigits: absAmount < 10000000 ? 1 : 0
+        }).format(absAmount / 1000000) + "M";
+      }
+      if (absAmount >= 1000) {
+        return "$" + sign + new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(absAmount / 1000) + "K";
+      }
+      return "$" + sign + formatCurrency(absAmount);
+    }
+
     function escapeHtml(value) {
       return String(value || "").replace(/[&<>"']/g, function (char) {
         return {
@@ -717,26 +733,20 @@
 
     function colorBalanceDataLabels(visibleRows) {
       window.setTimeout(function () {
-        var labels = el.querySelectorAll('.apexcharts-series[seriesName="Saldo"] .apexcharts-datalabel');
-        if (!labels.length) {
-          labels = el.querySelectorAll(".apexcharts-datalabel");
-        }
+        var labels = el.querySelectorAll(".apexcharts-datalabel");
         labels.forEach(function (label, index) {
           var row = visibleRows[index] || {};
           var color = (row.balance || 0) < 0 ? "#b42318" : "#4c735c";
           label.setAttribute("fill", "#ffffff");
           label.style.fill = "#ffffff";
-          var parent = label.parentNode;
-          var rect = null;
-          if (parent) {
-            rect = parent.querySelector("rect");
-          }
-          if (!rect && label.previousElementSibling && label.previousElementSibling.tagName.toLowerCase() === "rect") {
-            rect = label.previousElementSibling;
-          }
+          var group = label.closest("g");
+          if (!group) return;
+          var rect = group.querySelector("rect");
           if (rect) {
             rect.setAttribute("fill", color);
             rect.setAttribute("stroke", color);
+            rect.setAttribute("rx", "4");
+            rect.setAttribute("ry", "4");
           }
         });
       }, 0);
@@ -782,11 +792,13 @@
         dataLabels: {
           enabled: true,
           enabledOnSeries: [2],
-          formatter: function (value) { return "$" + formatCurrency(value); },
-          style: { fontSize: "10px", colors: ["#ffffff"] },
+          formatter: formatCompactCurrency,
+          offsetY: -6,
+          style: { fontSize: "9px", fontWeight: 700, colors: ["#ffffff"] },
           background: {
             enabled: true,
             borderRadius: 3,
+            padding: 3,
             opacity: 0.85
           }
         },
