@@ -1,4 +1,5 @@
 import hashlib
+import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -24,6 +25,8 @@ class NotionFundRecord:
     currency: str
     payment_date: object
     cost_center: str
+    rindegastos_fund_id: str
+    notion_rindegastos_fund: str
     raw_payload: dict
     normalized_payload: dict
 
@@ -140,6 +143,7 @@ class NotionFundsSync:
             "record_id": settings.NOTION_FUNDS_REMITTANCE_PROPERTY,
             "cost_center": settings.NOTION_FUNDS_COST_CENTER_PROPERTY,
             "notion_status": settings.NOTION_FUNDS_STATUS_PROPERTY,
+            "rindegastos_fund": settings.NOTION_FUNDS_RINDEGASTOS_FUND_PROPERTY,
         }
         found = {}
         for label, configured_name in configured.items():
@@ -175,6 +179,11 @@ class NotionFundsSync:
         notion_status = _property_text(_get_property(properties, settings.NOTION_FUNDS_STATUS_PROPERTY))
         record_id = _property_text(_get_property(properties, settings.NOTION_FUNDS_REMITTANCE_PROPERTY))
         cost_center = _property_text(_get_property(properties, settings.NOTION_FUNDS_COST_CENTER_PROPERTY))
+        notion_rindegastos_fund = self._property_text_or_relation_names(
+            properties,
+            settings.NOTION_FUNDS_RINDEGASTOS_FUND_PROPERTY,
+        )
+        rindegastos_fund_id = _extract_fund_id(notion_rindegastos_fund)
         normalized = {
             "page_id": page.get("id") or "",
             "url": page.get("url") or "",
@@ -187,6 +196,8 @@ class NotionFundsSync:
             "currency": currency,
             "payment_date": payment_date.isoformat() if payment_date else "",
             "cost_center": cost_center,
+            "rindegastos_fund_id": rindegastos_fund_id,
+            "notion_rindegastos_fund": notion_rindegastos_fund,
         }
         return NotionFundRecord(
             page_id=page.get("id") or "",
@@ -200,6 +211,8 @@ class NotionFundsSync:
             currency=currency,
             payment_date=payment_date,
             cost_center=cost_center,
+            rindegastos_fund_id=rindegastos_fund_id,
+            notion_rindegastos_fund=notion_rindegastos_fund,
             raw_payload=page,
             normalized_payload=normalized,
         )
@@ -223,7 +236,8 @@ class NotionFundsSync:
             "idempotency_key": self.idempotency_key(record),
             "mapping": mapping,
             "rindegastos_user": mapping.rindegastos_user if mapping else None,
-            "rindegastos_fund_id": mapping.rindegastos_fund_id if mapping else "",
+            "rindegastos_fund_id": record.rindegastos_fund_id or (mapping.rindegastos_fund_id if mapping else ""),
+            "notion_rindegastos_fund": record.notion_rindegastos_fund,
             "notion_raw_payload": record.raw_payload,
             "normalized_payload": record.normalized_payload,
             "last_error": error,
@@ -267,9 +281,9 @@ class NotionFundsSync:
             errors.append("Monto vacío o menor/igual a cero.")
         if not record.payment_date:
             errors.append("Fecha de pago vacía o inválida.")
-        if not mapping:
+        if not mapping and not record.rindegastos_fund_id:
             pending.append("No existe mapeo activo beneficiario -> Rindegastos.")
-        elif not mapping.rindegastos_user and not mapping.rindegastos_fund_id:
+        elif mapping and not mapping.rindegastos_user and not mapping.rindegastos_fund_id and not record.rindegastos_fund_id:
             pending.append("El mapeo no tiene usuario ni fondo Rindegastos.")
         if errors:
             return NotionFundSyncLog.STATUS_ERROR, " ".join(errors)
@@ -305,6 +319,12 @@ class NotionFundsSync:
                 names.append(name)
         return ", ".join(names)
 
+    def _property_text_or_relation_names(self, properties, property_name):
+        prop = _get_property(properties, property_name)
+        if (prop or {}).get("type") == "relation":
+            return self._resolve_relation_names(prop)
+        return _property_text(prop)
+
 
 def _property_text(prop):
     if not prop:
@@ -336,6 +356,17 @@ def _property_text(prop):
     if prop_type == "checkbox":
         return "true" if value else "false"
     return ""
+
+
+def _extract_fund_id(value):
+    text = (value or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"\bID\s*[:#-]?\s*(\d{3,})\b", text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    match = re.search(r"\b(\d{3,})\b", text)
+    return match.group(1) if match else ""
 
 
 def _property_relation_ids(prop):

@@ -162,8 +162,7 @@ def _is_admin_user(user):
 
 
 def _can_access_funds(user):
-    allowed_emails = {email.strip().lower() for email in getattr(settings, "FUNDS_ALLOWED_USER_EMAILS", []) if email}
-    return bool(user.is_authenticated and (user.email or "").strip().lower() in allowed_emails)
+    return bool(user.is_authenticated and user.is_superuser)
 
 
 def _decimal_or_zero(value):
@@ -414,6 +413,8 @@ def funds_dashboard(request):
     date_from_filter = request.GET.get("date_from", "").strip()
     date_to_filter = request.GET.get("date_to", "").strip()
     search_query = request.GET.get("q", "").strip()
+    sort_key = request.GET.get("sort", "updated_at").strip()
+    sort_dir = request.GET.get("dir", "desc").strip().lower()
     if local_status_filter:
         logs = logs.filter(local_status=local_status_filter)
     if notion_status_filter:
@@ -435,7 +436,42 @@ def funds_dashboard(request):
             | Q(notion_record_id__icontains=search_query)
             | Q(notion_status__icontains=search_query)
             | Q(cost_center__icontains=search_query)
+            | Q(notion_rindegastos_fund__icontains=search_query)
+            | Q(rindegastos_fund_id__icontains=search_query)
         )
+
+    sort_fields = {
+        "remesa": "notion_record_id",
+        "beneficiary": "beneficiary_name",
+        "rut": "beneficiary_rut",
+        "amount": "amount",
+        "date": "payment_date",
+        "cost_center": "cost_center",
+        "fund": "notion_rindegastos_fund",
+        "notion_status": "notion_status",
+        "sync": "local_status",
+        "updated_at": "updated_at",
+    }
+    if sort_key not in sort_fields:
+        sort_key = "updated_at"
+    sort_dir = "asc" if sort_dir == "asc" else "desc"
+    sort_field = sort_fields[sort_key]
+    sort_prefix = "" if sort_dir == "asc" else "-"
+    secondary_sort = "notion_record_id" if sort_field == "updated_at" else "-updated_at"
+    logs = logs.order_by(f"{sort_prefix}{sort_field}", secondary_sort)
+
+    sort_query = request.GET.copy()
+    sort_query.pop("page", None)
+    sort_links = {}
+    for key in sort_fields:
+        params = sort_query.copy()
+        params["sort"] = key
+        params["dir"] = "desc" if sort_key == key and sort_dir == "asc" else "asc"
+        sort_links[key] = {
+            "url": f"?{params.urlencode()}",
+            "active": sort_key == key,
+            "indicator": "↑" if sort_key == key and sort_dir == "asc" else "↓" if sort_key == key else "",
+        }
 
     paginator = Paginator(logs, 50)
     page_obj = paginator.get_page(request.GET.get("page"))
@@ -474,6 +510,9 @@ def funds_dashboard(request):
         "date_from_filter": date_from_filter,
         "date_to_filter": date_to_filter,
         "search_query": search_query,
+        "sort_key": sort_key,
+        "sort_dir": sort_dir,
+        "sort_links": sort_links,
         "status_choices": NotionFundSyncLog.STATUS_CHOICES,
         "notion_status_options": notion_status_options,
         "cost_center_options": cost_center_options,

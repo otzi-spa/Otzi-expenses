@@ -544,6 +544,7 @@ class NotionFundSyncLog(models.Model):
         related_name="notion_fund_sync_logs",
     )
     rindegastos_fund_id = models.CharField(max_length=255, blank=True)
+    notion_rindegastos_fund = models.CharField(max_length=255, blank=True)
     rindegastos_deposit_id = models.CharField(max_length=255, blank=True)
     notion_raw_payload = models.JSONField(default=dict, blank=True)
     normalized_payload = models.JSONField(default=dict, blank=True)
