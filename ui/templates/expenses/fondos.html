@@ -2,6 +2,115 @@
 {% load l10n %}
 {% block page_title %}Fondos{% endblock %}
 
+{% block extra_css %}
+{{ block.super }}
+<style>
+  .funds-shell {
+    background: #f7f7f5;
+    border: 1px solid #e7e5df;
+    border-radius: 8px;
+  }
+
+  .funds-panel {
+    background: #ffffff;
+    border: 1px solid #e6e4de;
+    border-radius: 8px;
+  }
+
+  .funds-kpi {
+    border-right: 1px solid #eceae5;
+    min-height: 86px;
+  }
+
+  .funds-kpi:last-child {
+    border-right: 0;
+  }
+
+  .notion-table {
+    color: #37352f;
+  }
+
+  .notion-table thead th {
+    background: #fbfaf8;
+    border-color: #e6e4de !important;
+    color: #6b6a65;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  .notion-table tbody td {
+    border-color: #efede8 !important;
+    color: #37352f;
+    font-size: 0.86rem;
+    vertical-align: top;
+  }
+
+  .notion-table tbody tr:hover {
+    background: #fbfaf7;
+  }
+
+  .notion-pill {
+    align-items: center;
+    border-radius: 4px;
+    display: inline-flex;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.2;
+    max-width: 220px;
+    min-height: 22px;
+    overflow: hidden;
+    padding: 3px 8px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pill-work-key { background: #f4d2e3; color: #7a3b5a; }
+  .pill-cost-purple { background: #e8def8; color: #5d4777; }
+  .pill-cost-brown { background: #ead8c6; color: #76553b; }
+  .pill-cost-gray { background: #e7e4df; color: #5f5b53; }
+  .pill-fund-blue { background: #d9e9f8; color: #275f91; }
+  .pill-fund-pink { background: #f1d5e4; color: #7a3b5a; }
+  .pill-company { background: #e2b98e; color: #613d1f; }
+  .pill-status-blue { background: #d8e9fb; color: #1f5f99; }
+  .pill-status-yellow { background: #f6e4b8; color: #7a5b12; }
+  .pill-status-green { background: #d9eadf; color: #2f6f45; }
+  .pill-status-gray { background: #e8e6e1; color: #5f5b53; }
+  .pill-sync-error { background: #f8d7da; color: #842029; }
+  .pill-sync-ready { background: #d1e7dd; color: #0f5132; }
+  .pill-sync-pending { background: #fff3cd; color: #664d03; }
+  .pill-sync-default { background: #e7f1ff; color: #084298; }
+
+  .funds-chart {
+    min-height: 320px;
+  }
+
+  .funds-filter-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(240px, 1.5fr) repeat(5, minmax(150px, 1fr)) minmax(120px, 0.7fr);
+  }
+
+  @media (max-width: 1199.98px) {
+    .funds-filter-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 767.98px) {
+    .funds-filter-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .funds-kpi {
+      border-bottom: 1px solid #eceae5;
+      border-right: 0;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block toolbar %}
 <div class="app-toolbar py-3">
   <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
@@ -34,78 +143,130 @@
 </div>
 {% endif %}
 
-<div class="row g-4 mb-6">
-  <div class="col-md-3">
-    <div class="card">
-      <div class="card-body py-4">
-        <div class="text-muted fw-semibold">Configuración</div>
-        <div class="fs-5 fw-bold">{% if notion_configured %}Lista{% else %}Pendiente{% endif %}</div>
-        <div class="text-muted fs-8">{% if notion_uses_data_source %}Data source API{% else %}Database API legado{% endif %}</div>
+<div class="funds-shell p-4 p-lg-5 mb-5">
+  <div class="funds-panel mb-4">
+    <div class="row g-0">
+      <div class="col-md-3 funds-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Depositos Rindegastos</div>
+        <div class="fs-3 fw-bold text-gray-900">CLP {{ funds_chart.totals.deposits|floatformat:0|localize }}</div>
+        <div class="text-muted fs-8">{% if funds_chart.available %}API oficial{% else %}Sin lectura API{% endif %}</div>
+      </div>
+      <div class="col-md-3 funds-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Gastos Rindegastos</div>
+        <div class="fs-3 fw-bold text-gray-900">CLP {{ funds_chart.totals.withdrawals|floatformat:0|localize }}</div>
+        <div class="text-muted fs-8">Cargos aprobados contra fondos</div>
+      </div>
+      <div class="col-md-3 funds-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Saldo Rindegastos</div>
+        <div class="fs-3 fw-bold text-gray-900">CLP {{ funds_chart.totals.balance|floatformat:0|localize }}</div>
+        <div class="text-muted fs-8">Disponible actual</div>
+      </div>
+      <div class="col-md-3 funds-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Proyectado Expenses</div>
+        <div class="fs-3 fw-bold text-gray-900">CLP {{ funds_chart.totals.projected|floatformat:0|localize }}</div>
+        <div class="text-muted fs-8">Notion local aun no sincronizado</div>
       </div>
     </div>
   </div>
-  <div class="col-md-3">
-    <div class="card">
-      <div class="card-body py-4">
-        <div class="text-muted fw-semibold">Filtro Notion</div>
-        <div class="fs-7 fw-bold">{{ notion_work_key_property }}</div>
-        <div class="text-muted fs-8">{{ notion_work_key_value }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="card">
-      <div class="card-body py-4">
-        <div class="text-muted fw-semibold">Mapeos activos</div>
-        <div class="fs-3 fw-bold">{{ mapping_count }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="card">
-      <div class="card-body py-4">
-        <div class="text-muted fw-semibold">Registros locales</div>
-        <div class="fs-3 fw-bold">{{ page_obj.paginator.count }}</div>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div class="card mb-5">
-  <div class="card-body">
-    <form method="get" class="row g-3 align-items-end">
-      <div class="col-md-5">
+  <div class="funds-panel p-4 mb-4">
+    <div class="d-flex flex-column flex-lg-row gap-4">
+      <div class="flex-grow-1">
+        <div class="fw-bold text-gray-900 mb-1">Resumen de fondos</div>
+        <div class="text-muted fs-8">Depositos, gastos, saldo y proyeccion pendiente por fondo.</div>
+        {% if funds_chart.error %}
+        <div class="text-warning fs-8 mt-2">{{ funds_chart.error }}</div>
+        {% endif %}
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <span class="notion-pill pill-fund-blue">Rindegastos</span>
+        <span class="notion-pill pill-status-yellow">Proyectado</span>
+      </div>
+    </div>
+    <div id="fundsChart" class="funds-chart mt-4"></div>
+  </div>
+
+  <div class="funds-panel p-4 mb-4">
+    <form method="get" class="funds-filter-grid align-items-end">
+      <div>
         <label class="form-label">Buscar</label>
         <input type="search" name="q" value="{{ search_query }}" class="form-control" placeholder="Beneficiario, RUT, remesa u obra">
       </div>
-      <div class="col-md-4">
-        <label class="form-label">Estado</label>
-        <select name="status" class="form-select">
+      <div>
+        <label class="form-label">Estado Notion</label>
+        <select name="notion_status" class="form-select">
           <option value="">Todos</option>
-          {% for value,label in status_choices %}
-          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% for value in notion_status_options %}
+          <option value="{{ value }}" {% if notion_status_filter == value %}selected{% endif %}>{{ value }}</option>
           {% endfor %}
         </select>
       </div>
-      <div class="col-md-3">
+      <div>
+        <label class="form-label">Sync</label>
+        <select name="status" class="form-select">
+          <option value="">Todos</option>
+          {% for value,label in status_choices %}
+          <option value="{{ value }}" {% if local_status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Obra/Centro</label>
+        <select name="cost_center" class="form-select">
+          <option value="">Todas</option>
+          {% for value in cost_center_options %}
+          <option value="{{ value }}" {% if cost_center_filter == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Fondo</label>
+        <select name="fund_id" class="form-select">
+          <option value="">Todos</option>
+          {% for value in fund_options %}
+          <option value="{{ value }}" {% if fund_filter == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Desde</label>
+        <input type="date" name="date_from" value="{{ date_from_filter }}" class="form-control">
+      </div>
+      <div>
         <button type="submit" class="btn btn-light-primary w-100">Filtrar</button>
+      </div>
+      <div>
+        <label class="form-label">Hasta</label>
+        <input type="date" name="date_to" value="{{ date_to_filter }}" class="form-control">
+      </div>
+      <div class="d-flex align-items-end">
+        <a class="btn btn-light w-100" href="{% url 'funds_dashboard' %}">Limpiar</a>
       </div>
     </form>
   </div>
-</div>
 
-<div class="card">
-  <div class="card-body p-0">
+  <div class="funds-panel">
+    <div class="d-flex justify-content-between align-items-center px-5 py-4 border-bottom border-gray-200">
+      <div>
+        <div class="fw-bold text-gray-900">Remesas Notion</div>
+        <div class="text-muted fs-8">{{ page_obj.paginator.count }} registros filtrados · CLP {{ filtered_total_amount|floatformat:0|localize }}</div>
+      </div>
+      <div class="d-none d-md-flex gap-2">
+        <span class="notion-pill pill-work-key">{{ notion_work_key_value }}</span>
+        <span class="notion-pill pill-status-gray">{{ notion_work_key_property }}</span>
+      </div>
+    </div>
     <div class="table-responsive">
-      <table class="table table-row-bordered table-row-gray-200 align-middle mb-0">
+      <table class="table table-row-bordered table-row-gray-200 align-middle mb-0 notion-table">
         <thead>
-          <tr class="fw-bold text-muted">
+          <tr>
             <th class="ps-6">Remesa</th>
             <th>Beneficiario</th>
             <th>RUT</th>
             <th>Monto</th>
             <th>Fecha</th>
             <th>Obra/Centro</th>
+            <th>Fondo</th>
             <th>Estado Notion</th>
             <th>Sync</th>
             <th>Error</th>
@@ -118,7 +279,7 @@
             <td class="ps-6 fw-semibold">{{ log.notion_record_id|default:"-" }}</td>
             <td>{{ log.beneficiary_name|default:"-" }}</td>
             <td>{{ log.beneficiary_rut|default:"-" }}</td>
-            <td>
+            <td class="fw-semibold text-nowrap">
               {% if log.amount %}
                 {{ log.currency }} {{ log.amount|floatformat:0|localize }}
               {% else %}
@@ -126,9 +287,30 @@
               {% endif %}
             </td>
             <td>{{ log.payment_date|date:"d/m/Y"|default:"-" }}</td>
-            <td>{{ log.cost_center|default:"-" }}</td>
-            <td>{{ log.notion_status|default:"-" }}</td>
-            <td><span class="badge badge-light-primary">{{ log.get_local_status_display }}</span></td>
+            <td>
+              {% if log.cost_center %}
+              <span class="notion-pill {% if 'Maquinaria' in log.cost_center %}pill-cost-purple{% elif 'Antofagasta' in log.cost_center %}pill-cost-brown{% else %}pill-cost-gray{% endif %}">{{ log.cost_center }}</span>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>
+              {% if log.rindegastos_fund_id %}
+              <span class="notion-pill {% if log.rindegastos_fund_id == '787141' %}pill-fund-pink{% else %}pill-fund-blue{% endif %}">ID: {{ log.rindegastos_fund_id }}</span>
+              {% else %}
+              <span class="notion-pill pill-status-gray">Sin mapeo</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if log.notion_status %}
+              <span class="notion-pill {% if 'sincronizado' in log.notion_status|lower %}pill-status-yellow{% elif 'Transferido' in log.notion_status %}pill-status-blue{% elif 'Aprobado' in log.notion_status %}pill-status-green{% else %}pill-status-gray{% endif %}">{{ log.notion_status }}</span>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>
+              <span class="notion-pill {% if log.local_status == 'error' %}pill-sync-error{% elif log.local_status == 'ready' or log.local_status == 'rindegastos_ok' or log.local_status == 'notion_ok' %}pill-sync-ready{% elif log.local_status == 'pending_mapping' or log.local_status == 'pending' %}pill-sync-pending{% else %}pill-sync-default{% endif %}">{{ log.get_local_status_display }}</span>
+            </td>
             <td class="text-muted fs-8" style="max-width: 360px;">{{ log.last_error|default:"" }}</td>
             <td class="text-end pe-6">
               {% if log.notion_url %}
@@ -140,7 +322,7 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="10" class="text-center text-muted py-10">Todavía no hay registros sincronizados.</td>
+            <td colspan="11" class="text-center text-muted py-10">Todavía no hay registros sincronizados.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -148,17 +330,92 @@
     </div>
   </div>
   {% if page_obj.paginator.num_pages > 1 %}
-  <div class="card-footer d-flex justify-content-between align-items-center">
+  <div class="d-flex justify-content-between align-items-center px-5 py-4 border-top border-gray-200">
     <span class="text-muted fs-8">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
     <div class="d-flex gap-2">
       {% if page_obj.has_previous %}
-      <a class="btn btn-sm btn-light" href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}&q={{ search_query }}">Anterior</a>
+      <a class="btn btn-sm btn-light" href="?page={{ page_obj.previous_page_number }}{% if query_without_page %}&{{ query_without_page }}{% endif %}">Anterior</a>
       {% endif %}
       {% if page_obj.has_next %}
-      <a class="btn btn-sm btn-light" href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}&q={{ search_query }}">Siguiente</a>
+      <a class="btn btn-sm btn-light" href="?page={{ page_obj.next_page_number }}{% if query_without_page %}&{{ query_without_page }}{% endif %}">Siguiente</a>
       {% endif %}
     </div>
   </div>
   {% endif %}
+  </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+{{ funds_chart|json_script:"funds-chart-data" }}
+<script>
+  (function () {
+    var el = document.getElementById("fundsChart");
+    if (!el) return;
+
+    function formatCurrency(value) {
+      return new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    if (!window.ApexCharts) {
+      el.innerHTML = '<div class="text-muted">ApexCharts no disponible</div>';
+      return;
+    }
+
+    var payload = JSON.parse(document.getElementById("funds-chart-data").textContent || "{}");
+    var rows = payload.rows || [];
+    if (!rows.length) {
+      el.innerHTML = '<div class="text-muted py-10 text-center">Sin datos de fondos para graficar</div>';
+      return;
+    }
+
+    var categories = rows.map(function (row) {
+      var title = row.title || row.fund_id || "Sin fondo";
+      return title.length > 28 ? title.slice(0, 28) + "..." : title;
+    });
+
+    var options = {
+      series: [
+        { name: "Depositos", data: rows.map(function (row) { return row.deposits || 0; }) },
+        { name: "Gastos", data: rows.map(function (row) { return row.withdrawals || 0; }) },
+        { name: "Saldo", data: rows.map(function (row) { return row.balance || 0; }) },
+        { name: "Proyectado", data: rows.map(function (row) { return row.projected || 0; }) }
+      ],
+      chart: {
+        type: "bar",
+        height: 330,
+        toolbar: { show: false },
+        stacked: false
+      },
+      colors: ["#6c9bd2", "#d86f68", "#73a580", "#d6a84f"],
+      plotOptions: {
+        bar: {
+          horizontal: true,
+          borderRadius: 3,
+          barHeight: "64%"
+        }
+      },
+      dataLabels: { enabled: false },
+      grid: { borderColor: "#eceae5" },
+      xaxis: {
+        categories: categories,
+        labels: {
+          formatter: function (value) { return "$" + formatCurrency(value); }
+        }
+      },
+      tooltip: {
+        y: {
+          formatter: function (value) { return "CLP " + formatCurrency(value); }
+        }
+      },
+      legend: {
+        position: "top",
+        horizontalAlign: "left"
+      }
+    };
+
+    new ApexCharts(el, options).render();
+  })();
+</script>
 {% endblock %}

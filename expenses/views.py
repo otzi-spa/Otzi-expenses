@@ -11,8 +11,9 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Count, Prefetch
+from django.db.models import Count, Prefetch, Sum
 from django.db.models import Max, Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.core.paginator import Paginator
@@ -50,7 +51,7 @@ from requests import RequestException
 from .invoice_tax_calculator import calculate_invoice_taxes
 from .funds_sync import NotionFundsSync
 from .notion_client import NotionAPIError
-from .rindegastos_client import RindegastosAPIError
+from .rindegastos_client import RindegastosAPIError, RindegastosClient
 from .rindegastos_diff_rules import (
     AUTO_APPLY_RULES,
     MANUAL_REVIEW_RULES,
@@ -165,6 +166,125 @@ def _can_access_funds(user):
     return bool(user.is_authenticated and (user.email or "").strip().lower() in allowed_emails)
 
 
+def _decimal_or_zero(value):
+    if value in (None, ""):
+        return Decimal("0")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0")
+
+
+def _money_int(value):
+    return int(_decimal_or_zero(value))
+
+
+def _fund_field(fund, *keys):
+    for key in keys:
+        value = fund.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def _funds_chart_context(local_logs):
+    projected_by_fund = {}
+    projected_logs = local_logs.exclude(notion_status__icontains="sincronizado").exclude(
+        local_status__in=[
+            NotionFundSyncLog.STATUS_RINDEGASTOS_OK,
+            NotionFundSyncLog.STATUS_NOTION_OK,
+            NotionFundSyncLog.STATUS_RINDEGASTOS_OK_NOTION_ERROR,
+        ]
+    )
+    for row in projected_logs.values("rindegastos_fund_id", "cost_center").annotate(total=Sum("amount"), count=Count("id")):
+        fund_id = row["rindegastos_fund_id"] or ""
+        key = fund_id or f"obra:{row['cost_center'] or 'Sin mapeo'}"
+        projected_by_fund[key] = {
+            "fund_id": fund_id,
+            "title": row["cost_center"] or "Sin mapeo",
+            "projected": _money_int(row["total"]),
+            "projected_count": row["count"],
+        }
+
+    payload = {
+        "available": False,
+        "error": "",
+        "totals": {
+            "deposits": 0,
+            "withdrawals": 0,
+            "balance": 0,
+            "projected": sum(item["projected"] for item in projected_by_fund.values()),
+        },
+        "rows": [],
+    }
+
+    cache_key = "expenses:funds_dashboard:rindegastos_funds:v1"
+    funds = cache.get(cache_key)
+    try:
+        if funds is None:
+            funds = RindegastosClient().get_funds()
+            cache.set(cache_key, funds, 5 * 60)
+    except (RindegastosAPIError, RequestException) as exc:
+        payload["error"] = str(exc)
+        for item in projected_by_fund.values():
+            payload["rows"].append(
+                {
+                    "fund_id": item["fund_id"],
+                    "title": item["title"],
+                    "deposits": 0,
+                    "withdrawals": 0,
+                    "balance": 0,
+                    "projected": item["projected"],
+                    "projected_count": item["projected_count"],
+                }
+            )
+        payload["rows"] = sorted(payload["rows"], key=lambda item: item["projected"], reverse=True)[:12]
+        return payload
+
+    rows_by_key = {}
+    for fund in funds:
+        fund_id = str(_fund_field(fund, "Id", "id"))
+        title = str(_fund_field(fund, "Title", "Name", "name", "FundName", "Description") or f"Fondo {fund_id}")
+        deposits = _money_int(_fund_field(fund, "Deposits", "deposits", "ManualDeposit", "manualDeposit"))
+        withdrawals = _money_int(_fund_field(fund, "Withdrawals", "withdrawals", "Charges", "charges"))
+        balance = _money_int(_fund_field(fund, "Balance", "balance", "FinalBalance", "finalBalance"))
+        key = fund_id or title
+        projected = projected_by_fund.get(key, {})
+        rows_by_key[key] = {
+            "fund_id": fund_id,
+            "title": title,
+            "deposits": deposits,
+            "withdrawals": withdrawals,
+            "balance": balance,
+            "projected": projected.get("projected", 0),
+            "projected_count": projected.get("projected_count", 0),
+        }
+
+    for key, item in projected_by_fund.items():
+        if key not in rows_by_key:
+            rows_by_key[key] = {
+                "fund_id": item["fund_id"],
+                "title": item["title"],
+                "deposits": 0,
+                "withdrawals": 0,
+                "balance": 0,
+                "projected": item["projected"],
+                "projected_count": item["projected_count"],
+            }
+
+    rows = list(rows_by_key.values())
+    payload["available"] = True
+    payload["totals"]["deposits"] = sum(row["deposits"] for row in rows)
+    payload["totals"]["withdrawals"] = sum(row["withdrawals"] for row in rows)
+    payload["totals"]["balance"] = sum(row["balance"] for row in rows)
+    payload["rows"] = sorted(
+        rows,
+        key=lambda item: max(item["projected"], item["balance"], item["deposits"], item["withdrawals"]),
+        reverse=True,
+    )[:12]
+    return payload
+
+
 def _can_manage_expenses(user):
     return bool(
         user.is_authenticated
@@ -237,14 +357,32 @@ def funds_dashboard(request):
                 messages.error(request, f"No se pudo sincronizar Notion: {exc}")
         return redirect("funds_dashboard")
 
-    logs = (
+    base_logs = (
         NotionFundSyncLog.objects.select_related("mapping", "rindegastos_user")
         .order_by("-updated_at")
     )
-    status_filter = request.GET.get("status", "").strip()
+    logs = base_logs
+    local_status_filter = request.GET.get("status", "").strip()
+    notion_status_filter = request.GET.get("notion_status", "").strip()
+    cost_center_filter = request.GET.get("cost_center", "").strip()
+    fund_filter = request.GET.get("fund_id", "").strip()
+    date_from_filter = request.GET.get("date_from", "").strip()
+    date_to_filter = request.GET.get("date_to", "").strip()
     search_query = request.GET.get("q", "").strip()
-    if status_filter:
-        logs = logs.filter(local_status=status_filter)
+    if local_status_filter:
+        logs = logs.filter(local_status=local_status_filter)
+    if notion_status_filter:
+        logs = logs.filter(notion_status=notion_status_filter)
+    if cost_center_filter:
+        logs = logs.filter(cost_center=cost_center_filter)
+    if fund_filter:
+        logs = logs.filter(rindegastos_fund_id=fund_filter)
+    date_from = parse_date(date_from_filter)
+    date_to = parse_date(date_to_filter)
+    if date_from:
+        logs = logs.filter(payment_date__gte=date_from)
+    if date_to:
+        logs = logs.filter(payment_date__lte=date_to)
     if search_query:
         logs = logs.filter(
             Q(beneficiary_name__icontains=search_query)
@@ -259,13 +397,46 @@ def funds_dashboard(request):
     status_counts = dict(
         NotionFundSyncLog.objects.values_list("local_status").annotate(total=Count("id"))
     )
+    notion_status_options = list(
+        base_logs.exclude(notion_status="")
+        .values_list("notion_status", flat=True)
+        .distinct()
+        .order_by("notion_status")
+    )
+    cost_center_options = list(
+        base_logs.exclude(cost_center="")
+        .values_list("cost_center", flat=True)
+        .distinct()
+        .order_by("cost_center")
+    )
+    fund_options = list(
+        base_logs.exclude(rindegastos_fund_id="")
+        .values_list("rindegastos_fund_id", flat=True)
+        .distinct()
+        .order_by("rindegastos_fund_id")
+    )
+    query_without_page = request.GET.copy()
+    query_without_page.pop("page", None)
+    filtered_total_amount = logs.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    funds_chart = _funds_chart_context(base_logs)
     context = {
         "page_obj": page_obj,
-        "status_filter": status_filter,
+        "local_status_filter": local_status_filter,
+        "notion_status_filter": notion_status_filter,
+        "cost_center_filter": cost_center_filter,
+        "fund_filter": fund_filter,
+        "date_from_filter": date_from_filter,
+        "date_to_filter": date_to_filter,
         "search_query": search_query,
         "status_choices": NotionFundSyncLog.STATUS_CHOICES,
+        "notion_status_options": notion_status_options,
+        "cost_center_options": cost_center_options,
+        "fund_options": fund_options,
         "status_counts": status_counts,
         "mapping_count": EmployeeFundMapping.objects.filter(is_active=True).count(),
+        "filtered_total_amount": filtered_total_amount,
+        "query_without_page": query_without_page.urlencode(),
+        "funds_chart": funds_chart,
         "notion_configured": bool(
             settings.NOTION_API_KEY and (settings.NOTION_DATA_SOURCE_ID or settings.NOTION_DATABASE_ID)
         ),
