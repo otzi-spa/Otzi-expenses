@@ -50,6 +50,7 @@ from django.utils import timezone
 from requests import RequestException
 from .invoice_tax_calculator import calculate_invoice_taxes
 from .funds_sync import NotionFundsSync
+from .fund_deposit_sync import FundDepositSyncError, inject_notion_remittance_to_rindegastos, user_can_inject_fund_deposits
 from .notion_client import NotionAPIError
 from .rindegastos_client import RindegastosAPIError, RindegastosClient
 from .rindegastos_diff_rules import (
@@ -410,6 +411,19 @@ def funds_dashboard(request):
                 messages.success(request, f"Fondos Rindegastos sincronizados: {len(funds)} fondos leídos.")
             except (RindegastosAPIError, RequestException) as exc:
                 messages.error(request, f"No se pudo sincronizar Rindegastos: {exc}")
+        elif action == "inject_notion_fund":
+            log_id = request.POST.get("log_id")
+            try:
+                log = inject_notion_remittance_to_rindegastos(log_id, request.user)
+                messages.success(
+                    request,
+                    f"{log.notion_record_id} abonada en Rindegastos y cerrada en Notion.",
+                )
+            except (FundDepositSyncError, NotionFundSyncLog.DoesNotExist, ValueError) as exc:
+                messages.error(request, f"No se pudo inyectar la remesa: {exc}")
+        next_url = request.POST.get("next", "")
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+            return redirect(next_url)
         return redirect("funds_dashboard")
 
     base_logs = (
@@ -540,6 +554,7 @@ def funds_dashboard(request):
         "notion_uses_data_source": bool(settings.NOTION_DATA_SOURCE_ID),
         "notion_work_key_property": settings.NOTION_FUNDS_WORK_KEY_PROPERTY,
         "notion_work_key_value": settings.NOTION_FUNDS_WORK_KEY_VALUE,
+        "can_inject_fund_deposits": user_can_inject_fund_deposits(request.user),
     }
     return render(request, "expenses/fondos.html", context)
 

@@ -71,8 +71,16 @@ class NotionClient:
                 break
         return results
 
+    def update_page(self, page_id, properties=None, is_locked=None):
+        payload = {}
+        if properties is not None:
+            payload["properties"] = properties
+        if is_locked is not None:
+            payload["is_locked"] = bool(is_locked)
+        return self._request("PATCH", f"pages/{page_id}", payload=payload)
+
     def update_page_properties(self, page_id, properties):
-        return self._request("PATCH", f"pages/{page_id}", payload={"properties": properties})
+        return self.update_page(page_id, properties=properties)
 
     def retrieve_page(self, page_id):
         return self._request("GET", f"pages/{page_id}")

@@ -47,6 +47,7 @@ from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, e
 from expenses.tax_indicators_sync import SiiTaxIndicatorSync
 from expenses.views import _expense_export_id, _find_similar_expenses, _missing_fields_for_parametrization, _rindegastos_note
 from expenses.whatsapp_notifications import build_rejection_payload, build_whatsapp_template_request
+from expenses.fund_deposit_sync import inject_notion_remittance_to_rindegastos
 from expenses.funds_sync import NotionFundsSync
 
 LOCAL_TEST_STORAGES = {
@@ -104,6 +105,91 @@ class NotionFundsSyncStatusTests(SimpleTestCase):
 
         self.assertEqual(status, NotionFundSyncLog.STATUS_IGNORED)
         self.assertIn("Estado Notion sin acción de abono", error)
+
+
+class FundDepositSyncTests(TestCase):
+    @override_settings(
+        FUNDS_DEPOSIT_ALLOWED_USER_EMAILS=["fsantibanez@otzi.cl"],
+        NOTION_FUNDS_SYNCED_STATUS_VALUE="Transferido y sincronizado",
+        RINDEGASTOS_FUNDS_ADMIN_ID="43913",
+    )
+    def test_inject_ready_remittance_deposits_locks_and_closes_notion(self):
+        user = get_user_model().objects.create_user(
+            username="fsantibanez@otzi.cl",
+            email="fsantibanez@otzi.cl",
+            password="pass",
+            is_superuser=True,
+        )
+        log = NotionFundSyncLog.objects.create(
+            notion_page_id="page-1",
+            notion_url="https://notion.example/page-1",
+            notion_status="Transferido",
+            notion_work_key=settings.NOTION_FUNDS_WORK_KEY_VALUE,
+            notion_record_id="REMESA-123",
+            beneficiary_name="Beneficiario",
+            amount=Decimal("100000"),
+            currency="CLP",
+            payment_date=date(2026, 8, 25),
+            cost_center="Obra",
+            local_status=NotionFundSyncLog.STATUS_READY,
+            idempotency_key="abc",
+            rindegastos_fund_id="861031",
+            notion_raw_payload={"properties": {"Estado": {"type": "status"}}},
+        )
+
+        class FakeRindegastosClient:
+            def __init__(self):
+                self.calls = []
+
+            def deposit_money_to_fund(self, fund_id, admin_id, amount, note=None):
+                self.calls.append(
+                    {"fund_id": fund_id, "admin_id": admin_id, "amount": amount, "note": note}
+                )
+                return {"DepositId": "dep-1"}
+
+        class FakeNotionClient:
+            def __init__(self):
+                self.calls = []
+
+            def update_page(self, page_id, properties=None, is_locked=None):
+                self.calls.append({"page_id": page_id, "properties": properties, "is_locked": is_locked})
+                return {"id": page_id, "is_locked": is_locked}
+
+        rindegastos_client = FakeRindegastosClient()
+        notion_client = FakeNotionClient()
+
+        inject_notion_remittance_to_rindegastos(
+            log.id,
+            user,
+            rindegastos_client=rindegastos_client,
+            notion_client=notion_client,
+        )
+
+        log.refresh_from_db()
+        self.assertEqual(log.local_status, NotionFundSyncLog.STATUS_CLOSED)
+        self.assertEqual(log.notion_status, "Transferido y sincronizado")
+        self.assertEqual(log.rindegastos_deposit_id, "dep-1")
+        self.assertEqual(
+            rindegastos_client.calls,
+            [
+                {
+                    "fund_id": "861031",
+                    "admin_id": "43913",
+                    "amount": "100000",
+                    "note": "REMESA-123",
+                }
+            ],
+        )
+        self.assertEqual(
+            notion_client.calls,
+            [
+                {
+                    "page_id": "page-1",
+                    "properties": {"Estado": {"status": {"name": "Transferido y sincronizado"}}},
+                    "is_locked": True,
+                }
+            ],
+        )
 
 
 class FuelExpenseValidationTests(TestCase):
@@ -344,6 +430,33 @@ class RindegastosClientTests(TestCase):
                 "IntegrationStatus": 1,
                 "IntegrationCode": "OTZ-ABC123",
                 "IntegrationDate": "2026-08-05 10:30:00",
+            },
+            headers={
+                "Authorization": "Bearer token",
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+        )
+
+    @patch("expenses.rindegastos_client.requests.post")
+    def test_deposit_money_to_fund_sends_json_body(self, post_mock):
+        post_mock.return_value = self.FakeResponse({"DepositId": "dep-1"})
+
+        result = RindegastosClient(base_url="https://api.example.test/v1", token="token").deposit_money_to_fund(
+            fund_id="861031",
+            admin_id="43913",
+            amount="100000",
+            note="REMESA-123",
+        )
+
+        self.assertEqual(result["DepositId"], "dep-1")
+        post_mock.assert_called_once_with(
+            "https://api.example.test/v1/depositMoneyToFund",
+            json={
+                "Id": "861031",
+                "IdAdmin": "43913",
+                "DepositAmount": "100000",
+                "Note": "REMESA-123",
             },
             headers={
                 "Authorization": "Bearer token",
