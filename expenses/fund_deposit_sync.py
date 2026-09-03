@@ -1,3 +1,4 @@
+import time
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -63,7 +64,12 @@ def inject_notion_remittance_to_rindegastos(log_id, actor, rindegastos_client=No
             admin_id=settings.RINDEGASTOS_FUNDS_ADMIN_ID,
             amount=amount,
         )
-        after_fund = rindegastos_client.get_fund(log.rindegastos_fund_id)
+        after_fund, detected_transaction, anomaly = _fetch_after_fund_until_detected(
+            rindegastos_client,
+            log.rindegastos_fund_id,
+            before_fund,
+            amount,
+        )
     except RindegastosAPIError as exc:
         attempt.status = FundDepositInjectionAttempt.STATUS_FAILED
         attempt.error = f"No se pudo crear abono en Rindegastos: {exc}"
@@ -74,12 +80,6 @@ def inject_notion_remittance_to_rindegastos(log_id, actor, rindegastos_client=No
         log.save(update_fields=["local_status", "last_error", "updated_at"])
         raise FundDepositSyncError(log.last_error) from exc
 
-    detected_transaction, anomaly = _detect_new_transaction(
-        before_fund,
-        after_fund,
-        fund_id=log.rindegastos_fund_id,
-        amount=amount,
-    )
     detected_reference = _transaction_reference(detected_transaction, fund_id=log.rindegastos_fund_id, amount=amount)
     attempt.response_payload = rindegastos_response
     attempt.after_fund_payload = _fund_audit_snapshot(after_fund)
@@ -123,7 +123,8 @@ def inject_notion_remittance_to_rindegastos(log_id, actor, rindegastos_client=No
         log.last_error = anomaly
         log.save(update_fields=["local_status", "last_error", "updated_at"])
         raise FundDepositSyncError(
-            "Abono creado en Rindegastos, pero la identificación del movimiento quedó para revisión: "
+            "Rindegastos respondió sin error, pero no se pudo confirmar el movimiento nuevo. "
+            "La remesa quedó para revisión antes de reintentar: "
             f"{anomaly}"
         )
 
@@ -140,7 +141,7 @@ def inject_notion_remittance_to_rindegastos(log_id, actor, rindegastos_client=No
         )
     except NotionAPIError as exc:
         attempt.status = FundDepositInjectionAttempt.STATUS_NOTION_FAILED
-        attempt.error = f"Abono creado en Rindegastos, pero falló actualización Notion: {exc}"
+        attempt.error = f"Abono confirmado en Rindegastos, pero falló actualización Notion: {exc}"
         attempt.completed_at = timezone.now()
         attempt.save(update_fields=["status", "error", "completed_at", "updated_at"])
         log.local_status = NotionFundSyncLog.STATUS_RINDEGASTOS_OK_NOTION_ERROR
@@ -167,6 +168,20 @@ def inject_notion_remittance_to_rindegastos(log_id, actor, rindegastos_client=No
             "updated_at",
         ]
     )
+    return log
+
+
+def release_notion_remittance_for_retry(log_id, actor):
+    if not user_can_inject_fund_deposits(actor):
+        raise FundDepositSyncError("Usuario no autorizado para liberar abonos.")
+    log = NotionFundSyncLog.objects.get(pk=log_id)
+    if log.local_status != NotionFundSyncLog.STATUS_RINDEGASTOS_OK_REVIEW:
+        raise FundDepositSyncError("Solo se pueden liberar remesas que quedaron en revisión.")
+    if _normalize_status(log.notion_status) != _normalize_status("Transferido"):
+        raise FundDepositSyncError("La remesa ya no está en estado Transferido en Notion.")
+    log.local_status = NotionFundSyncLog.STATUS_READY
+    log.last_error = ""
+    log.save(update_fields=["local_status", "last_error", "updated_at"])
     return log
 
 
@@ -218,6 +233,27 @@ def _decimal_to_api_value(value):
     if amount == amount.to_integral_value():
         return str(int(amount))
     return format(amount, "f")
+
+
+def _fetch_after_fund_until_detected(rindegastos_client, fund_id, before_fund, amount):
+    attempts = max(1, int(getattr(settings, "FUNDS_DEPOSIT_POST_VERIFY_ATTEMPTS", 4)))
+    sleep_seconds = max(0, float(getattr(settings, "FUNDS_DEPOSIT_POST_VERIFY_SLEEP_SECONDS", 1)))
+    after_fund = {}
+    detected_transaction = {}
+    anomaly = ""
+    for attempt_number in range(attempts):
+        if attempt_number and sleep_seconds:
+            time.sleep(sleep_seconds)
+        after_fund = rindegastos_client.get_fund(fund_id)
+        detected_transaction, anomaly = _detect_new_transaction(
+            before_fund,
+            after_fund,
+            fund_id=fund_id,
+            amount=amount,
+        )
+        if detected_transaction and not anomaly:
+            break
+    return after_fund, detected_transaction, anomaly
 
 
 def _detect_new_transaction(before_fund, after_fund, fund_id="", amount=""):

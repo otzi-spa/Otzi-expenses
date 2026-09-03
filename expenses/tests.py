@@ -48,7 +48,7 @@ from expenses.rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, e
 from expenses.tax_indicators_sync import SiiTaxIndicatorSync
 from expenses.views import _expense_export_id, _find_similar_expenses, _missing_fields_for_parametrization, _rindegastos_note
 from expenses.whatsapp_notifications import build_rejection_payload, build_whatsapp_template_request
-from expenses.fund_deposit_sync import inject_notion_remittance_to_rindegastos
+from expenses.fund_deposit_sync import inject_notion_remittance_to_rindegastos, release_notion_remittance_for_retry
 from expenses.funds_sync import NotionFundsSync
 
 LOCAL_TEST_STORAGES = {
@@ -112,6 +112,8 @@ class FundDepositSyncTests(TestCase):
     @override_settings(
         FUNDS_DEPOSIT_ALLOWED_USER_EMAILS=["fsantibanez@otzi.cl"],
         FUNDS_DEPOSIT_AUDIT_TRANSACTION_SNAPSHOT_LIMIT=1,
+        FUNDS_DEPOSIT_POST_VERIFY_ATTEMPTS=1,
+        FUNDS_DEPOSIT_POST_VERIFY_SLEEP_SECONDS=0,
         NOTION_FUNDS_SYNCED_STATUS_VALUE="Transferido y sincronizado",
         RINDEGASTOS_FUNDS_ADMIN_ID="43913",
     )
@@ -221,6 +223,29 @@ class FundDepositSyncTests(TestCase):
                 }
             ],
         )
+
+    @override_settings(FUNDS_DEPOSIT_ALLOWED_USER_EMAILS=["fsantibanez@otzi.cl"])
+    def test_release_review_remittance_for_retry(self):
+        user = get_user_model().objects.create_user(
+            username="fsantibanez@otzi.cl",
+            email="fsantibanez@otzi.cl",
+            password="pass",
+            is_superuser=True,
+        )
+        log = NotionFundSyncLog.objects.create(
+            notion_page_id="page-1",
+            notion_status="Transferido",
+            notion_record_id="REMESA-123",
+            local_status=NotionFundSyncLog.STATUS_RINDEGASTOS_OK_REVIEW,
+            idempotency_key="abc",
+            last_error="Rindegastos no mostró movimientos nuevos.",
+        )
+
+        release_notion_remittance_for_retry(log.id, user)
+
+        log.refresh_from_db()
+        self.assertEqual(log.local_status, NotionFundSyncLog.STATUS_READY)
+        self.assertEqual(log.last_error, "")
 
 
 class FuelExpenseValidationTests(TestCase):

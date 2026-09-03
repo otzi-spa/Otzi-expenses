@@ -515,7 +515,7 @@ class NotionFundSyncLog(models.Model):
         (STATUS_ERROR, "Error"),
         (STATUS_IGNORED, "Ignorado"),
         (STATUS_RINDEGASTOS_OK, "Rindegastos OK"),
-        (STATUS_RINDEGASTOS_OK_REVIEW, "Rindegastos OK / revisar"),
+        (STATUS_RINDEGASTOS_OK_REVIEW, "Rindegastos sin confirmar"),
         (STATUS_NOTION_OK, "Notion actualizado"),
         (STATUS_RINDEGASTOS_OK_NOTION_ERROR, "Rindegastos OK / Notion error"),
     ]

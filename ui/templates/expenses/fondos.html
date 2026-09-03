@@ -541,6 +541,20 @@
                   Inyectar
                 </button>
               </form>
+              {% elif can_inject_fund_deposits and log.local_status == 'rindegastos_ok_review' and log.notion_status == 'Transferido' %}
+              <form method="post" class="d-inline">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="release_notion_fund_retry">
+                <input type="hidden" name="log_id" value="{{ log.id }}">
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-warning me-2"
+                  onclick="return confirm('Libera esta remesa para reintento solo si verificaste que el abono no existe en Rindegastos. ¿Continuar?')"
+                >
+                  Liberar
+                </button>
+              </form>
               {% endif %}
               {% if log.notion_url %}
               <a href="{{ log.notion_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-light">Abrir</a>
