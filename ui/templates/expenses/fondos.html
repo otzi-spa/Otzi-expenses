@@ -523,7 +523,7 @@
               {% endif %}
             </td>
             <td>
-              <span class="notion-pill {% if log.local_status == 'error' %}pill-sync-error{% elif log.local_status == 'closed' %}pill-sync-closed{% elif log.local_status == 'ready' or log.local_status == 'rindegastos_ok' or log.local_status == 'notion_ok' %}pill-sync-ready{% elif log.local_status == 'pending_mapping' or log.local_status == 'pending' %}pill-sync-pending{% else %}pill-sync-default{% endif %}">{{ log.get_local_status_display }}</span>
+              <span class="notion-pill {% if log.local_status == 'error' or log.local_status == 'rindegastos_ok_review' %}pill-sync-error{% elif log.local_status == 'closed' %}pill-sync-closed{% elif log.local_status == 'ready' or log.local_status == 'rindegastos_ok' or log.local_status == 'notion_ok' %}pill-sync-ready{% elif log.local_status == 'pending_mapping' or log.local_status == 'pending' %}pill-sync-pending{% else %}pill-sync-default{% endif %}">{{ log.get_local_status_display }}</span>
             </td>
             <td class="text-muted fs-8" style="max-width: 360px;">{{ log.last_error|default:"" }}</td>
             <td class="text-end pe-6">

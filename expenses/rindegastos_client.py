@@ -164,14 +164,12 @@ class RindegastosClient:
             return fund
         return payload
 
-    def deposit_money_to_fund(self, fund_id, admin_id, amount, note=None):
+    def deposit_money_to_fund(self, fund_id, admin_id, amount):
         data = {
             "Id": str(fund_id),
             "IdAdmin": str(admin_id),
             "DepositAmount": str(amount),
         }
-        if note:
-            data["Note"] = str(note)
         return self._post("depositMoneyToFund", data=data)
 
     def set_expense_integration(self, expense_id, integration_status, integration_code, integration_date=None):

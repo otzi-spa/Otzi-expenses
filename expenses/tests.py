@@ -23,6 +23,7 @@ from expenses.models import (
     ExpenseAuditLog,
     ExpenseNotification,
     ExpenseTypeCatalog,
+    FundDepositInjectionAttempt,
     FuelSpecificTaxRate,
     NotionFundSyncLog,
     RindegastosExpenseDiff,
@@ -110,6 +111,7 @@ class NotionFundsSyncStatusTests(SimpleTestCase):
 class FundDepositSyncTests(TestCase):
     @override_settings(
         FUNDS_DEPOSIT_ALLOWED_USER_EMAILS=["fsantibanez@otzi.cl"],
+        FUNDS_DEPOSIT_AUDIT_TRANSACTION_SNAPSHOT_LIMIT=1,
         NOTION_FUNDS_SYNCED_STATUS_VALUE="Transferido y sincronizado",
         RINDEGASTOS_FUNDS_ADMIN_ID="43913",
     )
@@ -140,12 +142,33 @@ class FundDepositSyncTests(TestCase):
         class FakeRindegastosClient:
             def __init__(self):
                 self.calls = []
+                self.snapshots = [
+                    {"Id": "861031", "Transactions": []},
+                    {
+                        "Id": "861031",
+                        "Transactions": [
+                            {
+                                "TransactionType": 1,
+                                "TransactionAmount": "100000.00",
+                                "TransactionDate": "2026-09-03",
+                            }
+                        ],
+                        "ExtraLargeField": "not persisted",
+                    },
+                ]
 
-            def deposit_money_to_fund(self, fund_id, admin_id, amount, note=None):
+            def get_fund(self, fund_id):
+                return self.snapshots.pop(0)
+
+            def deposit_money_to_fund(self, fund_id, admin_id, amount):
                 self.calls.append(
-                    {"fund_id": fund_id, "admin_id": admin_id, "amount": amount, "note": note}
+                    {
+                        "fund_id": fund_id,
+                        "admin_id": admin_id,
+                        "amount": amount,
+                    }
                 )
-                return {"DepositId": "dep-1"}
+                return {"Status": "OK"}
 
         class FakeNotionClient:
             def __init__(self):
@@ -166,9 +189,18 @@ class FundDepositSyncTests(TestCase):
         )
 
         log.refresh_from_db()
+        attempt = FundDepositInjectionAttempt.objects.get(notion_log=log)
         self.assertEqual(log.local_status, NotionFundSyncLog.STATUS_CLOSED)
         self.assertEqual(log.notion_status, "Transferido y sincronizado")
-        self.assertEqual(log.rindegastos_deposit_id, "dep-1")
+        self.assertEqual(log.rindegastos_deposit_id, "fund:861031:type:1:date:2026-09-03:amount:100000.00")
+        self.assertEqual(attempt.status, FundDepositInjectionAttempt.STATUS_COMPLETED)
+        self.assertEqual(attempt.internal_note, "REMESA-123")
+        self.assertEqual(attempt.detected_transaction_reference, log.rindegastos_deposit_id)
+        self.assertEqual(attempt.request_payload, {"Id": "861031", "IdAdmin": "43913", "DepositAmount": "100000"})
+        self.assertEqual(attempt.before_fund_payload["transactions_count"], 0)
+        self.assertEqual(attempt.after_fund_payload["transactions_count"], 1)
+        self.assertEqual(attempt.after_fund_payload["transactions_tail_limit"], 1)
+        self.assertNotIn("ExtraLargeField", attempt.after_fund_payload)
         self.assertEqual(
             rindegastos_client.calls,
             [
@@ -176,7 +208,6 @@ class FundDepositSyncTests(TestCase):
                     "fund_id": "861031",
                     "admin_id": "43913",
                     "amount": "100000",
-                    "note": "REMESA-123",
                 }
             ],
         )
@@ -446,7 +477,6 @@ class RindegastosClientTests(TestCase):
             fund_id="861031",
             admin_id="43913",
             amount="100000",
-            note="REMESA-123",
         )
 
         self.assertEqual(result["DepositId"], "dep-1")
@@ -456,7 +486,6 @@ class RindegastosClientTests(TestCase):
                 "Id": "861031",
                 "IdAdmin": "43913",
                 "DepositAmount": "100000",
-                "Note": "REMESA-123",
             },
             headers={
                 "Authorization": "Bearer token",

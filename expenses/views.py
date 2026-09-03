@@ -210,6 +210,7 @@ def _funds_chart_context(local_logs):
     projected_logs = local_logs.exclude(notion_status__icontains="sincronizado").exclude(
         local_status__in=[
             NotionFundSyncLog.STATUS_RINDEGASTOS_OK,
+            NotionFundSyncLog.STATUS_RINDEGASTOS_OK_REVIEW,
             NotionFundSyncLog.STATUS_NOTION_OK,
             NotionFundSyncLog.STATUS_RINDEGASTOS_OK_NOTION_ERROR,
             NotionFundSyncLog.STATUS_CLOSED,

@@ -13,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='notionfundsynclog',
             name='local_status',
-            field=models.CharField(choices=[('pending', 'Pendiente'), ('pending_mapping', 'Pendiente mapeo'), ('validated', 'Validado'), ('ready', 'Listo para abono'), ('closed', 'Cerrado'), ('error', 'Error'), ('ignored', 'Ignorado'), ('rindegastos_ok', 'Rindegastos OK'), ('notion_ok', 'Notion actualizado'), ('rindegastos_ok_notion_error', 'Rindegastos OK / Notion error')], db_index=True, default='pending', max_length=40),
+            field=models.CharField(choices=[('pending', 'Pendiente'), ('pending_mapping', 'Pendiente mapeo'), ('validated', 'Validado'), ('ready', 'Listo para abono'), ('closed', 'Cerrado'), ('error', 'Error'), ('ignored', 'Ignorado'), ('rindegastos_ok', 'Rindegastos OK'), ('rindegastos_ok_review', 'Rindegastos OK / revisar'), ('notion_ok', 'Notion actualizado'), ('rindegastos_ok_notion_error', 'Rindegastos OK / Notion error')], db_index=True, default='pending', max_length=40),
         ),
     ]

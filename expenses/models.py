@@ -502,6 +502,7 @@ class NotionFundSyncLog(models.Model):
     STATUS_ERROR = "error"
     STATUS_IGNORED = "ignored"
     STATUS_RINDEGASTOS_OK = "rindegastos_ok"
+    STATUS_RINDEGASTOS_OK_REVIEW = "rindegastos_ok_review"
     STATUS_NOTION_OK = "notion_ok"
     STATUS_RINDEGASTOS_OK_NOTION_ERROR = "rindegastos_ok_notion_error"
 
@@ -514,6 +515,7 @@ class NotionFundSyncLog(models.Model):
         (STATUS_ERROR, "Error"),
         (STATUS_IGNORED, "Ignorado"),
         (STATUS_RINDEGASTOS_OK, "Rindegastos OK"),
+        (STATUS_RINDEGASTOS_OK_REVIEW, "Rindegastos OK / revisar"),
         (STATUS_NOTION_OK, "Notion actualizado"),
         (STATUS_RINDEGASTOS_OK_NOTION_ERROR, "Rindegastos OK / Notion error"),
     ]
@@ -575,6 +577,68 @@ class NotionFundSyncLog(models.Model):
     def save(self, *args, **kwargs):
         self.beneficiary_rut = normalize_rut(self.beneficiary_rut)
         super().save(*args, **kwargs)
+
+
+class FundDepositInjectionAttempt(models.Model):
+    STATUS_STARTED = "started"
+    STATUS_RINDEGASTOS_OK = "rindegastos_ok"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+    STATUS_NOTION_FAILED = "notion_failed"
+    STATUS_AMBIGUOUS = "ambiguous"
+
+    STATUS_CHOICES = [
+        (STATUS_STARTED, "Iniciado"),
+        (STATUS_RINDEGASTOS_OK, "Rindegastos OK"),
+        (STATUS_COMPLETED, "Completado"),
+        (STATUS_FAILED, "Fallido"),
+        (STATUS_NOTION_FAILED, "Notion falló"),
+        (STATUS_AMBIGUOUS, "Ambiguo"),
+    ]
+
+    notion_log = models.ForeignKey(
+        NotionFundSyncLog,
+        on_delete=models.CASCADE,
+        related_name="deposit_attempts",
+    )
+    actor = models.ForeignKey(
+        "accounts.User",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="fund_deposit_attempts",
+    )
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_STARTED, db_index=True)
+    internal_note = models.CharField(max_length=255, blank=True)
+    rindegastos_fund_id = models.CharField(max_length=255, blank=True)
+    rindegastos_admin_id = models.CharField(max_length=255, blank=True)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=8, default="CLP")
+    requested_payment_date = models.DateField(null=True, blank=True)
+    request_payload = models.JSONField(default=dict, blank=True)
+    response_payload = models.JSONField(default=dict, blank=True)
+    before_fund_payload = models.JSONField(default=dict, blank=True)
+    after_fund_payload = models.JSONField(default=dict, blank=True)
+    detected_transaction = models.JSONField(default=dict, blank=True)
+    detected_transaction_reference = models.CharField(max_length=255, blank=True)
+    anomaly = models.TextField(blank=True)
+    error = models.TextField(blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-started_at",)
+        indexes = [
+            models.Index(fields=["status", "started_at"]),
+            models.Index(fields=["rindegastos_fund_id", "started_at"]),
+            models.Index(fields=["internal_note"]),
+        ]
+        verbose_name = "Intento abono fondo"
+        verbose_name_plural = "Intentos abono fondos"
+
+    def __str__(self):
+        return f"{self.internal_note or self.notion_log_id} - {self.status}"
 
 
 class ExpenseAuditLog(models.Model):
