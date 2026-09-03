@@ -37,7 +37,7 @@ from expenses.models import (
 )
 from expenses.tasks import reconcile_rindegastos_expenses_task, send_expense_notification_task, sync_funds_sources_task
 from expenses.invoice_tax_calculator import calculate_invoice_taxes
-from expenses.rindegastos_client import RindegastosClient
+from expenses.rindegastos_client import RindegastosAPIError, RindegastosClient
 from expenses.rindegastos_reconcile import (
     RindegastosExpenseReconciler,
     normalize_rindegastos_expense,
@@ -518,6 +518,17 @@ class RindegastosClientTests(TestCase):
             },
             timeout=20,
         )
+
+    @patch("expenses.rindegastos_client.requests.post")
+    def test_post_payload_error_raises_api_error(self, post_mock):
+        post_mock.return_value = self.FakeResponse({"Error": "Invalid User Creator: IdAdmin"})
+
+        with self.assertRaisesMessage(RindegastosAPIError, "Invalid User Creator: IdAdmin"):
+            RindegastosClient(base_url="https://api.example.test/v1", token="token").deposit_money_to_fund(
+                fund_id="861031",
+                admin_id="440877",
+                amount="100000",
+            )
 
 
 class RindegastosExpenseReconcilerTests(TestCase):

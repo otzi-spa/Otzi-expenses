@@ -275,6 +275,10 @@ def _format_integration_date(value):
 def _raise_payload_error(endpoint, payload):
     if not isinstance(payload, dict):
         return
+    for key in ("Error", "error"):
+        message = payload.get(key)
+        if message:
+            raise RindegastosAPIError(f"{endpoint}: API error - {message}")
     status_code = payload.get("statusCode") or payload.get("StatusCode")
     try:
         status_code = int(status_code)
