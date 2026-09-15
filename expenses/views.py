@@ -176,6 +176,8 @@ def _can_access_funds(user):
 def _can_access_funds_audit(user):
     if not getattr(user, "is_authenticated", False):
         return False
+    if getattr(user, "is_superuser", False):
+        return True
     allowed_emails = {email.casefold() for email in settings.FUNDS_AUDIT_ALLOWED_USER_EMAILS}
     return (getattr(user, "email", "") or "").casefold() in allowed_emails
 

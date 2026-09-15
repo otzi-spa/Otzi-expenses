@@ -12,6 +12,8 @@ def funds_access(request):
 def _can_access_funds_audit(user):
     if not getattr(user, "is_authenticated", False):
         return False
+    if getattr(user, "is_superuser", False):
+        return True
     from django.conf import settings
 
     allowed_emails = {email.casefold() for email in settings.FUNDS_AUDIT_ALLOWED_USER_EMAILS}
