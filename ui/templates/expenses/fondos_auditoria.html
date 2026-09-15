@@ -1,0 +1,270 @@
+{% extends "metronic/base_app.html" %}
+{% load l10n %}
+{% block page_title %}Auditoría Fondos{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+  .audit-shell {
+    background: #f7f7f5;
+    border: 1px solid #e7e5df;
+    border-radius: 8px;
+  }
+
+  .audit-panel {
+    background: #ffffff;
+    border: 1px solid #e6e4de;
+    border-radius: 8px;
+  }
+
+  .audit-filter-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(6, minmax(150px, 1fr)) minmax(120px, 0.7fr);
+  }
+
+  .audit-kpi {
+    border-right: 1px solid #eceae5;
+    min-height: 78px;
+  }
+
+  .audit-kpi:last-child {
+    border-right: 0;
+  }
+
+  .audit-table {
+    color: #37352f;
+  }
+
+  .audit-table thead th {
+    background: #fbfaf8;
+    border-color: #e6e4de !important;
+    color: #6b6a65;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  .audit-table tbody td {
+    border-color: #efede8 !important;
+    color: #37352f;
+    font-size: 0.84rem;
+    vertical-align: top;
+  }
+
+  .audit-table tbody tr:hover {
+    background: #fbfaf7;
+  }
+
+  .audit-pill {
+    align-items: center;
+    border-radius: 4px;
+    display: inline-flex;
+    font-size: 0.76rem;
+    font-weight: 800;
+    line-height: 1.2;
+    min-height: 22px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  .audit-status-completed { background: #d1e7dd; color: #0f5132; }
+  .audit-status-failed { background: #f8d7da; color: #842029; }
+  .audit-status-ambiguous { background: #fff3cd; color: #664d03; }
+  .audit-status-notion_failed { background: #fce5cd; color: #7a3f00; }
+  .audit-status-rindegastos_ok { background: #d9e9f8; color: #275f91; }
+  .audit-status-started { background: #e8e6e1; color: #5f5b53; }
+  .audit-delta-ok { color: #0f5132; font-weight: 700; }
+  .audit-delta-bad { color: #842029; font-weight: 700; }
+  .audit-issue {
+    max-width: 420px;
+    white-space: normal;
+  }
+
+  @media (max-width: 1199.98px) {
+    .audit-filter-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 767.98px) {
+    .audit-filter-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .audit-kpi {
+      border-bottom: 1px solid #eceae5;
+      border-right: 0;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block toolbar %}
+<div class="app-toolbar py-3">
+  <div class="app-container container-fluid d-flex align-items-center justify-content-between w-100 px-0">
+    <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Auditoría Fondos</h1>
+    <a class="btn btn-sm btn-light" href="{% url 'funds_dashboard' %}">Volver a Fondos</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if messages %}
+<div class="mb-5">
+  {% for message in messages %}
+  <div class="alert alert-{{ message.tags|default:'info' }} mb-3">{{ message }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="audit-shell p-4 p-lg-5">
+  <div class="audit-panel mb-4">
+    <div class="row g-0">
+      <div class="col-md-4 audit-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Intentos filtrados</div>
+        <div class="fs-3 fw-bold text-gray-900">{{ page_obj.paginator.count }}</div>
+        <div class="text-muted fs-8">Según filtros actuales</div>
+      </div>
+      <div class="col-md-4 audit-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Completados</div>
+        <div class="fs-3 fw-bold text-gray-900">{{ completed_count }}</div>
+        <div class="text-muted fs-8">Total CLP {{ completed_total|floatformat:0|localize }}</div>
+      </div>
+      <div class="col-md-4 audit-kpi p-4">
+        <div class="text-muted fw-semibold fs-8 text-uppercase">Con anomalía/error</div>
+        <div class="fs-3 fw-bold {% if anomaly_count %}text-danger{% else %}text-gray-900{% endif %}">{{ anomaly_count }}</div>
+        <div class="text-muted fs-8">Requieren revisión</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="audit-panel p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-start gap-4 mb-4">
+      <div>
+        <div class="fw-bold text-gray-900">Filtros de auditoría</div>
+        <div class="text-muted fs-8">Intentos de inyección de remesas hacia Rindegastos.</div>
+      </div>
+      <a class="btn btn-light-primary" href="?{{ export_query }}">Exportar TSV</a>
+    </div>
+    <form method="get" class="audit-filter-grid align-items-end">
+      <div>
+        <label class="form-label">Desde</label>
+        <input type="date" name="date_from" value="{{ date_from_filter }}" class="form-control">
+      </div>
+      <div>
+        <label class="form-label">Hasta</label>
+        <input type="date" name="date_to" value="{{ date_to_filter }}" class="form-control">
+      </div>
+      <div>
+        <label class="form-label">Estado</label>
+        <select name="status" class="form-select">
+          <option value="">Todos</option>
+          {% for value,label in status_choices %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Remesa</label>
+        <input type="search" name="remesa" value="{{ remesa_filter }}" class="form-control" placeholder="REMESA-6263">
+      </div>
+      <div>
+        <label class="form-label">Fondo</label>
+        <select name="fund_id" class="form-select">
+          <option value="">Todos</option>
+          {% for option in fund_options %}
+          <option value="{{ option.id }}" {% if fund_filter == option.id %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Actor</label>
+        <select name="actor" class="form-select">
+          <option value="">Todos</option>
+          {% for email in actor_options %}
+          <option value="{{ email }}" {% if actor_filter == email %}selected{% endif %}>{{ email }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <button type="submit" class="btn btn-light-primary w-100">Filtrar</button>
+      </div>
+      <div class="form-check mt-2">
+        <input class="form-check-input" type="checkbox" name="anomaly" value="1" id="auditOnlyIssues" {% if anomaly_filter == "1" %}checked{% endif %}>
+        <label class="form-check-label" for="auditOnlyIssues">Solo anomalías</label>
+      </div>
+      <div>
+        <a class="btn btn-light w-100" href="{% url 'funds_audit' %}">Limpiar</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="audit-panel">
+    <div class="d-flex justify-content-between align-items-center px-5 py-4 border-bottom border-gray-200">
+      <div>
+        <div class="fw-bold text-gray-900">Intentos de inyección</div>
+        <div class="text-muted fs-8">{{ page_obj.paginator.count }} registros filtrados</div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-row-bordered table-row-gray-200 align-middle mb-0 audit-table">
+        <thead>
+          <tr>
+            <th class="ps-6">Inicio</th>
+            <th>Remesa</th>
+            <th>Estado</th>
+            <th>Fondo</th>
+            <th>Monto</th>
+            <th>Actor</th>
+            <th>Admin</th>
+            <th>Movs</th>
+            <th>Delta depósitos</th>
+            <th>Delta saldo</th>
+            <th>Movimiento detectado</th>
+            <th class="pe-6">Anomalía/Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td class="ps-6 text-nowrap">{{ row.inicio|default:"-" }}</td>
+            <td class="fw-semibold">{{ row.remesa|default:"-" }}</td>
+            <td><span class="audit-pill audit-status-{{ row.estado_intento }}">{{ row.status_label }}</span></td>
+            <td>{{ row.fondo_rindegastos|default:"-" }}</td>
+            <td class="fw-semibold text-nowrap">{{ row.amount_display }}</td>
+            <td>{{ row.actor_expenses|default:"-" }}</td>
+            <td>{{ row.admin_rindegastos|default:"-" }}</td>
+            <td class="text-nowrap">{{ row.movement_delta_display }}</td>
+            <td class="{% if row.has_issue %}audit-delta-bad{% else %}audit-delta-ok{% endif %} text-nowrap">{{ row.delta_depositos }}</td>
+            <td class="{% if row.has_issue %}audit-delta-bad{% else %}audit-delta-ok{% endif %} text-nowrap">{{ row.delta_saldo }}</td>
+            <td class="text-muted fs-8">{{ row.movimiento_detectado|default:"-" }}</td>
+            <td class="audit-issue pe-6 {% if row.has_issue %}text-danger{% else %}text-muted{% endif %}">
+              {{ row.issue|default:"-" }}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="12" class="text-center text-muted py-10">No hay intentos que calcen con los filtros.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="d-flex justify-content-between align-items-center px-5 py-4 border-top border-gray-200">
+      <span class="text-muted fs-8">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+      <div class="d-flex gap-2">
+        {% if page_obj.has_previous %}
+        <a class="btn btn-sm btn-light" href="?page={{ page_obj.previous_page_number }}{% if query_without_page %}&{{ query_without_page }}{% endif %}">Anterior</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a class="btn btn-sm btn-light" href="?page={{ page_obj.next_page_number }}{% if query_without_page %}&{{ query_without_page }}{% endif %}">Siguiente</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

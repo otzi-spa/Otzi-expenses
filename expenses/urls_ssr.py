@@ -6,6 +6,7 @@ from .views import (
     expense_detail,
     expense_list,
     expense_rindegastos_export,
+    funds_audit,
     funds_dashboard,
     attachment_export_serve,
     rindegastos_policy_options,
@@ -27,6 +28,7 @@ urlpatterns = [
     path("", dashboard, name="dashboard"),
     path("gastos/", expense_list, name="expense_list"),
     path("fondos/", funds_dashboard, name="funds_dashboard"),
+    path("fondos/auditoria/", funds_audit, name="funds_audit"),
     path("expenses/create/", expense_create, name="expense_create"),
     path("expenses/export/rindegastos/", expense_rindegastos_export, name="expense_rindegastos_export"),
     path(

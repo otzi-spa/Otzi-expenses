@@ -54,6 +54,17 @@
         </div>
         {% endif %}
 
+        {% if can_access_funds_audit %}
+        <div class="menu-item {% if request.resolver_match.url_name == 'funds_audit' %}here show{% endif %}">
+          <a class="menu-link" href="{% url 'funds_audit' %}">
+            <span class="menu-icon">
+              <i class="ki-duotone ki-chart-line fs-2"></i>
+            </span>
+            <span class="menu-title">Auditoría Fondos</span>
+          </a>
+        </div>
+        {% endif %}
+
         {% if request.user.is_superuser or request.user.role == "admin" or request.user.role == "reviewer" %}
         <div class="menu-item {% if request.resolver_match.url_name == 'settings_rindegastos_rules' %}here show{% endif %}">
           <a class="menu-link" href="{% url 'settings_rindegastos_rules' %}">

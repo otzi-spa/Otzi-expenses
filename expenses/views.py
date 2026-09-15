@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime
+from datetime import datetime, time as datetime_time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
@@ -32,6 +32,7 @@ from .models import (
     ExpenseTypeCatalog,
     EmployeeFundMapping,
     FuelSpecificTaxRate,
+    FundDepositInjectionAttempt,
     NotionFundSyncLog,
     RindegastosExpenseFieldCatalog,
     RindegastosExpenseDiff,
@@ -56,6 +57,7 @@ from .fund_deposit_sync import (
     release_notion_remittance_for_retry,
     user_can_inject_fund_deposits,
 )
+from .fund_deposit_audit import AUDIT_TSV_COLUMNS, attempt_audit_row, attempt_audit_summary, format_amount, movement_delta_text
 from .notion_client import NotionAPIError
 from .rindegastos_client import RindegastosAPIError, RindegastosClient
 from .rindegastos_diff_rules import (
@@ -169,6 +171,13 @@ def _is_admin_user(user):
 
 def _can_access_funds(user):
     return bool(user.is_authenticated and user.is_superuser)
+
+
+def _can_access_funds_audit(user):
+    if not getattr(user, "is_authenticated", False):
+        return False
+    allowed_emails = {email.casefold() for email in settings.FUNDS_AUDIT_ALLOWED_USER_EMAILS}
+    return (getattr(user, "email", "") or "").casefold() in allowed_emails
 
 
 def _decimal_or_zero(value):
@@ -565,6 +574,148 @@ def funds_dashboard(request):
         "can_inject_fund_deposits": user_can_inject_fund_deposits(request.user),
     }
     return render(request, "expenses/fondos.html", context)
+
+
+@login_required
+def funds_audit(request):
+    if not _can_access_funds_audit(request.user):
+        messages.error(request, "La auditoría de fondos todavía está restringida.")
+        return redirect("dashboard")
+
+    attempts = FundDepositInjectionAttempt.objects.select_related("notion_log", "actor").order_by("-started_at")
+    date_from_filter = request.GET.get("date_from", "").strip()
+    date_to_filter = request.GET.get("date_to", "").strip()
+    status_filter = request.GET.get("status", "").strip()
+    remesa_filter = request.GET.get("remesa", "").strip()
+    fund_filter = request.GET.get("fund_id", "").strip()
+    actor_filter = request.GET.get("actor", "").strip()
+    anomaly_filter = request.GET.get("anomaly", "").strip()
+
+    date_from = _parse_local_date_boundary(date_from_filter, is_end=False)
+    date_to = _parse_local_date_boundary(date_to_filter, is_end=True)
+    if date_from:
+        attempts = attempts.filter(started_at__gte=date_from)
+    if date_to:
+        attempts = attempts.filter(started_at__lte=date_to)
+    if status_filter:
+        attempts = attempts.filter(status=status_filter)
+    if remesa_filter:
+        attempts = attempts.filter(
+            Q(internal_note__icontains=remesa_filter)
+            | Q(notion_log__notion_record_id__icontains=remesa_filter)
+        )
+    if fund_filter:
+        attempts = attempts.filter(rindegastos_fund_id=fund_filter)
+    if actor_filter:
+        attempts = attempts.filter(actor__email=actor_filter)
+    if anomaly_filter == "1":
+        attempts = attempts.filter(Q(anomaly__gt="") | Q(error__gt=""))
+
+    if request.GET.get("format") == "tsv":
+        return _funds_audit_tsv_response(attempts)
+
+    paginator = Paginator(attempts, 50)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    rows = [_funds_audit_view_row(attempt) for attempt in page_obj.object_list]
+    query_without_page = request.GET.copy()
+    query_without_page.pop("page", None)
+    export_query = request.GET.copy()
+    export_query["format"] = "tsv"
+    export_query.pop("page", None)
+    filtered_completed = attempts.filter(status=FundDepositInjectionAttempt.STATUS_COMPLETED)
+    completed_count = filtered_completed.count()
+    completed_total = filtered_completed.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    anomaly_count = attempts.filter(Q(anomaly__gt="") | Q(error__gt="")).count()
+    fund_options = _attempt_fund_filter_options()
+    actor_options = list(
+        get_user_model()
+        .objects.filter(fund_deposit_attempts__isnull=False)
+        .exclude(email="")
+        .values_list("email", flat=True)
+        .distinct()
+        .order_by("email")
+    )
+    context = {
+        "page_obj": page_obj,
+        "rows": rows,
+        "date_from_filter": date_from_filter,
+        "date_to_filter": date_to_filter,
+        "status_filter": status_filter,
+        "remesa_filter": remesa_filter,
+        "fund_filter": fund_filter,
+        "actor_filter": actor_filter,
+        "anomaly_filter": anomaly_filter,
+        "status_choices": FundDepositInjectionAttempt.STATUS_CHOICES,
+        "fund_options": fund_options,
+        "actor_options": actor_options,
+        "completed_count": completed_count,
+        "completed_total": completed_total,
+        "anomaly_count": anomaly_count,
+        "query_without_page": query_without_page.urlencode(),
+        "export_query": export_query.urlencode(),
+    }
+    return render(request, "expenses/fondos_auditoria.html", context)
+
+
+def _funds_audit_tsv_response(attempts):
+    response = HttpResponse(content_type="text/tab-separated-values; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="auditoria-fondos.tsv"'
+    writer = csv.writer(response, delimiter="\t")
+    writer.writerow(AUDIT_TSV_COLUMNS)
+    for attempt in attempts[:5000]:
+        row = attempt_audit_row(attempt, _fmt_local_dt)
+        writer.writerow([row[column] for column in AUDIT_TSV_COLUMNS])
+    return response
+
+
+def _funds_audit_view_row(attempt):
+    row = attempt_audit_row(attempt, _fmt_local_dt)
+    audit = attempt_audit_summary(attempt)
+    issue = attempt.anomaly or attempt.error or attempt.notion_log.last_error or ""
+    row.update(
+        {
+            "attempt": attempt,
+            "amount_display": f"{attempt.currency or 'CLP'} {format_amount(attempt.amount)}",
+            "movement_delta_display": movement_delta_text(audit),
+            "issue": issue,
+            "has_issue": bool(issue),
+            "status_label": attempt.get_status_display(),
+        }
+    )
+    return row
+
+
+def _attempt_fund_filter_options():
+    options_by_id = {}
+    rows = (
+        FundDepositInjectionAttempt.objects.select_related("notion_log")
+        .exclude(rindegastos_fund_id="")
+        .values("rindegastos_fund_id", "notion_log__notion_rindegastos_fund")
+        .order_by("rindegastos_fund_id", "notion_log__notion_rindegastos_fund")
+    )
+    for row in rows:
+        fund_id = (row.get("rindegastos_fund_id") or "").strip()
+        if not fund_id:
+            continue
+        label = (row.get("notion_log__notion_rindegastos_fund") or "").strip() or f"ID: {fund_id}"
+        current = options_by_id.get(fund_id)
+        if current is None or current["label"] == f"ID: {fund_id}":
+            options_by_id[fund_id] = {"id": fund_id, "label": label}
+    return sorted(options_by_id.values(), key=lambda option: option["label"].casefold())
+
+
+def _parse_local_date_boundary(value, is_end=False):
+    parsed_date = parse_date(value or "")
+    if not parsed_date:
+        return None
+    parsed = datetime.combine(parsed_date, datetime_time.max if is_end else datetime_time.min)
+    return timezone.make_aware(parsed, timezone.get_current_timezone())
+
+
+def _fmt_local_dt(value):
+    if not value:
+        return ""
+    return timezone.localtime(value).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _normalize_empty(value):
