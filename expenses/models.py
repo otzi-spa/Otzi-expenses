@@ -621,6 +621,7 @@ class FundDepositInjectionAttempt(models.Model):
     after_fund_payload = models.JSONField(default=dict, blank=True)
     detected_transaction = models.JSONField(default=dict, blank=True)
     detected_transaction_reference = models.CharField(max_length=255, blank=True)
+    audit_summary = models.JSONField(default=dict, blank=True)
     anomaly = models.TextField(blank=True)
     error = models.TextField(blank=True)
     started_at = models.DateTimeField(auto_now_add=True)

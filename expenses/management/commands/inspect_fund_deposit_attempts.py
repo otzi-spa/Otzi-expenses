@@ -1,4 +1,6 @@
+import csv
 import json
+from datetime import datetime, time
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError
@@ -19,6 +21,7 @@ class Command(BaseCommand):
         parser.add_argument("--from", dest="date_from", default="", help="Fecha/hora inicial del intento, YYYY-MM-DD.")
         parser.add_argument("--to", dest="date_to", default="", help="Fecha/hora final del intento, YYYY-MM-DD.")
         parser.add_argument("--summary", action="store_true", help="Imprime un resumen compacto para auditoría.")
+        parser.add_argument("--tsv", action="store_true", help="Exporta un resumen separado por tabs.")
         parser.add_argument("--limit", type=int, default=10, help="Cantidad máxima de intentos a mostrar.")
         parser.add_argument("--show-json", action="store_true", help="Imprime payloads JSON completos guardados.")
 
@@ -47,6 +50,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("No hay intentos que calcen con el filtro."))
             return
 
+        if options["tsv"]:
+            self._print_tsv(attempts)
+            return
+
         if options["summary"]:
             self._print_summary(attempts, options)
             return
@@ -66,10 +73,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(title))
         self.stdout.write(f"Completados: {len(completed)} | Total completado: CLP {_format_amount(total)}")
         self.stdout.write("")
-        self.stdout.write("Remesa | Estado | Inicio | Fondo | Monto | Actor | Movimiento | Anomalía/Error")
+        self.stdout.write(
+            "Remesa | Estado | Inicio | Fondo | Monto | Actor | Movimiento | "
+            "Movs | Delta depósitos | Delta saldo | Anomalía/Error"
+        )
         for attempt in attempts:
             log = attempt.notion_log
             actor = attempt.actor.email if attempt.actor_id and attempt.actor else "-"
+            audit = _attempt_audit_summary(attempt)
             issue = attempt.anomaly or attempt.error or log.last_error or "-"
             line = " | ".join(
                 [
@@ -80,10 +91,76 @@ class Command(BaseCommand):
                     f"{attempt.currency or 'CLP'} {_format_amount(attempt.amount)}",
                     actor,
                     attempt.detected_transaction_reference or "-",
+                    _movement_delta_text(audit),
+                    _format_amount(audit.get("deposits_delta")),
+                    _format_amount(audit.get("balance_delta")),
                     issue,
                 ]
             )
             self.stdout.write(line)
+
+    def _print_tsv(self, attempts):
+        writer = csv.writer(self.stdout, delimiter="\t")
+        writer.writerow(
+            [
+                "remesa",
+                "estado_intento",
+                "inicio",
+                "fin",
+                "fondo_rindegastos",
+                "admin_rindegastos",
+                "monto",
+                "moneda",
+                "actor_expenses",
+                "fecha_notion",
+                "estado_notion",
+                "sync_local",
+                "movimientos_antes",
+                "movimientos_despues",
+                "delta_movimientos",
+                "depositos_antes",
+                "depositos_despues",
+                "delta_depositos",
+                "saldo_antes",
+                "saldo_despues",
+                "delta_saldo",
+                "movimiento_detectado",
+                "anomalia",
+                "error",
+            ]
+        )
+        for attempt in attempts:
+            log = attempt.notion_log
+            actor = attempt.actor.email if attempt.actor_id and attempt.actor else ""
+            audit = _attempt_audit_summary(attempt)
+            writer.writerow(
+                [
+                    attempt.internal_note or log.notion_record_id or "",
+                    attempt.status,
+                    _fmt_dt(attempt.started_at),
+                    _fmt_dt(attempt.completed_at),
+                    attempt.rindegastos_fund_id,
+                    attempt.rindegastos_admin_id,
+                    _format_amount(attempt.amount),
+                    attempt.currency,
+                    actor,
+                    attempt.requested_payment_date or "",
+                    log.notion_status,
+                    log.local_status,
+                    audit.get("before_transactions_count", ""),
+                    audit.get("after_transactions_count", ""),
+                    audit.get("transactions_delta", ""),
+                    _format_amount(audit.get("before_deposits")),
+                    _format_amount(audit.get("after_deposits")),
+                    _format_amount(audit.get("deposits_delta")),
+                    _format_amount(audit.get("before_balance")),
+                    _format_amount(audit.get("after_balance")),
+                    _format_amount(audit.get("balance_delta")),
+                    attempt.detected_transaction_reference or audit.get("detected_transaction_reference", ""),
+                    attempt.anomaly,
+                    attempt.error,
+                ]
+            )
 
     def _print_attempt(self, attempt, show_json=False):
         log = attempt.notion_log
@@ -94,6 +171,7 @@ class Command(BaseCommand):
         after_balance = _snapshot_value(attempt.after_fund_payload, "balance")
         before_deposits = _snapshot_value(attempt.before_fund_payload, "deposits")
         after_deposits = _snapshot_value(attempt.after_fund_payload, "deposits")
+        audit = _attempt_audit_summary(attempt)
         response_summary = _response_summary(attempt.response_payload)
 
         self.stdout.write("")
@@ -119,6 +197,13 @@ class Command(BaseCommand):
             f"movimientos {before_count} -> {after_count} | "
             f"depositos {before_deposits} -> {after_deposits} | saldo {before_balance} -> {after_balance}"
         )
+        self.stdout.write(
+            "  Deltas auditados: "
+            f"movimientos {_movement_delta_text(audit)} | "
+            f"depositos {_format_amount(audit.get('deposits_delta'))} | "
+            f"saldo {_format_amount(audit.get('balance_delta'))} | "
+            f"esperado {_format_amount(audit.get('expected_amount'))}"
+        )
         self.stdout.write(f"  Respuesta Rindegastos: {response_summary}")
         self.stdout.write(f"  Movimiento detectado: {attempt.detected_transaction_reference or '-'}")
         if attempt.anomaly:
@@ -135,6 +220,7 @@ class Command(BaseCommand):
                 "before_fund_payload": attempt.before_fund_payload,
                 "after_fund_payload": attempt.after_fund_payload,
                 "detected_transaction": attempt.detected_transaction,
+                "audit_summary": attempt.audit_summary,
                 "notion_log_response_payload": log.rindegastos_response_payload,
             }
             self.stdout.write(json.dumps(payloads, ensure_ascii=False, indent=2, default=str))
@@ -151,6 +237,39 @@ def _snapshot_value(snapshot, key):
         return "-"
     value = snapshot.get(key)
     return value if value not in (None, "") else "-"
+
+
+def _attempt_audit_summary(attempt):
+    if isinstance(attempt.audit_summary, dict) and attempt.audit_summary:
+        return attempt.audit_summary
+    before = attempt.before_fund_payload if isinstance(attempt.before_fund_payload, dict) else {}
+    after = attempt.after_fund_payload if isinstance(attempt.after_fund_payload, dict) else {}
+    before_deposits = _decimal_or_none(before.get("deposits"))
+    after_deposits = _decimal_or_none(after.get("deposits"))
+    before_balance = _decimal_or_none(before.get("balance"))
+    after_balance = _decimal_or_none(after.get("balance"))
+    return {
+        "expected_amount": _decimal_to_string(attempt.amount),
+        "before_transactions_count": before.get("transactions_count", ""),
+        "after_transactions_count": after.get("transactions_count", ""),
+        "transactions_delta": _int_delta(after.get("transactions_count"), before.get("transactions_count")),
+        "before_deposits": _decimal_to_string(before_deposits),
+        "after_deposits": _decimal_to_string(after_deposits),
+        "deposits_delta": _decimal_to_string(_decimal_delta(after_deposits, before_deposits)),
+        "before_balance": _decimal_to_string(before_balance),
+        "after_balance": _decimal_to_string(after_balance),
+        "balance_delta": _decimal_to_string(_decimal_delta(after_balance, before_balance)),
+        "detected_transaction_reference": attempt.detected_transaction_reference,
+    }
+
+
+def _movement_delta_text(audit):
+    before = audit.get("before_transactions_count", "")
+    after = audit.get("after_transactions_count", "")
+    delta = audit.get("transactions_delta", "")
+    if before == "" and after == "" and delta == "":
+        return "-"
+    return f"{before}->{after} ({delta})"
 
 
 def _response_summary(payload):
@@ -180,9 +299,9 @@ def _parse_boundary(value, is_end=False):
         parsed_date = parse_date(raw)
         if parsed_date is None:
             raise CommandError(f"Fecha inválida: {raw}. Usa YYYY-MM-DD o fecha/hora ISO.")
-        parsed = timezone.datetime.combine(
+        parsed = datetime.combine(
             parsed_date,
-            timezone.datetime.max.time() if is_end else timezone.datetime.min.time(),
+            time.max if is_end else time.min,
         )
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
@@ -197,3 +316,35 @@ def _format_amount(value):
     except Exception:
         return str(value)
     return f"{amount:,.0f}".replace(",", ".")
+
+
+def _decimal_or_none(value):
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _decimal_delta(after_value, before_value):
+    if after_value is None or before_value is None:
+        return None
+    return after_value - before_value
+
+
+def _decimal_to_string(value):
+    if value in (None, ""):
+        return ""
+    try:
+        amount = Decimal(value)
+    except Exception:
+        return str(value)
+    if amount == amount.to_integral_value():
+        return str(int(amount))
+    return format(amount, "f")
+
+
+def _int_delta(after_value, before_value):
+    try:
+        return int(after_value) - int(before_value)
+    except Exception:
+        return ""

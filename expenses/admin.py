@@ -33,4 +33,5 @@ class FundDepositInjectionAttemptAdmin(admin.ModelAdmin):
         "before_fund_payload",
         "after_fund_payload",
         "detected_transaction",
+        "audit_summary",
     )

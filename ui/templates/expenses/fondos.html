@@ -399,8 +399,8 @@
         <label class="form-label">Fondo</label>
         <select name="fund_id" class="form-select">
           <option value="">Todos</option>
-          {% for value in fund_options %}
-          <option value="{{ value }}" {% if fund_filter == value %}selected{% endif %}>{{ value }}</option>
+          {% for option in fund_options %}
+          <option value="{{ option.id }}" {% if fund_filter == option.id %}selected{% endif %}>{{ option.label }}</option>
           {% endfor %}
         </select>
       </div>

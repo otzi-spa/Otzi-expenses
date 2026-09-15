@@ -528,12 +528,7 @@ def funds_dashboard(request):
         .distinct()
         .order_by("cost_center")
     )
-    fund_options = list(
-        base_logs.exclude(rindegastos_fund_id="")
-        .values_list("rindegastos_fund_id", flat=True)
-        .distinct()
-        .order_by("rindegastos_fund_id")
-    )
+    fund_options = _notion_fund_filter_options(base_logs)
     query_without_page = request.GET.copy()
     query_without_page.pop("page", None)
     filtered_total_amount = logs.aggregate(total=Sum("amount"))["total"] or Decimal("0")
@@ -575,6 +570,24 @@ def funds_dashboard(request):
 def _normalize_empty(value):
     text = (value or "").strip()
     return text or None
+
+
+def _notion_fund_filter_options(logs):
+    options_by_id = {}
+    rows = (
+        logs.exclude(rindegastos_fund_id="")
+        .values("rindegastos_fund_id", "notion_rindegastos_fund")
+        .order_by("rindegastos_fund_id", "notion_rindegastos_fund")
+    )
+    for row in rows:
+        fund_id = (row.get("rindegastos_fund_id") or "").strip()
+        if not fund_id:
+            continue
+        label = (row.get("notion_rindegastos_fund") or "").strip() or f"ID: {fund_id}"
+        current = options_by_id.get(fund_id)
+        if current is None or current["label"] == f"ID: {fund_id}":
+            options_by_id[fund_id] = {"id": fund_id, "label": label}
+    return sorted(options_by_id.values(), key=lambda option: option["label"].casefold())
 
 
 def _is_fuel_policy(policy_name):

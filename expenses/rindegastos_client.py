@@ -4,7 +4,9 @@ from django.utils import timezone
 
 
 class RindegastosAPIError(Exception):
-    pass
+    def __init__(self, message, payload=None):
+        super().__init__(message)
+        self.payload = payload
 
 
 class RindegastosClient:
@@ -278,7 +280,7 @@ def _raise_payload_error(endpoint, payload):
     for key in ("Error", "error"):
         message = payload.get(key)
         if message:
-            raise RindegastosAPIError(f"{endpoint}: API error - {message}")
+            raise RindegastosAPIError(f"{endpoint}: API error - {message}", payload=payload)
     status_code = payload.get("statusCode") or payload.get("StatusCode")
     try:
         status_code = int(status_code)
@@ -286,4 +288,4 @@ def _raise_payload_error(endpoint, payload):
         return
     if status_code >= 400:
         message = payload.get("message") or payload.get("Message") or payload
-        raise RindegastosAPIError(f"{endpoint}: API statusCode {status_code} - {message}")
+        raise RindegastosAPIError(f"{endpoint}: API statusCode {status_code} - {message}", payload=payload)

@@ -73,18 +73,29 @@ def inject_notion_remittance_to_rindegastos(log_id, actor, rindegastos_client=No
     except RindegastosAPIError as exc:
         attempt.status = FundDepositInjectionAttempt.STATUS_FAILED
         attempt.error = f"No se pudo crear abono en Rindegastos: {exc}"
+        attempt.response_payload = getattr(exc, "payload", None) or {}
         attempt.completed_at = timezone.now()
-        attempt.save(update_fields=["status", "error", "completed_at", "updated_at"])
+        attempt.save(update_fields=["status", "error", "response_payload", "completed_at", "updated_at"])
         log.local_status = NotionFundSyncLog.STATUS_ERROR
         log.last_error = attempt.error
-        log.save(update_fields=["local_status", "last_error", "updated_at"])
+        log.rindegastos_response_payload = attempt.response_payload
+        log.save(update_fields=["local_status", "last_error", "rindegastos_response_payload", "updated_at"])
         raise FundDepositSyncError(log.last_error) from exc
 
+    audit_summary = _build_audit_summary(
+        before_fund,
+        after_fund,
+        detected_transaction,
+        fund_id=log.rindegastos_fund_id,
+        amount=amount,
+    )
+    anomaly = _combine_anomalies(anomaly, audit_summary.get("anomalies") or [])
     detected_reference = _transaction_reference(detected_transaction, fund_id=log.rindegastos_fund_id, amount=amount)
     attempt.response_payload = rindegastos_response
     attempt.after_fund_payload = _fund_audit_snapshot(after_fund)
     attempt.detected_transaction = detected_transaction
     attempt.detected_transaction_reference = detected_reference
+    attempt.audit_summary = audit_summary
     attempt.anomaly = anomaly
     attempt.status = (
         FundDepositInjectionAttempt.STATUS_AMBIGUOUS
@@ -97,6 +108,7 @@ def inject_notion_remittance_to_rindegastos(log_id, actor, rindegastos_client=No
             "after_fund_payload",
             "detected_transaction",
             "detected_transaction_reference",
+            "audit_summary",
             "anomaly",
             "status",
             "updated_at",
@@ -312,6 +324,87 @@ def _fund_audit_snapshot(payload):
         "transactions_tail_limit": limit,
         "transactions_tail": transactions[-limit:] if limit else [],
     }
+
+
+def _build_audit_summary(before_fund, after_fund, detected_transaction, fund_id="", amount=""):
+    before_transactions = _transactions(before_fund)
+    after_transactions = _transactions(after_fund)
+    before_root = _fund_root(before_fund)
+    after_root = _fund_root(after_fund)
+    expected_amount = _decimal_or_none(amount)
+    before_deposits = _decimal_or_none(
+        before_root.get("Deposits") or before_root.get("deposits") or before_root.get("ManualDeposit")
+    )
+    after_deposits = _decimal_or_none(
+        after_root.get("Deposits") or after_root.get("deposits") or after_root.get("ManualDeposit")
+    )
+    before_balance = _decimal_or_none(
+        before_root.get("Balance") or before_root.get("balance") or before_root.get("finalBalance")
+    )
+    after_balance = _decimal_or_none(
+        after_root.get("Balance") or after_root.get("balance") or after_root.get("finalBalance")
+    )
+    transactions_delta = len(after_transactions) - len(before_transactions)
+    deposits_delta = _decimal_delta(after_deposits, before_deposits)
+    balance_delta = _decimal_delta(after_balance, before_balance)
+    detected_amount = _transaction_amount(detected_transaction)
+    detected_is_deposit = _is_deposit_transaction(detected_transaction) if detected_transaction else False
+    anomalies = []
+
+    if transactions_delta != 1:
+        anomalies.append(f"delta movimientos esperado 1 y fue {transactions_delta}")
+    if expected_amount is not None and deposits_delta is not None and deposits_delta != expected_amount:
+        anomalies.append(f"delta depósitos esperado {expected_amount} y fue {deposits_delta}")
+    if expected_amount is not None and balance_delta is not None and balance_delta != expected_amount:
+        anomalies.append(f"delta saldo esperado {expected_amount} y fue {balance_delta}")
+    if detected_transaction and not detected_is_deposit:
+        anomalies.append("movimiento detectado no está marcado como abono")
+    if expected_amount is not None and detected_amount is not None and detected_amount != expected_amount:
+        anomalies.append(f"monto movimiento detectado esperado {expected_amount} y fue {detected_amount}")
+
+    return {
+        "fund_id": str(fund_id or ""),
+        "expected_amount": _decimal_to_string(expected_amount),
+        "before_transactions_count": len(before_transactions),
+        "after_transactions_count": len(after_transactions),
+        "transactions_delta": transactions_delta,
+        "before_deposits": _decimal_to_string(before_deposits),
+        "after_deposits": _decimal_to_string(after_deposits),
+        "deposits_delta": _decimal_to_string(deposits_delta),
+        "before_balance": _decimal_to_string(before_balance),
+        "after_balance": _decimal_to_string(after_balance),
+        "balance_delta": _decimal_to_string(balance_delta),
+        "detected_transaction_reference": _transaction_reference(
+            detected_transaction,
+            fund_id=fund_id,
+            amount=amount,
+        ),
+        "detected_transaction_amount": _decimal_to_string(detected_amount),
+        "detected_transaction_is_deposit": detected_is_deposit,
+        "anomalies": anomalies,
+    }
+
+
+def _decimal_delta(after_value, before_value):
+    if after_value is None or before_value is None:
+        return None
+    return after_value - before_value
+
+
+def _decimal_to_string(value):
+    if value is None:
+        return ""
+    if value == value.to_integral_value():
+        return str(int(value))
+    return format(value, "f")
+
+
+def _combine_anomalies(existing, anomalies):
+    parts = []
+    if existing:
+        parts.append(str(existing))
+    parts.extend(str(item) for item in anomalies if item)
+    return "; ".join(parts)
 
 
 def _fund_root(payload):
