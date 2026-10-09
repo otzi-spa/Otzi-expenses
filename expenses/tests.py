@@ -427,6 +427,40 @@ class RindegastosUploadedExpenseSyncTests(TestCase):
         self.assertEqual(stats["matched"], 1)
         self.assertEqual(stats["matched_by"]["remote_id"], 1)
         self.assertEqual(expense.rindegastos_integration_code, export_id)
+        self.assertEqual(expense.rindegastos_report_id, "654")
+
+    def test_sync_preserves_existing_report_id_when_remote_report_is_empty(self):
+        expense = Expense.objects.create(
+            status="completed",
+            amount=Decimal("5900"),
+            currency="CLP",
+            category="Oficina Central",
+            supplier="Proveedor",
+            paid_at="2026-06-11",
+            rindegastos_expense_id="987",
+            rindegastos_report_id="654",
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "ReportId": "",
+                        "Status": "Aprobado",
+                        "IssueDate": "2026-06-11",
+                        "Total": 5900,
+                        "Note": "Nota editada en Rindegastos",
+                    }
+                ], {"Pages": 1}
+
+        RindegastosUploadedExpenseSync(client=FakeClient(), export_id_func=_expense_export_id).sync(
+            since=timezone.datetime(2026, 4, 1).date(),
+            until=timezone.datetime(2026, 7, 15).date(),
+        )
+
+        expense.refresh_from_db()
+        self.assertEqual(expense.rindegastos_report_id, "654")
 
 
 class RindegastosClientTests(TestCase):
@@ -632,6 +666,48 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertEqual(third["changed_snapshots"], 1)
         self.assertEqual(RindegastosExpenseSnapshot.objects.filter(expense=expense).count(), 2)
         self.assertEqual(RindegastosReconcileRun.objects.count(), 3)
+
+    def test_reconcile_updates_expense_report_tracking_from_remote_detail(self):
+        expense = Expense.objects.create(
+            status="completed",
+            supplier="Proveedor",
+            rindegastos_expense_id="987",
+            rindegastos_integration_code="OTZ-ABC123",
+        )
+
+        class FakeClient:
+            def get_expenses_page(self, params):
+                return [
+                    {
+                        "Id": 987,
+                        "Supplier": "Proveedor",
+                        "Total": 5900,
+                        "IntegrationCode": expense.rindegastos_integration_code,
+                    }
+                ], {"Pages": 1}
+
+            def get_expense(self, expense_id):
+                return {
+                    "Id": expense_id,
+                    "ReportId": "13421804",
+                    "Status": "Aprobado",
+                    "Supplier": "Proveedor",
+                    "Total": 5900,
+                    "IntegrationCode": expense.rindegastos_integration_code,
+                }
+
+            def get_expense_report(self, report_id):
+                return {"Id": report_id, "ReportNumber": "6571", "Title": "Informe visible"}
+
+        RindegastosExpenseReconciler(client=FakeClient(), export_id_func=_expense_export_id).reconcile(
+            since=date(2026, 4, 1),
+            until=date(2026, 8, 5),
+        )
+
+        expense.refresh_from_db()
+        self.assertEqual(expense.rindegastos_expense_id, "987")
+        self.assertEqual(expense.rindegastos_report_id, "13421804")
+        self.assertEqual(expense.rindegastos_status, "Aprobado")
 
     def test_reconcile_opens_diff_for_remote_value_mismatch(self):
         expense = Expense.objects.create(
@@ -2371,6 +2447,38 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "Target")
         self.assertContains(response, "trace_id=")
         self.assertContains(response, "scope=active")
+
+    def test_expense_list_displays_rindegastos_expense_and_report_ids_together(self):
+        Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Target",
+            rindegastos_expense_id="75528397",
+            rindegastos_report_id="13421804",
+        )
+
+        response = self.client.get(reverse("expense_list"))
+
+        self.assertContains(response, "75528397/13421804")
+
+    def test_expense_list_searches_by_rindegastos_report_id(self):
+        Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Target",
+            rindegastos_expense_id="75528397",
+            rindegastos_report_id="13421804",
+        )
+        Expense.objects.create(
+            status="completed",
+            supplier="Proveedor Comun",
+            rindegastos_expense_id="75528979",
+            rindegastos_report_id="13421805",
+        )
+
+        response = self.client.get(reverse("expense_list"), {"q": "13421804"})
+
+        self.assertEqual(response.context["paginator"].count, 1)
+        self.assertContains(response, "Proveedor Target")
+        self.assertNotContains(response, "Proveedor Comun")
 
     def test_expense_list_displays_open_rindegastos_diffs(self):
         expense = Expense.objects.create(

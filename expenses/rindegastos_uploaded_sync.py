@@ -158,10 +158,11 @@ class RindegastosUploadedExpenseSync:
             expense, otzi_id, match_source = match
             matched_ids.add(otzi_id)
             uploaded_at = _parse_rindegastos_datetime(summary["issue_date"]) or now
+            report_id = str(summary["report_id"] or "") or expense.rindegastos_report_id
             Expense.objects.filter(pk=expense.pk).update(
                 rindegastos_expense_id=str(summary["id"] or otzi_id),
                 rindegastos_integration_code=otzi_id,
-                rindegastos_report_id=str(summary["report_id"] or "") or None,
+                rindegastos_report_id=report_id or None,
                 rindegastos_uploaded_at=uploaded_at,
                 rindegastos_synced_at=now,
                 rindegastos_status=str(summary["status"] or "") or None,

@@ -489,7 +489,7 @@
           <td data-filter-value="{% if gasto.rindegastos_expense_id %}Subido{% else %}No subido{% endif %}" data-order="{% if gasto.rindegastos_expense_id %}1{% else %}0{% endif %}">
             {% if gasto.rindegastos_expense_id %}
               <span class="badge badge-light-success">Subido</span>
-              <div class="text-muted fs-8 mt-1">ID {{ gasto.rindegastos_expense_id }}</div>
+              <div class="text-muted fs-8 mt-1">{{ gasto.rindegastos_expense_id }}{% if gasto.rindegastos_report_id %}/{{ gasto.rindegastos_report_id }}{% endif %}</div>
             {% else %}
               <span class="badge badge-light">No subido</span>
             {% endif %}

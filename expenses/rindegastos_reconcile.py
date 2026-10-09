@@ -307,6 +307,12 @@ class RindegastosExpenseReconciler:
                     run=run,
                     dry_run=dry_run,
                 )
+                self._update_expense_tracking(
+                    expense=expense,
+                    normalized=normalized,
+                    payload=snapshot_payload,
+                    dry_run=dry_run,
+                )
                 diff_specs = compare_expense_to_remote(expense, normalized)
                 diff_result = self._handle_diffs(
                     expense,
@@ -380,6 +386,26 @@ class RindegastosExpenseReconciler:
             source_endpoint=source_endpoint,
         )
         return True, snapshot, normalized
+
+    def _update_expense_tracking(self, expense, normalized, payload, dry_run=False):
+        if dry_run:
+            return
+        updates = {
+            "rindegastos_synced_at": timezone.now(),
+            "rindegastos_raw_payload": payload,
+        }
+        remote_expense_id = normalized.get("rindegastos_expense_id") or ""
+        if remote_expense_id:
+            updates["rindegastos_expense_id"] = remote_expense_id
+        remote_report_id = normalized.get("rindegastos_report_id") or ""
+        if remote_report_id:
+            updates["rindegastos_report_id"] = remote_report_id
+        remote_status = normalized.get("rindegastos_status") or ""
+        if remote_status:
+            updates["rindegastos_status"] = remote_status
+        Expense.objects.filter(pk=expense.pk).update(**updates)
+        for field_name, value in updates.items():
+            setattr(expense, field_name, value)
 
     def _handle_diffs(self, expense, snapshot, diff_specs, remote_ids_count=1, dry_run=False, apply_safe_diffs=False):
         result = {"opened": 0, "auto_applied": 0, "manual_review": 0}

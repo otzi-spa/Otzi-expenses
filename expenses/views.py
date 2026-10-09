@@ -1923,6 +1923,7 @@ def expense_list(request):
             | Q(wa_sender__last_name__icontains=search_query)
             | Q(created_by__email__icontains=search_query)
             | Q(rindegastos_expense_id__icontains=search_query)
+            | Q(rindegastos_report_id__icontains=search_query)
             | Q(rindegastos_integration_code__icontains=search_query)
             | Q(document_number__icontains=search_query)
         )
