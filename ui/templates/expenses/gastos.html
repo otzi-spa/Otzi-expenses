@@ -4,9 +4,18 @@
 
 {% block toolbar %}
 <div class="app-toolbar py-3">
-  <div class="app-container container-fluid d-flex align-items-center w-100 px-0">
+  <div class="app-container container-fluid d-flex flex-wrap gap-2 align-items-center w-100 px-0">
     <h1 class="page-heading d-flex text-dark fw-bold fs-3 my-0">Gastos</h1>
-    <div class="d-flex align-items-center gap-2 ms-auto">
+    <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+      {% if can_manage_expenses %}
+      <form id="reportNamesSyncForm" action="{% url 'expense_rindegastos_reports_sync' %}" method="post">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-light d-inline-flex align-items-center gap-2" id="reportNamesSyncButton">
+          <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+          <span>Actualizar informes</span>
+        </button>
+      </form>
+      {% endif %}
       <button type="button" class="btn btn-excel-export d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#rindegastosExportModal">
         <span class="svg-icon svg-icon-5">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -34,6 +43,12 @@
 {% endblock %}
 
 {% block content %}
+<div id="reportNamesSyncMessage" class="alert alert-danger d-none" role="alert"></div>
+{% for message in messages %}
+{% if "report-names-sync" in message.tags %}
+<div class="alert alert-{{ message.level_tag }}" role="status">{{ message }}</div>
+{% endif %}
+{% endfor %}
 {% if messages %}
 <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1090;">
   {% for message in messages %}
@@ -2129,6 +2144,55 @@
   {{ tax_calculation_payload|json_script:"tax-calculation-data" }}
   <script>
     document.addEventListener("DOMContentLoaded", function () {
+      var reportNamesForm = document.getElementById('reportNamesSyncForm');
+      if (reportNamesForm) {
+        var reportNamesButton = document.getElementById('reportNamesSyncButton');
+        var reportNamesMessage = document.getElementById('reportNamesSyncMessage');
+        var reportNamesTimer;
+        function reportNamesBusy(busy) {
+          reportNamesButton.disabled = busy;
+          reportNamesButton.querySelector('span').textContent = busy ? 'Actualizando informes...' : 'Actualizar informes';
+        }
+        async function updateReportNames(method) {
+          clearTimeout(reportNamesTimer);
+          try {
+            var response = await fetch(reportNamesForm.action, {
+              method: method,
+              headers: method === 'POST' ? {
+                'X-CSRFToken': reportNamesForm.querySelector('[name=csrfmiddlewaretoken]').value
+              } : {},
+              credentials: 'same-origin'
+            });
+            if (response.redirected) {
+              window.location.href = response.url;
+              return;
+            }
+            var data = await response.json();
+            if (!response.ok || data.status === 'failed') {
+              throw new Error(data.message || 'No se pudo actualizar los informes. Intenta nuevamente.');
+            }
+            if (data.status === 'completed') {
+              window.location.reload();
+              return;
+            }
+            reportNamesBusy(data.status === 'running');
+            if (data.status === 'running') {
+              reportNamesTimer = setTimeout(function () { updateReportNames('GET'); }, 3000);
+            }
+          } catch (error) {
+            reportNamesBusy(false);
+            reportNamesMessage.textContent = error.message;
+            reportNamesMessage.classList.remove('d-none');
+          }
+        }
+        reportNamesForm.addEventListener('submit', function (event) {
+          event.preventDefault();
+          reportNamesMessage.classList.add('d-none');
+          reportNamesBusy(true);
+          updateReportNames('POST');
+        });
+        updateReportNames('GET');
+      }
       var taxCalculationData = JSON.parse(document.getElementById('tax-calculation-data').textContent || '{}');
       var expensesTable = document.getElementById("expensesTable");
       var serverFilterActive = "{{ current_scope|escapejs }}" !== "active" || Boolean("{{ search_query|escapejs }}");

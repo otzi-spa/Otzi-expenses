@@ -13,16 +13,21 @@ class Command(BaseCommand):
         parser.add_argument("--since", help="Fecha inicial YYYY-MM-DD. Default: últimos 120 días.")
         parser.add_argument("--until", help="Fecha final YYYY-MM-DD. Default: hoy.")
         parser.add_argument("--max-pages", type=int, default=20)
+        parser.add_argument(
+            "--report-names-only",
+            action="store_true",
+            help="Actualiza nombres de todos los informes asociados, sin filtrar por fecha ni modificar los gastos.",
+        )
 
     def handle(self, *args, **options):
         since = parse_date(options.get("since") or "") or rolling_uploaded_sync_since()
         until = parse_date(options.get("until") or "")
         try:
-            stats = RindegastosUploadedExpenseSync(export_id_func=expense_integration_code).sync(
-                since=since,
-                until=until,
-                max_pages=options["max_pages"],
-            )
+            sync = RindegastosUploadedExpenseSync(export_id_func=expense_integration_code)
+            if options["report_names_only"]:
+                stats = sync.sync_report_names()
+            else:
+                stats = sync.sync(since=since, until=until, max_pages=options["max_pages"])
         except (RindegastosAPIError, ValueError) as exc:
             raise CommandError(str(exc)) from exc
 

@@ -53,6 +53,13 @@ def sync_rindegastos_uploaded_expenses_task():
     return stats
 
 
+@shared_task(name="expenses.sync_rindegastos_report_names", track_started=True)
+def sync_rindegastos_report_names_task():
+    stats = RindegastosUploadedExpenseSync().sync_report_names()
+    logger.info("Actualización de nombres de informes Rindegastos completada: %s", stats)
+    return stats
+
+
 @shared_task(name="expenses.sync_funds_sources")
 def sync_funds_sources_task():
     stats = {

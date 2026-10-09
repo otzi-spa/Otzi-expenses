@@ -1,11 +1,14 @@
 import csv
 import io
+from importlib import import_module
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import urlparse
 
 from django.conf import settings
+from django.apps import apps
+from django.db import connection
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.files.base import ContentFile
@@ -35,7 +38,12 @@ from expenses.models import (
     TaxIndicatorValue,
     normalize_rut,
 )
-from expenses.tasks import reconcile_rindegastos_expenses_task, send_expense_notification_task, sync_funds_sources_task
+from expenses.tasks import (
+    reconcile_rindegastos_expenses_task,
+    send_expense_notification_task,
+    sync_funds_sources_task,
+    sync_rindegastos_report_names_task,
+)
 from expenses.invoice_tax_calculator import calculate_invoice_taxes
 from expenses.rindegastos_client import RindegastosAPIError, RindegastosClient
 from expenses.rindegastos_reconcile import (
@@ -503,6 +511,125 @@ class RindegastosUploadedExpenseSyncTests(TestCase):
         expenses[1].refresh_from_db()
         self.assertEqual(expenses[0].rindegastos_report_name, "")
         self.assertEqual(expenses[1].rindegastos_report_name, "6638 Octavio Olivares")
+
+    def test_sync_populates_report_names_for_expenses_outside_remote_results(self):
+        expenses = [
+            Expense.objects.create(rindegastos_report_id="13801951", rindegastos_expense_id=str(remote_id))
+            for remote_id in (987, 988)
+        ]
+
+        class FakeClient:
+            calls = 0
+
+            def get_expenses_page(self, params):
+                return [], {"Pages": 1}
+
+            def get_expense_report(self, report_id):
+                self.calls += 1
+                return {"ReportNumber": "6638", "Title": "Octavio Olivares"}
+
+        client = FakeClient()
+        stats = RindegastosUploadedExpenseSync(client=client, export_id_func=_expense_export_id).sync()
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(stats["matched"], 0)
+        self.assertEqual(stats["report_names_updated"], 2)
+        for expense in expenses:
+            expense.refresh_from_db()
+            self.assertEqual(expense.rindegastos_report_name, "6638 Octavio Olivares")
+            self.assertIsNone(expense.rindegastos_synced_at)
+
+    @patch("expenses.rindegastos_uploaded_sync.RindegastosClient")
+    def test_report_names_only_command_does_not_fetch_expenses(self, client_class):
+        expense = Expense.objects.create(rindegastos_report_id="13801951")
+        client_class.return_value.get_expense_report.return_value = {
+            "ReportNumber": "6638", "Title": "6638: Octavio Olivares"
+        }
+        call_command("sync_rindegastos_uploaded_expenses", report_names_only=True, stdout=io.StringIO())
+        client_class.return_value.get_expenses_page.assert_not_called()
+        expense.refresh_from_db()
+        self.assertEqual(expense.rindegastos_report_name, "6638: Octavio Olivares")
+
+    def test_backfill_uses_latest_saved_report_name_without_overwriting_known_names(self):
+        expense = Expense.objects.create(rindegastos_report_id="13801951")
+        known = Expense.objects.create(rindegastos_report_id="13801951", rindegastos_report_name="Nombre conocido")
+        for index, title in enumerate(("Informe antiguo", "6638: Octavio Olivares")):
+            RindegastosExpenseSnapshot.objects.create(
+                expense=expense,
+                rindegastos_report_id="13801951",
+                rindegastos_expense_id="987",
+                payload_hash=str(index),
+                normalized_payload={"rindegastos_report_number": "6638", "rindegastos_report_title": title},
+            )
+        migration = import_module("expenses.migrations.0044_backfill_rindegastos_report_names")
+        with connection.schema_editor() as editor:
+            migration.backfill_report_names(apps, editor)
+        expense.refresh_from_db()
+        known.refresh_from_db()
+        self.assertEqual(expense.rindegastos_report_name, "6638: Octavio Olivares")
+        self.assertEqual(known.rindegastos_report_name, "Nombre conocido")
+
+
+class RindegastosReportNamesActionTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username="reports-admin", email="reports@example.com", password="test"
+        )
+        self.client.force_login(self.user)
+        self.url = reverse("expense_rindegastos_reports_sync")
+
+    @patch("expenses.views.sync_rindegastos_report_names_task.delay")
+    def test_post_starts_background_update_and_get_does_not_enqueue(self, delay):
+        delay.return_value.id = "report-names-task"
+        self.assertEqual(self.client.get(self.url).json(), {"status": "idle"})
+        delay.assert_not_called()
+        response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.client.session["rindegastos_report_names_task_id"], "report-names-task")
+        delay.assert_called_once_with()
+
+    @patch("expenses.views.sync_rindegastos_report_names_task.delay")
+    @patch("expenses.views.AsyncResult")
+    def test_existing_update_is_not_enqueued_twice(self, result, delay):
+        session = self.client.session
+        session["rindegastos_report_names_task_id"] = "report-names-task"
+        session.save()
+        result.return_value.state = "STARTED"
+        self.assertEqual(self.client.post(self.url).json(), {"status": "running"})
+        delay.assert_not_called()
+
+    @patch("expenses.views.AsyncResult")
+    def test_completion_displays_results_and_partial_failures(self, result):
+        session = self.client.session
+        session["rindegastos_report_names_task_id"] = "report-names-task"
+        session.save()
+        result.return_value.state = "SUCCESS"
+        result.return_value.result = {"report_names_updated": 10, "reports_without_name": 2}
+        self.assertEqual(self.client.get(self.url).json(), {"status": "completed"})
+        self.assertNotIn("rindegastos_report_names_task_id", self.client.session)
+        response = self.client.get(reverse("expense_list"))
+        self.assertContains(response, "Informes actualizados: 10 gastos.")
+        self.assertContains(response, "No se pudo obtener el nombre de 2 informes.")
+
+    @patch("expenses.views.sync_rindegastos_report_names_task.delay")
+    def test_cannot_enqueue_without_manage_permission(self, delay):
+        user = get_user_model().objects.create_user(username="reports-viewer", password="test", role="viewer")
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(self.url).status_code, 403)
+        delay.assert_not_called()
+
+    @patch("expenses.views.sync_rindegastos_report_names_task.delay", side_effect=RuntimeError("Broker unavailable"))
+    def test_enqueue_error_allows_retry(self, delay):
+        with self.assertLogs("expenses.views", level="ERROR"):
+            response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("rindegastos_report_names_task_id", self.client.session)
+
+    @patch("expenses.tasks.RindegastosUploadedExpenseSync")
+    def test_background_task_refreshes_names_only(self, sync):
+        sync.return_value.sync_report_names.return_value = {"report_names_updated": 4}
+        self.assertEqual(sync_rindegastos_report_names_task.run(), {"report_names_updated": 4})
+        sync.return_value.sync_report_names.assert_called_once_with()
+        sync.return_value.sync.assert_not_called()
 
 
 class RindegastosClientTests(TestCase):

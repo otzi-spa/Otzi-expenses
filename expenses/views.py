@@ -10,6 +10,7 @@ from datetime import datetime, time as datetime_time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
+from celery.result import AsyncResult
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
@@ -70,6 +71,7 @@ from .rindegastos_trace import ensure_expense_integration_code, expense_integrat
 from .rindegastos_sync import RindegastosCatalogSync
 from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, default_uploaded_sync_since
 from .tax_indicators_sync import SiiTaxIndicatorSync
+from .tasks import sync_rindegastos_report_names_task
 from .whatsapp_notifications import create_rejection_notification, enqueue_notification_send
 
 
@@ -1770,6 +1772,42 @@ def expense_create(request):
         messages.error(request, receipt_error)
     messages.success(request, f"Gasto #{expense.id} creado correctamente.")
     return redirect("expense_list")
+
+
+@login_required
+def expense_rindegastos_reports_sync(request):
+    if not _can_manage_expenses(request.user):
+        return JsonResponse({"message": "No tienes permisos para actualizar informes."}, status=403)
+    if request.method not in {"GET", "POST"}:
+        return JsonResponse({"message": "Metodo no permitido."}, status=405)
+    task_id = request.session.get("rindegastos_report_names_task_id")
+    if task_id:
+        try:
+            result = AsyncResult(task_id)
+            state = result.state
+            if state in {"PENDING", "STARTED", "RETRY"}:
+                return JsonResponse({"status": "running"})
+            request.session.pop("rindegastos_report_names_task_id", None)
+            if request.method == "GET":
+                if state == "SUCCESS":
+                    stats = result.result
+                    messages.success(request, f"Informes actualizados: {stats['report_names_updated']} gastos.", extra_tags="report-names-sync")
+                    if stats["reports_without_name"]:
+                        messages.warning(request, f"No se pudo obtener el nombre de {stats['reports_without_name']} informes. Puedes reintentar.", extra_tags="report-names-sync")
+                    return JsonResponse({"status": "completed"})
+                return JsonResponse({"status": "failed", "message": "No se pudieron actualizar los informes. Puedes reintentar."})
+        except Exception:
+            logger.exception("No se pudo consultar la actualización de informes Rindegastos.")
+            return JsonResponse({"message": "No se pudo consultar la actualización. Intenta nuevamente."}, status=503)
+    if request.method == "GET":
+        return JsonResponse({"status": "idle"})
+    try:
+        result = sync_rindegastos_report_names_task.delay()
+    except Exception:
+        logger.exception("No se pudo iniciar la actualización de informes Rindegastos.")
+        return JsonResponse({"message": "No se pudo iniciar la actualización. Intenta nuevamente."}, status=503)
+    request.session["rindegastos_report_names_task_id"] = result.id
+    return JsonResponse({"status": "running"}, status=202)
 
 
 @login_required

@@ -136,6 +136,29 @@ class RindegastosUploadedExpenseSync:
             for expense in Expense.objects.exclude(rindegastos_expense_id__isnull=True).exclude(rindegastos_expense_id="")
         }
 
+    def sync_report_names(self, only_missing=False, report_cache=None):
+        report_cache = report_cache if report_cache is not None else {}
+        expenses = Expense.objects.exclude(rindegastos_report_id__isnull=True).exclude(rindegastos_report_id="")
+        if only_missing:
+            expenses = expenses.filter(rindegastos_report_name="")
+        report_ids = list(expenses.order_by().values_list("rindegastos_report_id", flat=True).distinct())
+        stats = {"reports_checked": len(report_ids), "report_names_updated": 0, "reports_without_name": 0}
+        for report_id in report_ids:
+            if report_id not in report_cache:
+                try:
+                    report_cache[report_id] = self.client.get_expense_report(report_id)
+                except Exception:
+                    logger.warning("No se pudo consultar el informe Rindegastos %s", report_id, exc_info=True)
+                    report_cache[report_id] = {}
+            name = rindegastos_report_name(report_cache[report_id])
+            if not name:
+                stats["reports_without_name"] += 1
+                continue
+            stats["report_names_updated"] += expenses.filter(rindegastos_report_id=report_id).exclude(
+                rindegastos_report_name=name
+            ).update(rindegastos_report_name=name)
+        return stats
+
     @transaction.atomic
     def sync(self, since=None, until=None, max_pages=10, results_per_page=100):
         now = timezone.now()
@@ -194,6 +217,7 @@ class RindegastosUploadedExpenseSync:
             matched_by[match_source] += 1
             matched += 1
 
+        report_stats = self.sync_report_names(only_missing=True, report_cache=report_cache)
         return {
             "since": (since or default_uploaded_sync_since()).isoformat(),
             "until": (until or timezone.localdate()).isoformat(),
@@ -206,6 +230,7 @@ class RindegastosUploadedExpenseSync:
             "matched_by": matched_by,
             "matched_ids": sorted(matched_ids),
             "unmatched_ids": sorted(unmatched_ids),
+            **report_stats,
         }
 
     def match_remote_expense(self, summary, local_by_export_id, local_by_remote_id):
