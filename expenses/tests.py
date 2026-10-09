@@ -439,9 +439,13 @@ class RindegastosUploadedExpenseSyncTests(TestCase):
             paid_at="2026-06-11",
             rindegastos_expense_id="987",
             rindegastos_report_id="654",
+            rindegastos_report_name="6638 Octavio Olivares",
         )
 
         class FakeClient:
+            def get_expense_report(self, report_id):
+                raise RuntimeError("Informe temporalmente no disponible")
+
             def get_expenses_page(self, params):
                 return [
                     {
@@ -461,6 +465,44 @@ class RindegastosUploadedExpenseSyncTests(TestCase):
 
         expense.refresh_from_db()
         self.assertEqual(expense.rindegastos_report_id, "654")
+        self.assertEqual(expense.rindegastos_report_name, "6638 Octavio Olivares")
+
+    def test_sync_fetches_report_name_once_per_report_and_clears_previous_name(self):
+        expenses = [
+            Expense.objects.create(
+                status="completed",
+                rindegastos_expense_id=str(remote_id),
+                rindegastos_report_id="old-report",
+                rindegastos_report_name="Informe anterior",
+            )
+            for remote_id in (987, 988)
+        ]
+
+        class FakeClient:
+            calls = 0
+
+            def get_expenses_page(self, params):
+                return [{"Id": 987, "ReportId": 654}, {"Id": 988, "ReportId": 654}], {"Pages": 1}
+
+            def get_expense_report(self, report_id):
+                self.calls += 1
+                return {"ReportNumber": "6638", "Title": "Octavio Olivares"}
+
+        client = FakeClient()
+        sync = RindegastosUploadedExpenseSync(client=client, export_id_func=_expense_export_id)
+        sync.sync()
+        self.assertEqual(client.calls, 1)
+        for expense in expenses:
+            expense.refresh_from_db()
+            self.assertEqual(expense.rindegastos_report_name, "6638 Octavio Olivares")
+
+        with patch.object(client, "get_expense_report", return_value={}):
+            Expense.objects.filter(pk=expenses[0].pk).update(rindegastos_report_id="old-report")
+            sync.sync()
+        expenses[0].refresh_from_db()
+        expenses[1].refresh_from_db()
+        self.assertEqual(expenses[0].rindegastos_report_name, "")
+        self.assertEqual(expenses[1].rindegastos_report_name, "6638 Octavio Olivares")
 
 
 class RindegastosClientTests(TestCase):
@@ -708,6 +750,7 @@ class RindegastosExpenseReconcilerTests(TestCase):
         self.assertEqual(expense.rindegastos_expense_id, "987")
         self.assertEqual(expense.rindegastos_report_id, "13421804")
         self.assertEqual(expense.rindegastos_status, "Aprobado")
+        self.assertEqual(expense.rindegastos_report_name, "6571 Informe visible")
 
     def test_reconcile_opens_diff_for_remote_value_mismatch(self):
         expense = Expense.objects.create(
@@ -2448,17 +2491,37 @@ class SupplierCatalogFlowTests(TestCase):
         self.assertContains(response, "trace_id=")
         self.assertContains(response, "scope=active")
 
-    def test_expense_list_displays_rindegastos_expense_and_report_ids_together(self):
+    def test_expense_list_displays_report_name_with_full_tooltip(self):
         Expense.objects.create(
             status="completed",
             supplier="Proveedor Target",
             rindegastos_expense_id="75528397",
             rindegastos_report_id="13421804",
+            rindegastos_report_name='6638 Octavio "Olivares"',
         )
 
         response = self.client.get(reverse("expense_list"))
 
-        self.assertContains(response, "75528397/13421804")
+        self.assertContains(response, '75528397/<span tabindex="0" data-kt-tooltip="true"')
+        self.assertContains(response, '>6638 O...</span>')
+        self.assertContains(response, 'title="6638 Octavio &quot;Olivares&quot;"')
+        self.assertNotContains(response, "75528397/13421804")
+
+    def test_expense_list_without_report_name_displays_only_expense_id(self):
+        Expense.objects.create(
+            status="completed",
+            rindegastos_expense_id="75528397",
+            rindegastos_report_id="13421804",
+        )
+        response = self.client.get(reverse("expense_list"))
+        self.assertContains(response, '>75528397</div>')
+
+    def test_expense_list_searches_by_report_name(self):
+        Expense.objects.create(status="completed", supplier="Target", rindegastos_report_name="6638 Octavio Olivares")
+        Expense.objects.create(status="completed", supplier="Otro", rindegastos_report_name="6641 Gastos varios")
+        response = self.client.get(reverse("expense_list"), {"q": "6638"})
+        self.assertEqual(response.context["paginator"].count, 1)
+        self.assertContains(response, "Target")
 
     def test_expense_list_searches_by_rindegastos_report_id(self):
         Expense.objects.create(

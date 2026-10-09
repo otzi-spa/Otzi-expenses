@@ -103,6 +103,7 @@ class Expense(models.Model):
     rindegastos_expense_id = models.CharField(max_length=255, blank=True, null=True, db_index=True)
     rindegastos_integration_code = models.CharField(max_length=64, blank=True, null=True, db_index=True)
     rindegastos_report_id = models.CharField(max_length=255, blank=True, null=True)
+    rindegastos_report_name = models.TextField(blank=True, default="")
     rindegastos_uploaded_at = models.DateTimeField(null=True, blank=True)
     rindegastos_synced_at = models.DateTimeField(null=True, blank=True)
     rindegastos_status = models.CharField(max_length=255, blank=True, null=True)

@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import date, datetime, timedelta
 
@@ -9,6 +10,17 @@ from .rindegastos_client import RindegastosClient
 
 
 OTZI_EXPENSE_ID_RE = re.compile(r"\bOTZ-[A-Z0-9]+\b")
+logger = logging.getLogger(__name__)
+
+
+def rindegastos_report_name(report):
+    title = str(report.get("Title") or report.get("title") or "").strip()
+    number = str(
+        report.get("ReportNumber") or report.get("reportNumber") or report.get("Folio") or report.get("folio") or ""
+    ).strip()
+    if number and not re.match(r"^" + re.escape(number) + r"(?:\b|:)", title):
+        return f"{number} {title}".strip()
+    return title
 
 
 def default_uploaded_sync_since():
@@ -142,6 +154,7 @@ class RindegastosUploadedExpenseSync:
         matched_by = {"integration_code": 0, "note": 0, "remote_id": 0}
         unmatched_ids = set()
         matched_ids = set()
+        report_cache = {}
         for payload in remote_expenses:
             summary = summarize_rindegastos_expense(payload)
             if summary["integration_otzi_ids"]:
@@ -159,10 +172,20 @@ class RindegastosUploadedExpenseSync:
             matched_ids.add(otzi_id)
             uploaded_at = _parse_rindegastos_datetime(summary["issue_date"]) or now
             report_id = str(summary["report_id"] or "") or expense.rindegastos_report_id
+            report_name = expense.rindegastos_report_name if report_id == expense.rindegastos_report_id else ""
+            if report_id:
+                if report_id not in report_cache:
+                    try:
+                        report_cache[report_id] = self.client.get_expense_report(report_id)
+                    except Exception:
+                        logger.warning("No se pudo consultar el informe Rindegastos %s", report_id, exc_info=True)
+                        report_cache[report_id] = {}
+                report_name = rindegastos_report_name(report_cache[report_id]) or report_name
             Expense.objects.filter(pk=expense.pk).update(
                 rindegastos_expense_id=str(summary["id"] or otzi_id),
                 rindegastos_integration_code=otzi_id,
                 rindegastos_report_id=report_id or None,
+                rindegastos_report_name=report_name,
                 rindegastos_uploaded_at=uploaded_at,
                 rindegastos_synced_at=now,
                 rindegastos_status=str(summary["status"] or "") or None,

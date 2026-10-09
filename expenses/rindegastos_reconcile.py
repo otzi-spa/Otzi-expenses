@@ -10,7 +10,12 @@ from .models import Expense, RindegastosExpenseDiff, RindegastosExpenseSnapshot,
 from .rindegastos_client import RindegastosClient
 from .rindegastos_diff_rules import apply_rindegastos_diff, classify_diff, diff_values_equivalent, should_ignore_diff
 from .rindegastos_trace import expense_integration_code
-from .rindegastos_uploaded_sync import RindegastosUploadedExpenseSync, extract_otzi_ids, summarize_rindegastos_expense
+from .rindegastos_uploaded_sync import (
+    RindegastosUploadedExpenseSync,
+    extract_otzi_ids,
+    rindegastos_report_name,
+    summarize_rindegastos_expense,
+)
 
 
 CUSTOM_FIELD_COLLECTION_KEYS = (
@@ -400,6 +405,10 @@ class RindegastosExpenseReconciler:
         remote_report_id = normalized.get("rindegastos_report_id") or ""
         if remote_report_id:
             updates["rindegastos_report_id"] = remote_report_id
+            report_context = payload.get("_otzi_report_context") or {}
+            report_name = rindegastos_report_name(report_context)
+            if report_name or remote_report_id != expense.rindegastos_report_id:
+                updates["rindegastos_report_name"] = report_name
         remote_status = normalized.get("rindegastos_status") or ""
         if remote_status:
             updates["rindegastos_status"] = remote_status

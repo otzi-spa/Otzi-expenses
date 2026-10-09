@@ -489,7 +489,7 @@
           <td data-filter-value="{% if gasto.rindegastos_expense_id %}Subido{% else %}No subido{% endif %}" data-order="{% if gasto.rindegastos_expense_id %}1{% else %}0{% endif %}">
             {% if gasto.rindegastos_expense_id %}
               <span class="badge badge-light-success">Subido</span>
-              <div class="text-muted fs-8 mt-1">{{ gasto.rindegastos_expense_id }}{% if gasto.rindegastos_report_id %}/{{ gasto.rindegastos_report_id }}{% endif %}</div>
+              <div class="text-muted fs-8 mt-1">{{ gasto.rindegastos_expense_id }}{% if gasto.rindegastos_report_name %}/<span tabindex="0" data-kt-tooltip="true" title="{{ gasto.rindegastos_report_name }}">{{ gasto.rindegastos_report_name|slice:":6" }}{% if gasto.rindegastos_report_name|length > 6 %}...{% endif %}</span>{% endif %}</div>
             {% else %}
               <span class="badge badge-light">No subido</span>
             {% endif %}
@@ -1054,6 +1054,7 @@
                               <div>Estado carga: {% if gasto.rindegastos_expense_id %}Subido{% else %}No detectado{% endif %}</div>
                               <div>ID gasto: {{ gasto.rindegastos_expense_id|default:"-" }}</div>
                               <div>ID informe: {{ gasto.rindegastos_report_id|default:"-" }}</div>
+                              {% if gasto.rindegastos_report_name %}<div>Informe: {{ gasto.rindegastos_report_name }}</div>{% endif %}
                               <div>Última sync: {{ gasto.rindegastos_synced_at|localtime|date:'d/m/Y H:i'|default:"-" }}</div>
                             </div>
                             <div class="col-sm-6">
